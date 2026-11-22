@@ -13,10 +13,10 @@ use std::ffi::{c_char, c_double, c_int, c_void, CStr, CString};
 use std::marker::PhantomData;
 use std::ops::{Deref, DerefMut};
 
-use crate::element::{AnyElement, IntoElement, Listener, Listeners, SharedString};
+use crate::element::{AnyElement, IntoElement, Listeners, SharedString};
 use crate::events::*;
 use crate::geometry::{point, px, size, Bounds, Pixels, Size};
-use crate::layout::{id_key, layout, Content, Frame, Key, LayoutCaches, UiState};
+use crate::layout::{id_key, layout, Content, Frame, Key, LayoutCaches, UiState, ROOT_KEY};
 use crate::prof::{self, span, Phase};
 use crate::style::AppRegion;
 use crate::window_kind::{WindowControlArea, WindowDecorations, WindowKind};
@@ -188,14 +188,7 @@ impl<V: 'static> WindowHandle<V> {
     /// Update the root view with its window.
     pub fn update<R>(&self, cx: &mut App,
                      f: impl FnOnce(&mut V, &mut Window, &mut Context<V>) -> R) -> Option<R> {
-        let notified = cx.notified;
-        cx.with_window(self.id.0, |w, cx| {
-            let r = self.entity.update(cx, |v, cx| f(v, w, cx));
-            if cx.notified != notified {
-                w.refresh(); // `cx.notify()` ran while this window was out of the list
-            }
-            r
-        })
+        cx.with_window(self.id.0, |w, cx| self.entity.update(cx, |v, cx| f(v, w, cx)))
     }
 }
 
@@ -649,7 +642,12 @@ impl App {
 
     fn with_window<R>(&mut self, id: usize, f: impl FnOnce(&mut Window, &mut App) -> R) -> Option<R> {
         let mut w = self.windows.get_mut(id)?.take()?;
+        let notified = self.notified;
         let r = f(&mut w, self);
+        // the window is out of the list while it runs: a `notify` in what it called missed it
+        if self.notified != notified {
+            w.refresh();
+        }
         // closed by the app (`remove_window`): its close hooks, now that it is back
         let closing = w.life == Life::Closing;
         if closing {
@@ -952,6 +950,24 @@ impl App {
         });
     }
 
+    /// Click with the middle or the secondary button at (x, y) (as a window sends it: the secondary
+    /// button's click arrives as its release alone). The left button is [`simulate_click`](Self::simulate_click).
+    pub fn simulate_button(&mut self, window: WindowId, x: f32, y: f32, button: MouseButton) {
+        let code = match button {
+            MouseButton::Left => return self.simulate_click(window, x, y),
+            MouseButton::Middle => 2,
+            MouseButton::Right => 3,
+        };
+        self.simulate_mouse_move(window, x, y);
+        self.input(window, |ctx, s| unsafe {
+            let (x, y) = ((x * s) as c_int, (y * s) as c_int);
+            if button == MouseButton::Middle {
+                sys::BK_button(ctx, x, y, code, 0, 0);
+            }
+            sys::BK_button(ctx, x, y, code, 1, 0);
+        });
+    }
+
     /// Press at `from`, drag to `to` and release there.
     pub fn simulate_drag(&mut self, window: WindowId, from: (f32, f32), to: (f32, f32)) {
         self.simulate_mouse_move(window, from.0, from.1);
@@ -1161,6 +1177,10 @@ struct Glide {
     duration: f32,
 }
 
+/// `Window::state_read` bits: the view read the hover (`is_hovered`) or the focus (`focused_id`).
+const READ_HOVER: u8 = 1;
+const READ_FOCUS: u8 = 2;
+
 /// A window (gpui's `Window`): its kit context, layout and interaction state.
 pub struct Window {
     id: usize,
@@ -1221,6 +1241,28 @@ pub struct Window {
     pointer: (f32, f32),
     pressed: Vec<Key>,
     press_button: MouseButton,
+    /// How many presses in a row the last one was (a double click's second is 2).
+    press_count: usize,
+    /// Where the button went down, and whether its press-drag has come (Blender's `KM_PRESS_DRAG`, once per press).
+    press_start: (f32, f32),
+    press_drag_sent: bool,
+    /// The element that holds the pointer (HTML's pointer capture): while one does, the pointer's events go
+    /// to it, wherever the pointer is.
+    capture: Option<Key>,
+    /// The element whose listener is running (what [`Window::set_pointer_capture`] holds the pointer for).
+    current: Option<Key>,
+    /// The elements under the pointer, outermost first: the order of what it enters and leaves.
+    hover_path: Vec<Key>,
+    /// Scratch for the hit test of a pointer move (kept so a move allocates nothing).
+    path_buf: Vec<Key>,
+    /// Capture events raised by a listener: fired when the event it is in has gone through (the frame is
+    /// lent to that one meanwhile).
+    later: Vec<(EventKind, Key, PointerEvent)>,
+    /// The interaction states the view read while it rendered (`READ_HOVER`: `is_hovered`, `READ_FOCUS`:
+    /// `focused_id`): it renders again when they change, as it does for a style that depends on them.
+    state_read: Cell<u8>,
+    /// Where each scroll container was when its `scroll` event last went out (a scroll from any source).
+    scroll_seen: HashMap<Key, (f32, f32)>,
     /// A scrollbar thumb being dragged: the container and where on the thumb it was grabbed.
     sb_drag: Option<(Key, f32)>,
     /// `data-stick="bottom"` containers: the scroll range last frame (to see when content grew).
@@ -1305,6 +1347,16 @@ impl Window {
                 pointer: (-1.0, -1.0),
                 pressed: Vec::new(),
                 press_button: MouseButton::Left,
+                press_count: 1,
+                press_start: (0.0, 0.0),
+                press_drag_sent: false,
+                capture: None,
+                current: None,
+                hover_path: Vec::new(),
+                path_buf: Vec::new(),
+                later: Vec::new(),
+                state_read: Cell::new(0),
+                scroll_seen: HashMap::new(),
                 sb_drag: None,
                 stuck: HashMap::new(),
                 selector: Selector::default(),
@@ -1547,6 +1599,7 @@ impl Window {
 
     /// The `.id()` of the focused element, if any.
     pub fn focused_id(&self) -> Option<&str> {
+        self.state_read.set(self.state_read.get() | READ_FOCUS);
         self.state.focused_id.as_deref()
     }
 
@@ -1561,6 +1614,7 @@ impl Window {
 
     /// Is the element with `.id(id)` hovered?
     pub fn is_hovered(&self, id: &str) -> bool {
+        self.state_read.set(self.state_read.get() | READ_HOVER);
         self.state.hovered.contains(&id_key(id))
     }
 
@@ -1735,7 +1789,7 @@ impl Window {
     fn press_is_quiet(&self, path: &[Key]) -> bool {
         let Some(f) = &self.frame else { return false };
         let plain = |k: &Key| f.by_key().get(k).and_then(|&i| f.el(i)).is_none_or(|e| !e.reactive);
-        !self.caches.state_rules && path.iter().all(plain) && self.state.focused.as_ref().is_none_or(plain)
+        !self.caches.state_rules && self.state_read.get() & READ_FOCUS == 0 && path.iter().all(plain) && self.state.focused.as_ref().is_none_or(plain)
     }
 
     fn select_press(&mut self, x: f32, y: f32, shift: bool) -> bool {
@@ -1792,6 +1846,7 @@ impl Window {
         self.dirty = false;
         self.scrolled = false;
         self.scroll_read.set(false);
+        self.state_read.set(0);
         let root = {
             let _s = span(Phase::Render);
             crate::hooks::begin(self.id);
@@ -1855,6 +1910,7 @@ impl Window {
         // container sticks to its end (animations follow it: see scroll_frame)
         self.scroll_free = !sticks && !self.scroll_read.get();
         self.present(app, frame, None);
+        self.forget_removed(app);
         if stuck {
             self.dirty = true;
         }
@@ -2096,7 +2152,9 @@ impl Window {
             self.set_window_title(&t);
         }
         self.frame = Some(frame);
+        // what the layout moved under a pointer that stayed still is entered or left
         self.update_hover(app, false);
+        self.fire_scrolls(app);
         drop(_rest);
         prof::frame_done();
     }
@@ -2130,55 +2188,153 @@ impl Window {
         f.hit_path(x, y, &self.caches.styles).into_iter().map(|i| f.nodes[i].key).collect()
     }
 
-    /// Call the listeners `pick` selects, from element `key` up to the root.
-    /// The frame is moved out of the window meanwhile, so listeners can take
-    /// `&mut Window` while the frame lends them out: no copies, no `Rc`.
     /// The element the event its listeners are running for fired on (`None` outside one).
     pub(crate) fn event_target(&self) -> Option<Key> {
         self.lent_bounds.first().map(|&(k, _)| k)
     }
 
-    fn emit<E: 'static>(&mut self, app: &mut App, key: Key, e: &E,
-                        pick: impl Fn(&Listeners) -> Vec<&Listener<E>>) {
+    /// Deliver `e` of `kind` to element `target` as HTML does: down from the root to it (the capture pass),
+    /// then back up (the bubbling pass, when `kind` bubbles), with the window-wide listeners heard before and
+    /// after both. A listener that calls `stop_propagation` ends the pass it is in. The frame is moved out
+    /// of the window meanwhile, so listeners can take `&mut Window` while the frame lends them out: no
+    /// copies, no `Rc` (the bounds of the event's path stay readable: `bounds_of`).
+    fn fire<E: 'static>(&mut self, app: &mut App, kind: EventKind, target: Key, e: &E) {
         let Some(frame) = self.frame.take() else { return };
-        app.propagate = true;
-        let mut cur = frame.by_key().get(&key).copied();
-        self.lent_bounds.clear();
-        let mut node = cur;
-        while let Some(i) = node {
-            self.lent_bounds.push((frame.nodes[i].key, frame.nodes[i].bounds));
-            node = frame.nodes[i].parent;
+        if frame.listen & kind.bit() == 0 {
+            self.frame = Some(frame);
+            return;
         }
-        'up: while let Some(i) = cur {
-            if let Some(ls) = frame.el(i).and_then(|e| e.listeners.as_deref()) {
-                for l in pick(ls) {
-                    l(e, self, app);
+        app.propagate = true;
+        let entries = |i: usize| frame.el(i).and_then(|el| el.listeners.as_deref()).map(|l| &l.entries[..]);
+        let path = frame.path_to(frame.by_key().get(&target).copied());
+        // reused, so an event allocates nothing once it has grown
+        self.lent_bounds.clear();
+        self.lent_bounds.extend(path.iter().rev().map(|&i| (frame.nodes[i].key, frame.nodes[i].bounds)));
+        let any = e as &dyn Any;
+        // every element of the window, for the listeners that hear all of it
+        let wide = |this: &mut Self, app: &mut App, phase: DispatchPhase| {
+            for &i in &frame.wide {
+                let i = i as usize;
+                for en in entries(i).into_iter().flatten().filter(|en| en.wide && en.kind == kind) {
+                    this.current = Some(frame.nodes[i].key);
+                    (en.call)(any, phase, this, app);
                     if !app.propagate {
-                        break 'up;
+                        return;
                     }
                 }
             }
-            cur = frame.nodes[i].parent;
+        };
+        wide(self, app, DispatchPhase::Capture);
+        'pass: {
+            if !app.propagate {
+                break 'pass;
+            }
+            for &i in &path {
+                for en in entries(i).into_iter().flatten().filter(|en| en.capture && !en.wide && en.kind == kind) {
+                    self.current = Some(frame.nodes[i].key);
+                    (en.call)(any, DispatchPhase::Capture, self, app);
+                    if !app.propagate {
+                        break 'pass;
+                    }
+                }
+            }
+            let up = if kind.bubbles() { path.len() } else { path.len().min(1) };
+            for &i in path.iter().rev().take(up) {
+                for en in entries(i).into_iter().flatten().filter(|en| !en.capture && !en.wide && en.kind == kind) {
+                    self.current = Some(frame.nodes[i].key);
+                    (en.call)(any, DispatchPhase::Bubble, self, app);
+                    if !app.propagate {
+                        break 'pass;
+                    }
+                }
+            }
+            wide(self, app, DispatchPhase::Bubble);
         }
         app.propagate = true;
+        self.current = None;
         self.lent_bounds.clear();
         if self.frame.is_none() {
             self.frame = Some(frame);
         }
+        self.fire_later(app);
     }
 
-    /// The element keys under the pointer, and (when the pointer moved: `measure`) whether it is over
-    /// text that can be selected.
-    fn hover_target(&mut self, measure: bool) -> (Vec<Key>, Option<bool>) {
-        let Some(f) = &self.frame else { return (Vec::new(), Some(false)) };
+    /// The capture events that listeners raised, once the event they were in is done.
+    fn fire_later(&mut self, app: &mut App) {
+        while self.frame.is_some() && !self.later.is_empty() {
+            let (kind, key, e) = self.later.remove(0);
+            self.fire(app, kind, key, &e);
+        }
+    }
+
+    /// Hold the pointer for the element whose listener is running (HTML's `setPointerCapture`): its
+    /// pointer and mouse events go to that element, also after the pointer left it or the window, until the
+    /// button is released or [`release_pointer_capture`](Self::release_pointer_capture). A drag starts here.
+    pub fn set_pointer_capture(&mut self, app: &mut App) {
+        if let Some(key) = self.current {
+            self.capture_key(app, key);
+        }
+    }
+
+    /// [`set_pointer_capture`](Self::set_pointer_capture) for the element `id` (its `.id(..)`), from outside
+    /// its listener (a binding that learns of the request after the event).
+    pub fn capture_pointer_for(&mut self, app: &mut App, id: &str) {
+        self.capture_key(app, id_key(id));
+    }
+
+    fn capture_key(&mut self, app: &mut App, key: Key) {
+        if self.capture != Some(key) {
+            self.release_pointer_capture(app);
+            self.capture = Some(key);
+            let e = self.pointer_event(None, self.held(), 0);
+            self.later.push((EventKind::GotPointerCapture, key, e));
+            self.fire_later(app);
+        }
+    }
+
+    /// Let go of the pointer (HTML's `releasePointerCapture`).
+    pub fn release_pointer_capture(&mut self, app: &mut App) {
+        if let Some(key) = self.capture.take() {
+            let e = self.pointer_event(None, self.held(), 0);
+            self.later.push((EventKind::LostPointerCapture, key, e));
+            self.fire_later(app);
+        }
+    }
+
+    /// Whether the element `id` (its `.id(..)`) holds the pointer.
+    #[must_use]
+    pub fn has_pointer_capture(&self, id: &str) -> bool {
+        self.capture == Some(id_key(id))
+    }
+
+    /// The button held down, if any.
+    fn held(&self) -> Option<MouseButton> {
+        (!self.pressed.is_empty()).then_some(self.press_button)
+    }
+
+    /// A pointer event at the pointer's place.
+    fn pointer_event(&self, button: Option<MouseButton>, held: Option<MouseButton>, clicks: usize) -> PointerEvent {
+        PointerEvent::mouse(point(px(self.pointer.0), px(self.pointer.1)), button, held, Modifiers::default(), clicks)
+    }
+
+    /// Where the pointer's events go: the element that holds it, else the one under it (else the root,
+    /// which the window-wide listeners hear through).
+    fn pointer_target(&self) -> Key {
+        self.capture.or_else(|| self.hover_path.last().copied()).unwrap_or(ROOT_KEY)
+    }
+
+    /// The element keys under the pointer (into `path`), and (when the pointer moved: `measure`) whether
+    /// it is over text that can be selected.
+    fn hover_target(&mut self, measure: bool, path: &mut Vec<Key>) -> Option<bool> {
+        path.clear();
+        let Some(f) = &self.frame else { return Some(false) };
         let (x, y) = self.pointer;
         let hit = f.hit_box(x, y, &self.caches.styles);
-        let path = f.path_to(hit).into_iter().map(|i| f.nodes[i].key).collect();
-        let over = measure.then(|| hit.is_some_and(|i| {
+        path.extend(f.path_to(hit).into_iter().map(|i| f.nodes[i].key));
+        measure.then(|| hit.is_some_and(|i| {
             let mut cx = Cx { frame: f, styles: &self.caches.styles, text: &mut self.caches.text };
             crate::selection::is_text(&mut cx, i, x, y)
-        }));
-        (path, over)
+        }))
     }
 
     /// The pointer's cursor: that of the deepest element under it that sets one
@@ -2198,46 +2354,62 @@ impl Window {
         }
     }
 
-    fn update_hover(&mut self, app: &mut App, fire: bool) {
-        let (path, over_text) = self.hover_target(fire);
+    /// What is under the pointer: its cursor, `:hover`, and the elements it entered and left hear so
+    /// (`measure`: it moved, so whether it is over text is measured again).
+    fn update_hover(&mut self, app: &mut App, measure: bool) {
+        // the elements under the pointer, into a buffer that stays: most moves end where this returns
+        let mut path = std::mem::take(&mut self.path_buf);
+        let over_text = self.hover_target(measure, &mut path);
         self.set_cursor(&path, over_text);
-        let now: KeySet<Key> = path.iter().copied().collect();
-        if now == self.state.hovered {
+        if path == self.hover_path {
+            self.path_buf = path;
             return;
         }
-        let entered: Vec<Key> = now.difference(&self.state.hovered).copied().collect();
-        let left: Vec<Key> = self.state.hovered.difference(&now).copied().collect();
+        let now: KeySet<Key> = path.iter().copied().collect();
+        let entered: Vec<Key> = path.iter().copied().filter(|k| !self.state.hovered.contains(k)).collect();
+        let left: Vec<Key> = self.hover_path.iter().rev().copied().filter(|k| !now.contains(k)).collect();
+        let (old_deepest, new_deepest) = (self.hover_path.last().copied(), path.last().copied());
         // a restyle (a render) only where something answers to the pointer: a `:hover` rule in the
-        // sheet, or a `.hover()` refinement / Motion props on an element it entered or left
-        let restyle = self.frame.as_ref().is_some_and(|f| {
+        // sheet, or a `.hover()` refinement / Motion props on an element it entered or left, or a view
+        // that read `is_hovered`
+        let restyle = self.state_read.get() & READ_HOVER != 0 || self.frame.as_ref().is_some_and(|f| {
             entered.iter().chain(&left).any(|k| {
                 f.by_key().get(k).is_some_and(|&i| self.caches.state_rules || f.el(i).is_none_or(|e| e.reactive))
             })
         });
         self.state.hovered = now;
-        if fire {
-            // hover listeners don't bubble: each element hears its own enter / leave
-            for (keys, on) in [(left, false), (entered, true)] {
-                for k in keys {
-                    let Some(frame) = self.frame.take() else { return };
-                    let el = frame.by_key().get(&k).and_then(|&i| frame.el(i));
-                    if let Some(ls) = el.and_then(|e| e.listeners.as_deref()) {
-                        for l in &ls.hover {
-                            l(&on, self, app);
-                        }
-                    }
-                    if self.frame.is_none() {
-                        self.frame = Some(frame);
-                    }
-                }
-            }
+        // the path becomes the hover path; the old one's buffer is the next scratch
+        self.path_buf = std::mem::replace(&mut self.hover_path, path);
+        // out, leave, over, enter (HTML's order); enter and leave go to each element on its own, so a
+        // child doesn't make its parent leave
+        let held = self.held();
+        let pe = self.pointer_event(None, held, 0);
+        let me = MouseMoveEvent { position: pe.position, pressed_button: held, modifiers: Modifiers::default() };
+        if let Some(k) = old_deepest.filter(|_| new_deepest != old_deepest) {
+            self.fire(app, EventKind::PointerOut, k, &pe);
+            self.fire(app, EventKind::MouseOut, k, &me);
+        }
+        for &k in &left {
+            self.fire(app, EventKind::PointerLeave, k, &pe);
+            self.fire(app, EventKind::MouseLeave, k, &me);
+            self.fire(app, EventKind::Hover, k, &false);
+        }
+        if let Some(k) = new_deepest.filter(|_| new_deepest != old_deepest) {
+            self.fire(app, EventKind::PointerOver, k, &pe);
+            self.fire(app, EventKind::MouseOver, k, &me);
+        }
+        for &k in &entered {
+            self.fire(app, EventKind::PointerEnter, k, &pe);
+            self.fire(app, EventKind::MouseEnter, k, &me);
+            self.fire(app, EventKind::Hover, k, &true);
         }
         if restyle {
             self.dirty = true;
         }
     }
 
-    fn pointer_event(&self, text: &str) -> (Modifiers, MouseButton) {
+    /// The modifiers and the button of a pointer event's text.
+    fn parse_pointer(&self, text: &str) -> (Modifiers, MouseButton) {
         let mut it = text.split_whitespace().map(|v| v.parse::<i32>().unwrap_or(0));
         let mods = it.next().unwrap_or(0);
         let button = match it.next().unwrap_or(1) {
@@ -2261,14 +2433,26 @@ impl Window {
         button == MouseButton::Left && self.selector.release()
     }
 
-    /// Focus the element `key` (path: its ancestors, for `:focus-within`).
-    fn set_focus(&mut self, path: &[Key]) {
-        self.state.focused = path.last().copied();
+    /// Focus the element at the end of `path` (its ancestors, for `:focus-within`): `blur` and `focusout` for
+    /// the one that had it, `focus` and `focusin` for the one that has it now.
+    fn set_focus(&mut self, app: &mut App, path: &[Key]) {
+        let (old, new) = (self.state.focused, path.last().copied());
+        self.state.focused = new;
         self.state.focus_path = path.iter().copied().collect();
         self.state.focused_id = self.frame.as_ref().and_then(|f| {
             let i = *f.by_key().get(path.last()?)?;
             f.el(i)?.id.as_ref().map(|s| s.to_string())
         });
+        if old != new {
+            if let Some(k) = old {
+                self.fire(app, EventKind::Blur, k, &FocusEvent);
+                self.fire(app, EventKind::FocusOut, k, &FocusEvent);
+            }
+            if let Some(k) = new {
+                self.fire(app, EventKind::Focus, k, &FocusEvent);
+                self.fire(app, EventKind::FocusIn, k, &FocusEvent);
+            }
+        }
     }
 
     fn dispatch(&mut self, ev: RawEvent, app: &mut App) {
@@ -2306,11 +2490,23 @@ impl Window {
                 if self.select_drag(x, y) {
                     self.selection_changed(app, true);
                 }
-                let (modifiers, _) = self.pointer_event(&ev.text);
-                let pressed = (!self.pressed.is_empty()).then_some(self.press_button);
-                let e = MouseMoveEvent { position: point(px(x), px(y)), pressed_button: pressed, modifiers };
-                if let Some(deepest) = self.state_deepest() {
-                    self.emit(app, deepest, &e, |l| l.mouse_move.iter().collect());
+                let (modifiers, _) = self.parse_pointer(&ev.text);
+                let held = self.held();
+                let target = self.pointer_target();
+                let mut pe = self.pointer_event(None, held, 0);
+                pe.modifiers = modifiers;
+                self.fire(app, EventKind::PointerMove, target, &pe);
+                let e = MouseMoveEvent { position: point(px(x), px(y)), pressed_button: held, modifiers };
+                self.fire(app, EventKind::MouseMove, target, &e);
+                // Blender's press-drag: the first move past the drag threshold of a held button
+                if let Some(button) = held.filter(|_| !self.press_drag_sent) {
+                    let (sx, sy) = self.press_start;
+                    if (x - sx).abs() > DRAG_THRESHOLD || (y - sy).abs() > DRAG_THRESHOLD {
+                        self.press_drag_sent = true;
+                        let (start, at) = (point(px(sx), px(sy)), point(px(x), px(y)));
+                        let e = PressDragEvent { button, start, position: at, modifiers, direction: DragDirection::of(start, at) };
+                        self.fire(app, EventKind::PressDrag, target, &e);
+                    }
                 }
             }
             sys::BK_EV_LEAVE => {
@@ -2319,7 +2515,7 @@ impl Window {
             }
             sys::BK_EV_PRESS | sys::BK_EV_DOUBLE => {
                 self.pointer = (x, y);
-                let (modifiers, button) = self.pointer_event(&ev.text);
+                let (modifiers, button) = self.parse_pointer(&ev.text);
                 // a title bar's drag area: the window manager moves the window (Windows does it
                 // without the press reaching the app)
                 if button == MouseButton::Left && self.control_area_at(x, y) == Some(WindowControlArea::Drag) {
@@ -2338,17 +2534,20 @@ impl Window {
                 let quiet = self.press_is_quiet(&path);
                 self.press_quiet = quiet;
                 self.press_button = button;
+                self.press_count = if ev.kind == sys::BK_EV_DOUBLE { 2 } else { 1 };
+                self.press_start = (x, y);
+                self.press_drag_sent = false;
                 self.state.active = path.iter().copied().collect();
-                self.set_focus(&path);
-                self.pressed = path.clone();
+                self.set_focus(app, &path);
+                self.pressed.clone_from(&path);
                 self.dirty |= !quiet;
                 self.caches.anim.pointer_down(&path, x, y);
-                let e = MouseDownEvent { button, position: point(px(x), px(y)), modifiers,
-                                         click_count: if ev.kind == sys::BK_EV_DOUBLE { 2 } else { 1 } };
-                if let Some(&deepest) = path.last() {
-                    self.emit(app, deepest, &e, |l| l.mouse_down.iter()
-                        .filter(|(b, _)| b.is_none_or(|b| b == button)).map(|(_, f)| f).collect());
-                }
+                let target = self.capture.or(path.last().copied()).unwrap_or(ROOT_KEY);
+                let mut pe = self.pointer_event(Some(button), Some(button), self.press_count);
+                pe.modifiers = modifiers;
+                self.fire(app, EventKind::PointerDown, target, &pe);
+                let e = MouseDownEvent { button, position: point(px(x), px(y)), modifiers, click_count: self.press_count };
+                self.fire(app, EventKind::MouseDown, target, &e);
                 if selected {
                     // a press that renders draws the selection with it; a quiet one draws it now
                     self.selection_changed(app, quiet);
@@ -2358,37 +2557,53 @@ impl Window {
                 if self.sb_drag.take().is_some() {
                     return;
                 }
-                let (modifiers, button) = self.pointer_event(&ev.text);
-                let path = self.path_at(x, y);
+                self.pointer = (x, y);
+                let (modifiers, button) = self.parse_pointer(&ev.text);
+                let path = self.capture.map_or_else(|| self.path_at(x, y), |k| self.path_to_key(k));
+                let target = path.last().copied().unwrap_or(ROOT_KEY);
+                let mut pe = self.pointer_event(Some(button), None, self.press_count);
+                pe.modifiers = modifiers;
+                self.fire(app, EventKind::PointerUp, target, &pe);
                 let up = MouseUpEvent { button, position: point(px(x), px(y)), modifiers };
-                if let Some(&deepest) = path.last() {
-                    self.emit(app, deepest, &up, |l| l.mouse_up.iter()
-                        .filter(|(b, _)| b.is_none_or(|b| b == button)).map(|(_, f)| f).collect());
-                }
+                self.fire(app, EventKind::MouseUp, target, &up);
                 // click: the deepest element under both press and release
-                let common = self.pressed.iter().zip(&path).take_while(|(a, b)| a == b)
-                    .map(|(a, _)| *a).last();
+                let common = if self.pressed.is_empty() && button != MouseButton::Left {
+                    path.last().copied() // a button a window reports by its release alone
+                } else {
+                    self.pressed.iter().zip(&path).take_while(|(a, b)| a == b).map(|(a, _)| *a).last()
+                };
                 // a press that selected text is a selection, not a click (as in a browser)
                 let dragged = self.end_press(button);
-                if let (Some(target), MouseButton::Left, false) = (common, button, dragged) {
-                    self.toggle_details(target);
-                    let down = MouseDownEvent { button, position: point(px(x), px(y)), modifiers, click_count: 1 };
+                if let (Some(target), false) = (common, dragged) {
+                    let down = MouseDownEvent { button, position: point(px(x), px(y)), modifiers, click_count: self.press_count };
                     let e = ClickEvent { down, up };
-                    self.emit(app, target, &e, |l| l.click.iter().collect());
-                    self.run_control_area(target);
+                    if button == MouseButton::Left {
+                        self.toggle_details(target);
+                        self.fire(app, EventKind::Click, target, &e);
+                        if self.press_count == 2 {
+                            self.fire(app, EventKind::DoubleClick, target, &e);
+                        }
+                        self.run_control_area(target);
+                    } else {
+                        self.fire(app, EventKind::AuxClick, target, &e);
+                        if button == MouseButton::Right {
+                            let at = point(px(x), px(y));
+                            self.fire(app, EventKind::ContextMenu, target, &ContextMenuEvent { position: at, modifiers });
+                        }
+                    }
                 }
+                // the pointer is let go when its button is
+                self.release_pointer_capture(app);
             }
             sys::BK_EV_WHEEL => {
-                let (modifiers, _) = self.pointer_event(&ev.text);
+                let (modifiers, _) = self.parse_pointer(&ev.text);
                 let (px_, py_) = self.pointer;
                 // `b`: the exact device pixels of a touch drag (BK_scroll_px), 0 for a wheel notch
                 let pixels = (ev.b != 0.0).then(|| ev.b as f32 / self.scale);
                 let e = ScrollWheelEvent { position: point(px(px_), px(py_)), delta: ev.a as f32, pixels, modifiers };
                 let path = self.path_at(px_, py_);
-                if let Some(&deepest) = path.last() {
-                    self.emit(app, deepest, &e, |l| l.scroll.iter().collect());
-                }
-                // a touch drag follows the finger: it snaps no step (browsers snap such a gesture at its end)
+                self.fire(app, EventKind::Wheel, path.last().copied().unwrap_or(ROOT_KEY), &e);
+                // `scroll` follows the frame that moves it; a touch drag follows the finger: it snaps no step (browsers snap such a gesture at its end)
                 self.scroll_by(&path, -pixels.unwrap_or(ev.a as f32 * 40.0), modifiers.shift, pixels.is_none());
             }
             sys::BK_EV_KEY | sys::BK_EV_KEYRELEASE => {
@@ -2397,8 +2612,7 @@ impl Window {
                 let key = parts.next().unwrap_or("").to_owned();
                 let ks = Keystroke { key, key_char: (!ch.is_empty()).then_some(ch),
                                      modifiers: Modifiers::from_kit(ev.a as i32) };
-                let target = self.state.focused.or_else(|| self.state_deepest())
-                    .unwrap_or(crate::layout::ROOT_KEY);
+                let target = self.state.focused.or_else(|| self.state_deepest()).unwrap_or(ROOT_KEY);
                 if ev.kind == sys::BK_EV_KEY {
                     self.selection_key(&ks, app);
                     let page = match ks.key.to_ascii_lowercase().as_str() {
@@ -2406,16 +2620,66 @@ impl Window {
                         "pageup" => -1.0,
                         _ => 0.0,
                     };
-                    self.emit(app, target, &KeyDownEvent { keystroke: ks }, |l| l.key_down.iter().collect());
+                    // `keypress`: a key that types a character
+                    let types = ks.key_char.is_some() && !ks.modifiers.control && !ks.modifiers.alt;
+                    let down = KeyDownEvent { keystroke: ks };
+                    self.fire(app, EventKind::KeyDown, target, &down);
+                    if types {
+                        self.fire(app, EventKind::KeyPress, target, &down);
+                    }
                     if page != 0.0 {
                         self.scroll_page(page);
                     }
                 } else {
-                    self.emit(app, target, &KeyUpEvent { keystroke: ks }, |l| l.key_up.iter().collect());
+                    self.fire(app, EventKind::KeyUp, target, &KeyUpEvent { keystroke: ks });
                 }
             }
             _ => {}
         }
+    }
+
+    /// What left the tree no longer holds the pointer or the focus: the pointer is cancelled (`pointercancel`
+    /// and `lostpointercapture` go to the root), and key events go back to where the pointer is.
+    fn forget_removed(&mut self, app: &mut App) {
+        let Some(frame) = &self.frame else { return };
+        let gone = |k: Option<Key>| k.is_some_and(|k| !frame.by_key().contains_key(&k));
+        let (capture_gone, focus_gone) = (gone(self.capture), gone(self.state.focused));
+        if capture_gone {
+            self.capture = None;
+            let e = self.pointer_event(None, self.held(), 0);
+            self.fire(app, EventKind::PointerCancel, ROOT_KEY, &e);
+            self.fire(app, EventKind::LostPointerCapture, ROOT_KEY, &e);
+        }
+        if focus_gone {
+            self.state.focused = None;
+            self.state.focus_path.clear();
+            self.state.focused_id = None;
+        }
+    }
+
+    /// `scroll` for every scroll container that moved since its last one, whatever moved it (the wheel,
+    /// `set_scroll_offset`, a glide, a layout that changed its range). Costs nothing unless something listens.
+    fn fire_scrolls(&mut self, app: &mut App) {
+        let Some(frame) = &self.frame else { return };
+        if frame.listen & EventKind::Scroll.bit() == 0 {
+            return;
+        }
+        let mut moved: smallvec::SmallVec<[(Key, (f32, f32)); 4]> = smallvec::SmallVec::new();
+        for n in frame.nodes.iter().filter(|n| n.scroll_range != (0.0, 0.0)) {
+            match self.scroll_seen.insert(n.key, n.scroll_pos) {
+                Some(was) if was != n.scroll_pos => moved.push((n.key, n.scroll_pos)),
+                _ => {}
+            }
+        }
+        for (key, at) in moved {
+            self.fire(app, EventKind::Scroll, key, &ScrollEvent { offset: point(px(at.0), px(at.1)) });
+        }
+    }
+
+    /// Element keys from the root to the element `key` (empty when it isn't in this frame).
+    fn path_to_key(&self, key: Key) -> Vec<Key> {
+        let Some(f) = &self.frame else { return Vec::new() };
+        f.path_to(f.by_key().get(&key).copied()).into_iter().map(|i| f.nodes[i].key).collect()
     }
 
     fn state_deepest(&self) -> Option<Key> {
@@ -2533,7 +2797,7 @@ impl Window {
     /// (a `change` on its element), or areas and regions moved (the content follows: a render).
     fn screen_event(&mut self, target: &crate::screen::Target, ev: &RawEvent, app: &mut App) {
         if let Some((key, e)) = crate::screen::change_event(target, &self.screens, ev.node, ev.kind, ev.a, ev.b) {
-            self.emit(app, key, &e, |l| l.change.iter().collect());
+            self.fire(app, EventKind::Change, key, &e);
         }
         self.dirty = true;
     }
@@ -2570,8 +2834,8 @@ impl Window {
                     }
                     _ => {}
                 }
-                self.emit(app, key, &e, |l| l.input.iter().collect());
-                self.emit(app, key, &e, |l| l.change.iter().collect());
+                self.fire(app, EventKind::Input, key, &e);
+                self.fire(app, EventKind::Change, key, &e);
                 self.dirty = true;
             }
             sys::BK_EV_CLICK => {
@@ -2580,7 +2844,7 @@ impl Window {
                                             modifiers: Modifiers::default(), click_count: 1 };
                 let up = MouseUpEvent { button: MouseButton::Left, position: point(px(x), px(y)),
                                         modifiers: Modifiers::default() };
-                self.emit(app, key, &ClickEvent { down, up }, |l| l.click.iter().collect());
+                self.fire(app, EventKind::Click, key, &ClickEvent { down, up });
                 self.run_control_area(key);
                 self.dirty = true;
             }
