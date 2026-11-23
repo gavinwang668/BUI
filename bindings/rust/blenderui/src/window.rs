@@ -236,10 +236,29 @@ pub struct WindowOptions {
     pub window_decorations: WindowDecorations,
 }
 
+/// The GPU renderer's graphics API on Windows (Linux has OpenGL only: there this is ignored).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GpuApi {
+    /// Direct3D 11, the default.
+    D3d11,
+    /// Direct3D 12. A device that cannot start on it starts on Direct3D 11.
+    D3d12,
+}
+
+impl GpuApi {
+    const fn raw(self) -> c_int {
+        match self {
+            Self::D3d11 => sys::BUI_GPU_API_D3D11,
+            Self::D3d12 => sys::BUI_GPU_API_D3D12,
+        }
+    }
+}
+
 /// The application entry point (gpui's `Application`).
 pub struct Application {
     headless: bool,
     gpu: Option<bool>,
+    gpu_api: Option<GpuApi>,
     slug: Option<bool>,
     keep_alive: bool,
     theme: Option<String>,
@@ -254,15 +273,24 @@ impl Default for Application {
 impl Application {
     /// Native windows.
     pub fn new() -> Application {
-        Application { headless: false, gpu: None, slug: None, keep_alive: false, theme: None }
+        Application { headless: false, gpu: None, gpu_api: None, slug: None, keep_alive: false, theme: None }
     }
 
-    /// Draw every window on the GPU (Direct3D 11 on Windows): the same
+    /// Draw every window on the GPU (Direct3D 11 on Windows, or 12: [`Application::gpu_api`]): the same
     /// pixels as the software raster, with rasterization off the CPU. Falls
     /// back to software where no device exists. The `BUI_GPU` environment
     /// variable (1/0) overrides this.
     pub fn gpu(mut self, on: bool) -> Application {
         self.gpu = Some(on);
+        self
+    }
+
+    /// The graphics API the GPU renderer uses on Windows: [`GpuApi::D3d11`] (the default) or
+    /// [`GpuApi::D3d12`], which falls back to Direct3D 11 where it cannot start. The
+    /// `BUI_GPU_API` environment variable (`d3d11`/`d3d12`) overrides this; without either, a
+    /// default baked into the executable (`bui` CLI) applies, then Direct3D 11.
+    pub fn gpu_api(mut self, api: GpuApi) -> Application {
+        self.gpu_api = Some(api);
         self
     }
 
@@ -292,13 +320,17 @@ impl Application {
     /// Off-screen windows (tests, screenshots, CI): nothing is shown, the
     /// `simulate_*` and `draw` methods drive it.
     pub fn headless() -> Application {
-        Application { headless: true, gpu: None, slug: None, keep_alive: false, theme: None }
+        Application { headless: true, gpu: None, gpu_api: None, slug: None, keep_alive: false, theme: None }
     }
 
     /// The kit's global settings for this application (renderer, text, theme, off-screen scale).
     fn configure(&self, headless: bool) {
         if let Some(on) = self.gpu {
             unsafe { sys::BUI_gpu_set_default(on as c_int) };
+        }
+        if let Some(api) = self.gpu_api {
+            // SAFETY: sets a global choice, read when a device is created.
+            unsafe { sys::BUI_gpu_set_api(api.raw()) };
         }
         if let Some(on) = self.slug {
             crate::set_slug(on);

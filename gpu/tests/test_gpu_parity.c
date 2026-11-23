@@ -4,6 +4,7 @@
  * frames and the difference for inspection.
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #include "GPU_raster.h"
+#include "test_gpu_api.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -290,7 +291,7 @@ static int big_image(int max_texture)
 #endif
   }
   int ok = 1;
-  if (!BUI_raster_gpu_attach(rs[1], NULL, 1)) {
+  if (!test_gpu_attach(rs[1])) {
     printf("big images: no GPU device, skipped\n");
   }
   else {
@@ -351,7 +352,7 @@ static int video_frames(void)
   nv12_frame(f[1], 1);
   BuiRaster *rs[2] = {BUI_raster_create(640, 200), BUI_raster_create(640, 200)};
   int ok = 1;
-  if (!BUI_raster_gpu_attach(rs[1], NULL, 1)) {
+  if (!test_gpu_attach(rs[1])) {
     printf("video frames: no GPU device, skipped\n");
   }
   else {
@@ -405,7 +406,7 @@ static int italic_default(void)
   const float white[4] = {1, 1, 1, 1};
   for (int k = 0; k < 3; k++) { /* 0: CPU italic, 1: GPU italic, 2: CPU upright */
     BuiRaster *r = BUI_raster_create(IW, IH);
-    if (k == 1 && !BUI_raster_gpu_attach(r, NULL, 1)) {
+    if (k == 1 && !test_gpu_attach(r)) {
       printf("gpu parity: no GPU device, italic skipped\n");
       BUI_raster_free(r);
       return 1;
@@ -446,7 +447,7 @@ int main(void)
   for (int slug = 0; slug < 2; slug++) {
     set_slug(slug);
     BuiRaster *gpu = BUI_raster_create(W, H);
-    if (!BUI_raster_gpu_attach(gpu, NULL, 1)) {
+    if (!test_gpu_attach(gpu)) {
       printf("gpu parity: no GPU device, skipped\n");
       BUI_raster_free(gpu);
       break;

@@ -99,6 +99,11 @@ pub const BK_EFFECT_MAX_INPUTS: usize = 8;
 pub const BUI_TARGET_RGBA8: c_int = 0;
 pub const BUI_TARGET_RGBA16F: c_int = 1;
 pub const BUI_TARGET_RGBA32F: c_int = 2;
+/// GPU renderer graphics APIs (`BuiGpuApi`, `BUI_gpu_set_api`): Windows picks Direct3D 11 or 12.
+pub const BUI_GPU_API_DEFAULT: c_int = 0;
+pub const BUI_GPU_API_D3D11: c_int = 1;
+pub const BUI_GPU_API_D3D12: c_int = 2;
+pub const BUI_GPU_API_OPENGL: c_int = 3;
 pub const BK_EFFECT_MAX_FLOATS: usize = 256;
 pub const BK_EFFECT_MAX_SOURCE: usize = 65536;
 
@@ -537,6 +542,12 @@ unsafe extern "C" {
     pub fn BUI_gpu_default() -> c_int;
     pub fn BUI_gpu_set_slug(on: c_int);
     pub fn BUI_gpu_slug() -> c_int;
+    /// The graphics API new GPU devices start on (`BUI_GPU_API_*`; the `BUI_GPU_API` variable overrides).
+    pub fn BUI_gpu_set_api(api: c_int);
+    /// What new devices start on: `BUI_GPU_API`, else `BUI_gpu_set_api`, else the baked default, else Direct3D 11.
+    pub fn BUI_gpu_api() -> c_int;
+    /// The API a raster's device runs on (after any fall back); `BUI_GPU_API_DEFAULT` on the CPU.
+    pub fn BUI_raster_gpu_api(r: *const BuiRaster) -> c_int;
     pub fn BK_window_set_gpu(win: *mut BKWindow, on: c_int);
     pub fn BK_window_gpu(win: *mut BKWindow) -> c_int;
     pub fn BUI_text_add_font(family: *const c_char, flags: c_int, data: *const c_void,

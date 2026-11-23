@@ -4,6 +4,7 @@
  * Skips (exit 0) where no GPU device can be created. BUI_FX_PPM=dir writes the frame.
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #include "GPU_raster.h"
+#include "test_gpu_api.h"
 
 #include <math.h>
 #include <stdio.h>
@@ -152,7 +153,7 @@ int main(void)
   BUI_raster_free(cpu);
 
   BuiRaster *gpu = BUI_raster_create(W, H);
-  if (!BUI_raster_gpu_attach(gpu, NULL, 1)) {
+  if (!test_gpu_attach(gpu)) {
     printf("gpu effect: no GPU device, skipped\n");
     BUI_raster_free(gpu);
     return g_fail;

@@ -337,6 +337,30 @@ int BUI_raster_is_gpu(const BuiRaster *r);
  * BUI_GPU environment variable (1/0). Off by default. */
 void BUI_gpu_set_default(int on);
 int BUI_gpu_default(void);
+/* The graphics API of the GPU renderer on Windows (Linux has OpenGL only). Direct3D 11 is the
+ * default; Direct3D 12 is opt-in, and a device that cannot start on it starts on Direct3D 11. */
+typedef enum BuiGpuApi {
+  BUI_GPU_API_DEFAULT = 0, /* no choice: what comes next in the order below */
+  BUI_GPU_API_D3D11 = 1,
+  BUI_GPU_API_D3D12 = 2,
+  BUI_GPU_API_OPENGL = 3, /* what BUI_raster_gpu_api says on Linux */
+} BuiGpuApi;
+/* The app's choice for devices created from now on (BUI_GPU_API_DEFAULT clears it; other values
+ * are ignored). */
+void BUI_gpu_set_api(BuiGpuApi api);
+/* The API new devices start on, first of: the BUI_GPU_API environment variable ("d3d11" or
+ * "d3d12"; anything else is ignored, with a message under BUI_GPU_DEBUG=1), BUI_gpu_set_api(),
+ * the default baked into the program (below), Direct3D 11. */
+BuiGpuApi BUI_gpu_api(void);
+/* The API raster `r`'s device runs on (after any fall back); BUI_GPU_API_DEFAULT when it draws on
+ * the CPU. */
+BuiGpuApi BUI_raster_gpu_api(const BuiRaster *r);
+/* The baked default: a fixed-size marker in the program's data that tools may patch in a built
+ * executable (the `bui` CLI does). It is exactly BUI_GPU_API_MARKER_LEN bytes: the ASCII text
+ * "BUIGPUAPI=d3d11" (or "BUIGPUAPI=d3d12") followed by NUL bytes, so the patch is a same-length
+ * replacement of "d3d11" by "d3d12". Any other value after the '=' means no baked default. */
+#define BUI_GPU_API_MARKER "BUIGPUAPI=d3d11"
+#define BUI_GPU_API_MARKER_LEN 32
 /* How the GPU renderer draws text: 1 = Slug (glyph outlines evaluated in the
  * pixel shader; sharp at any size), 0 = per-glyph bitmap atlas (Blender's
  * approach; less GPU work). Takes effect on the next frame. Without a choice
