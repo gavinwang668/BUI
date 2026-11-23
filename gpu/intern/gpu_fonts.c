@@ -54,6 +54,12 @@ int gpu_font_dirs(char dirs[][GPU_FONT_PATH], int max)
   if (home && n < max) {
     snprintf(dirs[n++], GPU_FONT_PATH, "%s/Library/Fonts", home);
   }
+#elif defined(__ANDROID__)
+  /* the system's Noto set (CJK, Thai, Indic, symbols ...) and a vendor's extra fonts */
+  static const char *droid[] = {"/system/fonts", "/product/fonts"};
+  for (int i = 0; i < 2 && n < max; i++) {
+    snprintf(dirs[n++], GPU_FONT_PATH, "%s", droid[i]);
+  }
 #else
   static const char *nix[] = {
       "/usr/share/fonts/truetype/dejavu", "/usr/share/fonts/dejavu",

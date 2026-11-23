@@ -45,6 +45,7 @@ dependencies = [
  "blenderui-tailwind",
  "blenderui-vlist",
  "foldhash",
+ "ndk-context",
  "paste",
  "png",
  "smallvec",
@@ -324,6 +325,12 @@ checksum = "427802e8ec3a734331fec1035594a210ce1ff4dc5bc1950530920ab717964ea3"
 dependencies = [
  "libloading",
 ]
+
+[[package]]
+name = "ndk-context"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "once_cell"

@@ -462,6 +462,8 @@ unsafe extern "C" {
         -> c_int;
     pub fn BK_key(ctx: *mut BKContext, text: *const c_char, keysym: *const c_char, mods: c_int)
         -> c_int;
+    pub fn BK_key_taken(ctx: *mut BKContext);
+
     pub fn BK_key_release(ctx: *mut BKContext, keysym: *const c_char, mods: c_int) -> c_int;
     pub fn BK_button(ctx: *mut BKContext, x: c_int, y: c_int, button: c_int, release: c_int,
                      mods: c_int) -> c_int;
@@ -500,6 +502,9 @@ unsafe extern "C" {
     pub fn BK_window_set_keep_alive(on: c_int);
     pub fn BK_window_pump() -> c_int;
     pub fn BK_window_quit();
+    /// Android: the running `ANativeActivity *`, null while none runs.
+    #[cfg(target_os = "android")]
+    pub fn BK_android_activity() -> *mut c_void;
 
     // raster + text (gpu/)
     pub fn BUI_raster_create(width: c_int, height: c_int) -> *mut BuiRaster;

@@ -3224,11 +3224,16 @@ static int in_BK_key(BKContext *ctx, const char *text, const char *keysym, int m
   e.keysym = keysym ? keysym : "";
   snprintf(ctx->key_held, sizeof(ctx->key_held), "%s", e.keysym);
   ctx->interaction++;
+  ctx->key_taken = 0;
   for (BKNode *n = ctx->focus ? ctx->focus : ctx->hover; n; n = n->parent) {
     if (n->flags & NF_EVENTS) { /* Tk/Qt key bindings see the key first */
       bk_event(n, BK_EV_KEY, mods, &e);
       break;
     }
+  }
+  if (ctx->key_taken) { /* the host's binding acted on it: nothing else does */
+    ctx->key_taken = 0;
+    return 1;
   }
   if (ctx->modal) {
     if (bk_keysym_is(e.keysym, "Escape")) {
@@ -3849,6 +3854,13 @@ static int wheel_axis(BKContext *ctx, int x, int y, int delta, float px, int mod
 int BK_key(BKContext *ctx, const char *text, const char *keysym, int mods)
 {
   INPUT_ENTRY(in_BK_key(ctx, text, keysym, mods));
+}
+
+void BK_key_taken(BKContext *ctx)
+{
+  if (ctx) {
+    ctx->key_taken = 1;
+  }
 }
 
 int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods)
