@@ -53,8 +53,38 @@ npx bui run app.jsx              # run on the QuickJS runtime, no executable
 | `--bun` | Compile with `bun build --compile` instead of QuickJS. |
 | `--console` | Keep a console window for logs. By default, Windows builds open none, as an app should. |
 | `--dev` | Use React's development build. The default is the production build. |
+| `--gpu d3d11` or `--gpu d3d12` | Windows: the Direct3D the GPU renderer starts with. The default is `d3d11`. |
+| `--msix` | Windows: build an MSIX package instead of a bare `.exe`. See [Releasing on Windows](#releasing-on-windows). |
 
 `bui run` is handy while you work: it bundles your app and runs it on the same QuickJS runtime a build would use, so you see exactly what your users will.
+
+## Releasing on Windows
+
+A Windows app ships as a plain Win32 `.exe`, or as an **MSIX** package: the installable form of the same app that the Microsoft Store takes, with a clean install and uninstall. (MSIX is what replaced UWP packaging; the app inside stays a normal Win32 program.)
+
+```sh
+npx bui build app.jsx --msix                       # app.msix
+npx bui build app.jsx --msix --gpu d3d12           # starts on Direct3D 12
+npx bui package target/release/app.exe --msix      # any BUI executable: Rust, C ...
+npx bui package app.exe --gpu d3d12 -o app-dx12.exe
+```
+
+`bui package` releases an executable built any other way, so Rust and C apps use the same options. It never changes the input file.
+
+| Option | What it does |
+| --- | --- |
+| `--name` | The package name: 3 to 50 of `A-Z a-z 0-9 . -`. Default: `package.json`'s `name`, else the file's. |
+| `--version` | Four numbers, `1.2.3.0` (fewer are padded). Default: `package.json`'s `version`. |
+| `--display-name`, `--description` | What the Start menu and the Store show. |
+| `--publisher "CN=..."` | The publisher: with `--cert`, the certificate's subject. |
+| `--publisher-name` | The publisher as people read it. |
+| `--icon logo.png` | The app's logo. Without it, a plain square. |
+| `--include <file or folder>` | More files next to the executable (fonts, images). Repeat it for more. |
+| `--cert app.pfx`, `--cert-password` | Sign the package. Without them it is unsigned. |
+
+**Unsigned packages** install on a developer's machine with `Add-AppxPackage -AllowUnsigned app.msix` in PowerShell; their publisher is the one Windows reserves for that. To ship, sign with your certificate (the Store signs packages it distributes itself). Packaging needs the Windows SDK's `makeappx` (and `signtool` to sign).
+
+**`--gpu`** sets which Direct3D the app's GPU renderer starts with. It is stored in the executable, so it works on any BUI app. At run time `BUI_GPU_API=d3d11` or `d3d12` still overrides it, and an app that chooses in code keeps its choice. Changing it on a signed executable breaks the signature, so sign afterwards.
 
 ## QuickJS or Bun?
 
