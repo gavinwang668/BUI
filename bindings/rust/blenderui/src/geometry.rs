@@ -62,7 +62,16 @@ pub(crate) const ROOT_FONT_SIZE: f32 = 16.0;
 #[derive(Clone, Copy, Debug)]
 pub struct Units {
     pub font_size: f32,
+    /// The root element's font size (`rem`).
+    pub root_font_size: f32,
     pub viewport: (f32, f32),
+}
+
+impl Units {
+    /// Units outside any element (media queries, tests): the root font size is its initial value.
+    pub(crate) const fn initial(font_size: f32, viewport: (f32, f32)) -> Units {
+        Units { font_size, root_font_size: ROOT_FONT_SIZE, viewport }
+    }
 }
 
 impl Length {
@@ -70,7 +79,7 @@ impl Length {
     pub(crate) fn to_px(self, u: &Units) -> Option<f32> {
         match self {
             Length::Px(v) => Some(v),
-            Length::Rem(v) => Some(v * ROOT_FONT_SIZE),
+            Length::Rem(v) => Some(v * u.root_font_size),
             Length::Em(v) => Some(v * u.font_size),
             Length::Vw(v) => Some(v * u.viewport.0 / 100.0),
             Length::Vh(v) => Some(v * u.viewport.1 / 100.0),

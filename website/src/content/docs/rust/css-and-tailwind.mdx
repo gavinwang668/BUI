@@ -118,7 +118,7 @@ The default `box-sizing` is `border-box`, like Tailwind's preflight, not CSS's `
 - **Math:** every CSS math function with mixed units: `calc`, `min`, `max`, `clamp`, `round`, `mod`, `rem`, `abs`, trigonometry, `pow`, `hypot` …
 - **Variables:** custom properties (`--gap: 10px`) with `var()`, fallbacks (`var(--missing, 20px)`) and inheritance, plus `env()`.
 - **Sizing keywords:** `fit-content` and `stretch`.
-- **Colors:** CSS Color 4 and 5: `oklch()`, `lab()`, `color()`, `color-mix()`, relative colors and `light-dark()`.
+- **Colors:** CSS Color 4 and 5: `oklch()`, `lab()`, `color()`, `color-mix()`, relative colors and `light-dark()`. `light-dark()`, the system colors (`Canvas`, `LinkText` ...) and `@media (prefers-color-scheme)` follow the theme's mode, and windows re-render when the theme changes.
 
 ```rust
 div().style("width: calc(100% - 2 * var(--gap)); background: color-mix(in oklch, var(--brand) 60%, white)")

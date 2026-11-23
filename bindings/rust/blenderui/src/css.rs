@@ -441,12 +441,7 @@ impl Decl {
 
     /// Parse `value` for `prop` (the run-time path: `.css()`, stylesheets).
     pub fn new(prop: impl AsRef<str>, value: &str) -> Decl {
-        let mut value = value.trim();
-        let mut important = false;
-        if let Some(v) = value.strip_suffix("!important") {
-            value = v.trim_end();
-            important = true;
-        }
+        let (value, important) = strip_important(value);
         let prop = prop.as_ref();
         let prop = if prop.bytes().any(|b| b.is_ascii_uppercase()) {
             Prop::lookup(&prop.to_ascii_lowercase())
@@ -463,6 +458,20 @@ impl Decl {
 }
 
 /// Parse a declaration block: `color: red; padding: 4px 8px`.
+/// A declaration's value without its `!important` (`!` and `important` may have whitespace
+/// between them and any case), and whether it had one.
+fn strip_important(value: &str) -> (&str, bool) {
+    let value = value.trim();
+    let Some(head) = value.len().checked_sub(9).and_then(|n| value.get(..n)) else { return (value, false) };
+    if !value[head.len()..].eq_ignore_ascii_case("important") {
+        return (value, false);
+    }
+    match head.trim_end().strip_suffix('!') {
+        Some(v) => (v.trim_end(), true),
+        None => (value, false),
+    }
+}
+
 pub fn parse_declarations(block: &str) -> Vec<Decl> {
     split_top(&strip_comments(block), ';')
         .into_iter()
@@ -490,7 +499,7 @@ pub(crate) fn strip_comments(s: &str) -> String {
 
 pub use crate::selector::{
     has_match, Combinator, ContainerQuery, HasEntry, FontFace, Keyframes, MediaEnv, MediaQuery, PropertyRule,
-    PseudoElement, RelSelector, Rule, Selector, Stylesheet, Subject,
+    PseudoElement, Query, RelSelector, Rule, Selector, Stylesheet, Subject,
 };
 pub(crate) use crate::selector::Matches;
 

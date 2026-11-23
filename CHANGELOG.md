@@ -107,6 +107,7 @@ All notable changes to **blenderui** (BUI). The format follows
   - Examples: `examples/animation/` (a hero intro, a card grid, magnetic buttons, a marquee with drag and an equalizer).
 
 ### Changed
+- **Rust: boxes lay out at fractional positions, as in a browser.** A flex item a quarter of 190px is 47.5px wide (it was rounded to 48), and `element_bounds` reports what `getBoundingClientRect` would. Painting snaps each edge of a box's background, border and image to its nearest device pixel, so edges stay crisp and neighbouring boxes still meet; a canvas's own drawing stays anti-aliased, as a browser canvas.
 - **Kit: a layout arranges only the nodes that changed.** A node is arranged again when it or a node under it measured again, or when its place changed; the rest keep their places. A frame where one label changes among 3300 nodes: 0.26 ms instead of 0.31 ms. A change of theme, scale or font still arranges every node.
 - **Kit: a layout change redraws only what moved.** A layout used to redraw the whole window. Now each widget's
   place on screen is compared with where the last frame drew it, and only widgets that moved, resized, appeared or
@@ -175,6 +176,17 @@ All notable changes to **blenderui** (BUI). The format follows
 - **`BUI_PROFILE=each`.** Prints every frame's phase times and their total, not a 60-frame average, so one slow frame (a resize, a first open) shows.
 
 ### Fixed
+- **CSS (Rust): the cascade, selectors and `rem` follow the specifications.** Found by checking the engine against the specs, with Lean proofs of specificity and cascade order in `proofs/`:
+  - `!important` declarations in `@layer`s reverse the layer order (an earlier layer beats a later one, and a layered one beats an unlayered one), and UA `!important` beats author `!important`. They were applied in the normal order.
+  - `! important` (with a space) and `!IMPORTANT` count as important, in stylesheets and in `css!`.
+  - `:has()` counts as its most specific argument, like `:is()` and `:not()` (it counted as one class).
+  - `:scope` inside `@scope (root)` is the scoping root (it was the document's root).
+  - `:empty` sees the element's children: every element matched it, since rules match before the children are built.
+  - `:has(+ x)` and `:has(~ x)` see the element's following siblings (they never matched).
+  - `rem` (and `rlh`, `rex`, `rch`, `rcap`, `ric`) uses the root element's font size, not a fixed 16px.
+  - Out-of-range `rgb()` channels clamp (`rgb(300 -20 0)` is red) instead of being gamut-mapped.
+  - `:nth-last-child(An+B of S)` counts the following siblings that match `S` (it saw none, since they aren't built when rules match; `S` may name the element's ancestors).
+  - `light-dark()`, the system colors (`Canvas`, `LinkText` ...) and `@media (prefers-color-scheme)` follow the theme's mode (they were always dark). Light mode uses a browser's light system colors. Windows re-render when the theme changes, with no `notify_all()` needed.
 - **Android: the app runs again after Back.** The host's state (`g_quit`, the wake callback, keep-alive, the stop check) starts over on each `BK_android_attach`, so a relaunch in the same process is not a dead window; the activity is `singleTask`, so a second launch brings the running one back instead of attaching a second activity. `BK_android_detach` (new; `android_main` calls it before the glue frees the app) ends wakes from other threads, which used the freed looper. A Lua script that fails after opening its window shows its error (the error window came back NULL and crashed). A second finger joining a one-finger scroll no longer jumps it; `BK_window_timer` returns -1 (not 0) when the window's timers are full, as `BUI_kit.h` says; a failed window allocation returns NULL (the C demo checks it); a frame whose post fails is redrawn. `build.py` aligns the APK with `zipalign 4` (the libraries are deflated: `-P 16` aligned nothing and failed on build-tools 34) and builds a Rust app's crate with `--lib`.
 - **WebAssembly: an unstyled canvas keeps its size after a zoom.** At a pixel ratio of 1 its CSS size was not pinned, so after a zoom or a move to a retina screen it grew on every frame; every resize now sizes the backing store and pins it. `build.py --serve` serves `.wasm` and `.js` with their web types on Windows (the override was set on a `functools.partial`, where it did nothing). The wasm workflow runs on changes to the kit, the GPU raster, core and blenderui too, and the smoke test's click check compares against the hovered button, so it can fail.
 - **QuickJS (`bui run`, `bui build`, Android `--js`): timers set from promise jobs run.** A `setTimeout` made in a `.then` was missed (a headless app quit with it pending, a windowed one stalled until the next event); timers now run one task at a time with the promise jobs after each, as in HTML's event loop, and the next deadline is read after the last job. A pump that runs out of rounds with work left schedules the next one. `setTimeout(f, Infinity)` (or `NaN`, negative, past 2^31-1 ms) is a 0 ms delay, as in browsers, instead of panicking the runtime.

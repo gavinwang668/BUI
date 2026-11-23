@@ -629,7 +629,7 @@ From `cargo test --test suite parity:: -- --nocapture`:
 
 Beyond properties, the engine supports:
 - **Values:** every CSS math function (`calc`, `min`, `max`, `clamp`, `round`, `mod`, `rem`, trigonometry, `pow`, `hypot` ...) with mixed units, every length unit, and `var()` / `env()`.
-- **Colors:** CSS Color 4/5: `oklch`, `lab`, `color()`, `color-mix()`, relative colors and `light-dark()`.
+- **Colors:** CSS Color 4/5: `oklch`, `lab`, `color()`, `color-mix()`, relative colors and `light-dark()` (which, like the system colors and `prefers-color-scheme`, follows the theme's mode: `set_theme("light")` re-renders the windows).
 - **Selectors:** Selectors Level 4 (`:has()`, `:is()`, `:where()`, `:nth-child(of S)` ...), nesting, and `::before` / `::after` with `content`.
 - **At-rules:** `@media` (Media Queries 4 ranges), `@supports`, `@layer` and `@scope`.
 

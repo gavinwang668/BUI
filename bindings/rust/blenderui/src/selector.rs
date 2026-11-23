@@ -53,7 +53,9 @@ enum Simple {
     Attr { name: String, op: AttrOp, val: String, ci: bool },
     /// State and structural pseudo-classes without arguments.
     Pseudo(String),
-    Nth { a: i32, b: i32, last: bool, of_type: bool, of: Option<Box<[Selector]>> },
+    /// `later`: for `:nth-last-child(An+B of S)`, the source-tree query (`Query::LaterMatches`) counting
+    /// the following siblings that match `S`.
+    Nth { a: i32, b: i32, last: bool, of_type: bool, of: Option<Box<[Selector]>>, later: Option<u16> },
     Not(Box<[Selector]>),
     Is(Box<[Selector]>),
     Where(Box<[Selector]>),
@@ -61,7 +63,26 @@ enum Simple {
     Has(u16),
     Lang(Box<[String]>),
     Dir(bool),
+    /// `:scope` (or a bare `&`) inside `@scope`: an element its root selector matches.
+    ScopeRoot(Box<[Selector]>),
     Never,
+}
+
+impl Selector {
+    /// Inside `@scope (root)`: `:scope` is the scoping root, not the document's.
+    fn bind_scope(&mut self, root: &[Selector]) {
+        for (compound, _) in &mut self.parts {
+            for s in compound {
+                match s {
+                    Simple::Pseudo(p) if p == "scope" => *s = Simple::ScopeRoot(root.into()),
+                    Simple::Not(l) | Simple::Is(l) | Simple::Where(l) | Simple::Nth { of: Some(l), .. } => {
+                        l.iter_mut().for_each(|sel| sel.bind_scope(root));
+                    }
+                    _ => {}
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -81,15 +102,47 @@ pub struct Selector {
     pub pseudo: Option<PseudoElement>,
 }
 
-/// One `:has()`: its relative selectors and the rest of the compound it
-/// sits in (`.card` in `.card:has(img)`).
+/// What a source-tree query asks. Rules match while the box tree is being built, before an
+/// element's subtree and its following siblings exist, so these are answered on the declarative
+/// elements instead.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Query {
+    /// `:has()`: whether a relative selector holds.
+    Has,
+    /// `:nth-last-child(An+B of S)`: how many following siblings match `S` (each `rels` entry
+    /// holds one selector of `S`).
+    LaterMatches,
+}
+
+/// One source-tree query: `:has()` (its relative selectors and the rest of the compound it sits
+/// in, `.card` in `.card:has(img)`), or the `S` of an `:nth-last-child(An+B of S)`.
 #[derive(Clone, Debug, PartialEq)]
 pub struct HasEntry {
     pub rels: Box<[RelSelector]>,
     host: Vec<Simple>,
+    pub kind: Query,
 }
 
 impl HasEntry {
+    /// How many following siblings of the anchor this `:has()` can reach: 0 for `> a` / `a b`,
+    /// one per `+` hop, all of them with a `~`.
+    pub fn sibling_reach(&self) -> usize {
+        self.rels.iter().map(|r| {
+            let hops = std::iter::once(Some(r.comb)).chain(r.sel.parts.iter().map(|p| p.1));
+            let mut reach = 0usize;
+            for c in hops {
+                match c {
+                    Some(Combinator::Sibling) => return usize::MAX,
+                    Some(Combinator::Adjacent) => reach += 1,
+                    // a descendant / child hop leaves the sibling row
+                    Some(Combinator::Child | Combinator::Descendant) => return reach,
+                    None => {}
+                }
+            }
+            reach
+        }).max().unwrap_or(0)
+    }
+
     /// Whether the compound around this `:has()` can match `el` (a cheap
     /// filter before walking `el`'s subtree).
     pub fn host_matches<S: Subject>(&self, el: &S) -> bool {
@@ -138,6 +191,11 @@ pub trait Subject: Sized + Clone {
     /// Whether `:has()` number `id` of the author stylesheet holds here.
     fn has(&self, _id: u16) -> bool {
         false
+    }
+    /// The answer to source-tree query number `id` (`Query::LaterMatches`): how many following
+    /// siblings match its `S`, when they aren't reachable through `next_sibling` yet.
+    fn later_matches(&self, _id: u16) -> Option<usize> {
+        None
     }
     /// The size of the nearest query container (named `name`, if given).
     fn container(&self, _name: Option<&str>) -> Option<(f32, f32)> {
@@ -192,25 +250,28 @@ enum Bucket {
     Universal,
 }
 
-fn spec_of(compound: &[Simple], spec: &mut (u16, u16, u16)) {
+/// Add `compound`'s specificity to `spec`. `:is()`, `:not()`, `:has()` and `of S` count as their
+/// most specific argument (Selectors 4); `has` holds the `:has()` arguments.
+fn spec_of(compound: &[Simple], has: &[HasEntry], spec: &mut (u16, u16, u16)) {
     let max_of = |list: &[Selector]| list.iter().map(|s| s.specificity).max().unwrap_or((0, 0, 0));
     let add = |spec: &mut (u16, u16, u16), o: (u16, u16, u16)| {
-        spec.0 += o.0;
-        spec.1 += o.1;
-        spec.2 += o.2;
+        spec.0 = spec.0.saturating_add(o.0);
+        spec.1 = spec.1.saturating_add(o.1);
+        spec.2 = spec.2.saturating_add(o.2);
     };
     for s in compound {
         match s {
-            Simple::Id(_) => spec.0 += 1,
+            Simple::Id(_) => add(spec, (1, 0, 0)),
             Simple::Class(_) | Simple::Attr { .. } | Simple::Pseudo(_) | Simple::Lang(_) | Simple::Dir(_)
-            | Simple::Has(_) | Simple::Never => spec.1 += 1,
+            | Simple::ScopeRoot(_) | Simple::Never => add(spec, (0, 1, 0)),
+            Simple::Has(i) => add(spec, has[*i as usize].rels.iter().map(|r| r.sel.specificity).max().unwrap_or((0, 0, 0))),
             Simple::Nth { of, .. } => {
-                spec.1 += 1;
+                add(spec, (0, 1, 0));
                 if let Some(of) = of {
                     add(spec, max_of(of));
                 }
             }
-            Simple::Tag(_) => spec.2 += 1,
+            Simple::Tag(_) => add(spec, (0, 0, 1)),
             Simple::Not(l) | Simple::Is(l) => add(spec, max_of(l)),
             Simple::Where(_) | Simple::Universal => {}
         }
@@ -287,10 +348,10 @@ fn parse_complex(s: &str, has: &mut Vec<HasEntry>, relative: bool)
     parts.reverse();
     let mut spec = (0u16, 0u16, 0u16);
     for (compound, _) in &parts {
-        spec_of(compound, &mut spec);
+        spec_of(compound, has, &mut spec);
     }
     if pseudo.is_some() {
-        spec.2 += 1;
+        spec.2 = spec.2.saturating_add(1);
     }
     let n = parts.len();
     let combs: Vec<Option<Combinator>> = parts.iter().map(|p| p.1).collect();
@@ -454,7 +515,7 @@ fn parse_compound(s: &str, mut i: usize, has: &mut Vec<HasEntry>)
                                 let (comb, sel) = parse_complex(part, has, true)?;
                                 rels.push(RelSelector { comb: comb.unwrap_or(Combinator::Descendant), sel });
                             }
-                            has.push(HasEntry { rels: rels.into_boxed_slice(), host: Vec::new() });
+                            has.push(HasEntry { rels: rels.into_boxed_slice(), host: Vec::new(), kind: Query::Has });
                             Simple::Has((has.len() - 1) as u16)
                         }
                         "nth-child" | "nth-last-child" | "nth-of-type" | "nth-last-of-type" => {
@@ -463,8 +524,19 @@ fn parse_compound(s: &str, mut i: usize, has: &mut Vec<HasEntry>)
                                 None => (arg, None),
                             };
                             let (a, bb) = parse_nth(expr)?;
-                            Simple::Nth { a, b: bb, last: name.contains("last"), of_type: name.ends_with("of-type"),
-                                          of: if name.ends_with("child") { of } else { None } }
+                            let of = if name.ends_with("child") { of } else { None };
+                            let last = name.contains("last");
+                            // counting the following siblings that match S: a source-tree query
+                            let later = match &of {
+                                Some(list) if last => {
+                                    let rels = list.iter()
+                                        .map(|sel| RelSelector { comb: Combinator::Sibling, sel: sel.clone() }).collect();
+                                    has.push(HasEntry { rels, host: Vec::new(), kind: Query::LaterMatches });
+                                    Some((has.len() - 1) as u16)
+                                }
+                                _ => None,
+                            };
+                            Simple::Nth { a, b: bb, last, of_type: name.ends_with("of-type"), of, later }
                         }
                         "lang" => Simple::Lang(split_top(arg, ',').iter()
                             .map(|l| l.trim().trim_matches(['"', '\'']).to_ascii_lowercase()).collect()),
@@ -683,7 +755,7 @@ fn match_simple<S: Subject>(s: &Simple, el: &S) -> bool {
             "defined" => true,
             other => el.state(other),
         },
-        Simple::Nth { a, b, last, of_type, of } => {
+        Simple::Nth { a, b, last, of_type, of, later } => {
             let pos = match (of_type, of) {
                 (true, _) => {
                     let (i, n) = el.type_position();
@@ -693,7 +765,9 @@ fn match_simple<S: Subject>(s: &Simple, el: &S) -> bool {
                     if !any_matches(list, el) {
                         return false;
                     }
-                    if *last {
+                    if let Some(n) = later.and_then(|id| el.later_matches(id)) {
+                        n + 1 // answered on the source tree (the siblings aren't built yet)
+                    } else if *last {
                         let mut k = 1;
                         let mut cur = el.next_sibling();
                         while let Some(s) = cur {
@@ -746,6 +820,7 @@ fn match_simple<S: Subject>(s: &Simple, el: &S) -> bool {
             }
             !*rtl
         }
+        Simple::ScopeRoot(root) => any_matches(root, el),
         Simple::Never => false,
     }
 }
@@ -810,7 +885,7 @@ pub struct MediaEnv {
 
 impl MediaEnv {
     pub fn viewport(viewport: (f32, f32)) -> MediaEnv {
-        MediaEnv { width: viewport.0, height: viewport.1, dark: crate::color4::DARK, scale: 1.0 }
+        MediaEnv { width: viewport.0, height: viewport.1, dark: crate::color4::dark(), scale: 1.0 }
     }
 }
 
@@ -884,7 +959,7 @@ fn media_value(s: &str) -> MediaValue {
             "dpi" => v / 96.0,
             "dpcm" => v * 2.54 / 96.0,
             u => crate::calc::leaf(*v, u).map(|c| c.eval_units(
-                &crate::geometry::Units { font_size: 16.0, viewport: (0.0, 0.0) }, 0.0)).unwrap_or(*v),
+                &crate::geometry::Units::initial(16.0, (0.0, 0.0)), 0.0)).unwrap_or(*v),
         }),
         [t] if t.ident().is_some() => MediaValue::Ident(t.ident().unwrap_or("").to_string()),
         _ => MediaValue::Ident(s.to_ascii_lowercase()),
@@ -1435,7 +1510,10 @@ impl Stylesheet {
         let layer = self.layer_rank(ctx.layer.as_deref());
         let mut has = std::mem::take(&mut self.has);
         for sel in split_top(selector, ',') {
-            if let Some((None, selector)) = parse_complex(sel, &mut has, false) {
+            if let Some((None, mut selector)) = parse_complex(sel, &mut has, false) {
+                if let Some(s) = ctx.scope {
+                    selector.bind_scope(&self.scopes[s as usize].0);
+                }
                 let order = self.rules.len();
                 self.rules.push(Rule {
                     selector,

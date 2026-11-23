@@ -395,6 +395,9 @@ pub struct App {
     real_clock: bool,
     globals: HashMap<TypeId, Box<dyn Any>>,
     pub(crate) propagate: bool,
+    /// The theme generation the windows were last rendered for: a theme change re-renders them
+    /// (`light-dark()`, system colors, `prefers-color-scheme`, the `styled` sheet follow it).
+    theme_seen: i32,
     /// A key listener acted on the key ([`App::prevent_default`]).
     default_prevented: bool,
     /// Work sent from other threads ([`UiSender`]).
@@ -455,7 +458,8 @@ impl App {
         crate::motion::start_clock(real_clock);
         App { windows: Vec::new(), entities: Vec::new(), headless, real_clock, globals: HashMap::new(), propagate: true,
               default_prevented: false, remote: None, close_hooks: Vec::new(), closed_later: None,
-              activation_hooks: Vec::new(), notified: 0, shutdown_later: false }
+              activation_hooks: Vec::new(), notified: 0, shutdown_later: false,
+              theme_seen: crate::theme_generation() }
     }
 
     /// Create an entity (gpui's `cx.new`).
@@ -714,6 +718,11 @@ impl App {
     /// Re-render dirty windows now (headless) or soon (native: next loop turn).
     fn flush(&mut self) {
         self.drain();
+        let theme = crate::theme_generation();
+        if theme != self.theme_seen {
+            self.theme_seen = theme;
+            self.notify_all();
+        }
         // windows whose signals were written (hooks)
         for id in crate::hooks::take_dirty() {
             if id == usize::MAX {

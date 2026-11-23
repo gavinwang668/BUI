@@ -671,7 +671,7 @@ impl Elements {
             }
             self.dirty[s.node] = true;
             let st = styles.private_mut(n.style);
-            let u = Units { font_size: base.font_size, viewport };
+            let u = base.units(viewport);
             let (w, h) = (n.bounds.size.width, n.bounds.size.height);
             let at = |st: &Computed| (st.translate.0.resolve(&u, w), st.translate.1.resolve(&u, h));
             let before = if s.moves { at(st) } else { (0.0, 0.0) };

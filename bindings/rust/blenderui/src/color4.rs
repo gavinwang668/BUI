@@ -356,29 +356,33 @@ fn coords(space: Space, c: Rgba) -> V3 {
 
 // -- parsing ---------------------------------------------------------------------------
 
-/// What `light-dark()` picks: the UI is dark.
-pub const DARK: bool = true;
+/// Whether the active theme is dark: what `light-dark()`, the system colors and
+/// `@media (prefers-color-scheme)` follow.
+pub fn dark() -> bool {
+    crate::theme_name() == "dark"
+}
 
-/// A system color (`Canvas`, `LinkText` ...), in the kit's dark theme.
+/// A system color (`Canvas`, `LinkText` ...) in the active theme's mode: (dark, light). The dark
+/// ones are the kit's dark theme; the light ones a browser's light defaults.
 pub fn system(name: &str) -> Option<Rgba> {
-    use crate::color::rgb;
-    Some(match name {
-        "canvas" | "field" | "window" | "background" | "appworkspace" => rgb(0x282828),
+    let (on_dark, on_light) = match name {
+        "canvas" | "field" | "window" | "background" | "appworkspace" => (0x282828, 0xffffff),
         "canvastext" | "fieldtext" | "windowtext" | "captiontext" | "infotext" | "menutext"
-        | "buttontext" => rgb(0xe6e6e6),
-        "linktext" => rgb(0x5c9ce6),
-        "visitedtext" => rgb(0xb07ce6),
-        "activetext" => rgb(0xe65c5c),
+        | "buttontext" => (0xe6e6e6, 0x000000),
+        "linktext" => (0x5c9ce6, 0x0000ee),
+        "visitedtext" => (0xb07ce6, 0x551a8b),
+        "activetext" => (0xe65c5c, 0xee0000),
         "buttonface" | "buttonhighlight" | "buttonshadow" | "threedface" | "threedhighlight"
-        | "threedshadow" | "threeddarkshadow" | "threedlightshadow" | "menu" | "scrollbar" => rgb(0x545454),
-        "buttonborder" | "activeborder" | "inactiveborder" | "windowframe" => rgb(0x3d3d3d),
-        "highlight" | "selecteditem" | "accentcolor" | "activecaption" => rgb(0x4772b3),
-        "highlighttext" | "selecteditemtext" | "accentcolortext" | "inactivecaptiontext" => rgb(0xffffff),
-        "mark" => rgb(0xe6c84a),
-        "marktext" => rgb(0x000000),
-        "graytext" | "inactivecaption" | "infobackground" | "inactiveborder2" => rgb(0x8c8c8c),
+        | "threedshadow" | "threeddarkshadow" | "threedlightshadow" | "menu" | "scrollbar" => (0x545454, 0xefefef),
+        "buttonborder" | "activeborder" | "inactiveborder" | "windowframe" => (0x3d3d3d, 0x767676),
+        "highlight" | "selecteditem" | "accentcolor" | "activecaption" => (0x4772b3, 0x4772b3),
+        "highlighttext" | "selecteditemtext" | "accentcolortext" | "inactivecaptiontext" => (0xffffff, 0xffffff),
+        "mark" => (0xe6c84a, 0xffff00),
+        "marktext" => (0x000000, 0x000000),
+        "graytext" | "inactivecaption" | "infobackground" | "inactiveborder2" => (0x8c8c8c, 0x6d6d6d),
         _ => return None,
-    })
+    };
+    Some(crate::color::rgb(if dark() { on_dark } else { on_light }))
 }
 
 /// Channel keywords of a relative color (`from <color>`), in the target space.
@@ -411,7 +415,7 @@ fn component(toks: &[Tok], pct_ref: f64, hue: bool, ch: Option<&Channels>) -> Op
                 other => other.clone(),
             }).collect()).collect();
             let c = crate::calc::Calc::parse_fn(&fx.name, &args)?;
-            let u = crate::geometry::Units { font_size: 16.0, viewport: (0.0, 0.0) };
+            let u = crate::geometry::Units::initial(16.0, (0.0, 0.0));
             let v = c.eval_units(&u, 100.0) as f64;
             // a percentage inside calc resolves against 100: rescale it
             if c.has_pct() { v / 100.0 * pct_ref } else { v }
@@ -440,7 +444,7 @@ pub fn color_fn(fx: &FuncTok, current: Rgba) -> Option<Rgba> {
     let name = fx.name.as_ref();
     match name {
         "light-dark" => {
-            let pick = if DARK { fx.args.get(1)? } else { fx.args.first()? };
+            let pick = if dark() { fx.args.get(1)? } else { fx.args.first()? };
             return color_toks(pick, current);
         }
         "color-mix" => return color_mix(fx, current),
@@ -498,8 +502,9 @@ pub fn color_fn(fx: &FuncTok, current: Rgba) -> Option<Rgba> {
     let ch = channels.as_ref();
     let comp = |i: usize, pct: f64, hue: bool| component(&parts[i], pct, hue, ch);
     let c = match name {
-        "rgb" | "rgba" => [comp(0, 255.0, false)? / 255.0, comp(1, 255.0, false)? / 255.0,
-                           comp(2, 255.0, false)? / 255.0],
+        // CSS Color 4 §5.1: out-of-range rgb() channels clamp (no gamut mapping)
+        "rgb" | "rgba" => [(comp(0, 255.0, false)? / 255.0).clamp(0.0, 1.0), (comp(1, 255.0, false)? / 255.0).clamp(0.0, 1.0),
+                           (comp(2, 255.0, false)? / 255.0).clamp(0.0, 1.0)],
         // s / l (w / b) as percentages; bare numbers in modern syntax mean percent too
         "hsl" | "hsla" | "hwb" => [comp(0, 0.0, true)?, comp(1, 100.0, false)? / 100.0,
                                    comp(2, 100.0, false)? / 100.0],

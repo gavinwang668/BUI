@@ -266,6 +266,11 @@ pub(crate) struct ElData {
     /// refinements or Motion props. Without any (and no `:active` / `:focus` rule in the sheet) a press
     /// changes nothing on screen by itself.
     pub reactive: bool,
+    /// `:empty`: no element or text children (rules match before the children are built).
+    pub empty: bool,
+    /// Answers to the author sheet's `Query::LaterMatches` queries: (query, following siblings
+    /// that match its `S`).
+    pub later: smallvec::SmallVec<[(u16, u32); 1]>,
 }
 
 const NONE: u32 = u32::MAX;
@@ -567,6 +572,32 @@ type Kids = smallvec::SmallVec<[usize; 8]>;
 type NodeList = smallvec::SmallVec<[NodeId; 8]>;
 
 /// The slot index of a layout node (dense: the tree reuses freed slots).
+/// The declarations for both passes of `compute`, which apply the normal ones and then the
+/// `!important` ones, each in list order. The normal ones go UA, author (rules in cascade order),
+/// then the element's own; the important ones reverse the origins and the layers (CSS Cascade 5):
+/// author unlayered, author layers from the last to the first, the element's own, then UA.
+fn cascade_order<'d>(ua: &[&'d Rule], au: &[&'d Rule], own: &[&'d Decl]) -> smallvec::SmallVec<[&'d Decl; 24]> {
+    let rules = || ua.iter().chain(au).flat_map(|r| r.decls.iter());
+    let mut out: smallvec::SmallVec<[&'d Decl; 24]> = rules().chain(own.iter().copied()).filter(|d| !d.important).collect();
+    let important = |d: &&Decl| d.important;
+    if !rules().chain(own.iter().copied()).any(|d| d.important) {
+        return out;
+    }
+    let mut layered: smallvec::SmallVec<[&'d Rule; 8]> = smallvec::SmallVec::new();
+    for r in au {
+        if r.layer == u16::MAX {
+            out.extend(r.decls.iter().filter(important));
+        } else {
+            layered.push(r);
+        }
+    }
+    layered.sort_by_key(|r| std::cmp::Reverse(r.layer)); // stable: specificity and order stay
+    out.extend(layered.iter().flat_map(|r| r.decls.iter()).filter(important));
+    out.extend(own.iter().copied().filter(important));
+    out.extend(ua.iter().flat_map(|r| r.decls.iter()).filter(important));
+    out
+}
+
 fn slot(id: NodeId) -> usize {
     u64::from(id) as usize
 }
@@ -692,10 +723,13 @@ impl Subject for NodeRef<'_> {
         (t.0 as usize, t.1 as usize)
     }
     fn is_empty(&self) -> bool {
-        self.nodes[self.i].first == NONE
+        self.el().is_none_or(|e| e.empty)
     }
     fn has(&self, id: u16) -> bool {
         id < 64 && self.el().is_some_and(|e| e.has & (1 << id) != 0)
+    }
+    fn later_matches(&self, id: u16) -> Option<usize> {
+        self.el()?.later.iter().find(|q| q.0 == id).map(|q| q.1 as usize)
     }
     fn same(&self, o: &Self) -> bool {
         self.i == o.i
@@ -743,35 +777,60 @@ fn type_counts(els: &[&Div], k: usize) -> (usize, usize) {
     (before, before + els[k..].iter().filter(|e| e.tag == tag).count())
 }
 
-/// Flatten `div`'s element subtree (index 0 = `div` itself, the anchor).
-fn flatten<'d>(div: &'d Div, key: Key, out: &mut Vec<Flat<'d>>) {
-    out.push(Flat { tag: div.tag, id: None, attrs: &[], parent: NONE, first: NONE, next: NONE, prev: NONE,
-                    pos: (1, 1), tpos: (1, 1), key });
-    fn kids<'d>(div: &'d Div, me: u32, key: Key, out: &mut Vec<Flat<'d>>) {
-        let els: smallvec::SmallVec<[&'d Div; 16]> = div.children.iter().filter_map(|c| match c {
-            AnyElement::Element(d) => Some(d),
-            _ => None,
-        }).collect();
-        let mut prev = NONE;
-        for (k, d) in els.iter().enumerate() {
-            let ck = match &d.id {
-                Some(id) => id_key(id),
-                None => child_key(key, d.tag, k + 1),
-            };
-            let (before, total) = type_counts(&els, k);
-            let idx = out.len() as u32;
-            out.push(Flat { tag: d.tag, id: d.id.as_deref(), attrs: &d.attrs, parent: me, first: NONE, next: NONE,
-                            prev, pos: (k + 1, els.len()), tpos: (before + 1, total), key: ck });
-            if prev == NONE {
-                out[me as usize].first = idx;
-            } else {
-                out[prev as usize].next = idx;
-            }
-            prev = idx;
-            kids(d, idx, ck, out);
+/// The element children of `div` (and theirs) under flat entry `me`, whose key is `key`.
+fn flatten_kids<'d>(div: &'d Div, me: u32, key: Key, out: &mut Vec<Flat<'d>>) {
+    let els: smallvec::SmallVec<[&'d Div; 16]> = div.children.iter().filter_map(|c| match c {
+        AnyElement::Element(d) => Some(d),
+        AnyElement::Text(_) => None,
+    }).collect();
+    let mut prev = NONE;
+    for (k, d) in els.iter().enumerate() {
+        let ck = match &d.id {
+            Some(id) => id_key(id),
+            None => child_key(key, d.tag, k + 1),
+        };
+        let (before, total) = type_counts(&els, k);
+        let idx = out.len() as u32;
+        out.push(Flat { tag: d.tag, id: d.id.as_deref(), attrs: &d.attrs, parent: me, first: NONE, next: NONE,
+                        prev, pos: (k + 1, els.len()), tpos: (before + 1, total), key: ck });
+        if prev == NONE {
+            out[me as usize].first = idx;
+        } else {
+            out[prev as usize].next = idx;
         }
+        prev = idx;
+        flatten_kids(d, idx, ck, out);
     }
-    kids(div, 0, key, out);
+}
+
+/// The element siblings after the element at flat entry `me` (`pos` among its siblings): the
+/// first `take` of `later`, each with its subtree, chained after `me` under `parent`. Keys are
+/// the ones `children` gives them; `built` counts the element and the siblings before it by tag,
+/// for their type positions. Returns the first sibling's entry (`NONE` without any).
+#[allow(clippy::too_many_arguments)]
+fn flatten_later<'d>(later: &'d [AnyElement], take: usize, me: u32, pos: (usize, usize), parent: u32,
+                     parent_key: Key, built: &[(&str, usize)], out: &mut Vec<Flat<'d>>) -> u32 {
+    let els: smallvec::SmallVec<[&'d Div; 16]> = later.iter().filter_map(|c| match c {
+        AnyElement::Element(d) => Some(d),
+        AnyElement::Text(_) => None,
+    }).collect();
+    let count = |tag: &str| built.iter().find(|b| b.0.eq_ignore_ascii_case(tag)).map_or(0, |b| b.1);
+    let (first, mut prev) = (out.len() as u32, me);
+    for (k, d) in els.iter().enumerate().take(take) {
+        let ck = match &d.id {
+            Some(id) => id_key(id),
+            None => child_key(parent_key, d.tag, pos.0 + k + 1),
+        };
+        let (before, total) = type_counts(&els, k);
+        let idx = out.len() as u32;
+        let tpos = (count(d.tag) + before + 1, count(d.tag) + total);
+        out.push(Flat { tag: d.tag, id: d.id.as_deref(), attrs: &d.attrs, parent, first: NONE, next: NONE,
+                        prev, pos: (pos.0 + k + 1, pos.1), tpos, key: ck });
+        out[prev as usize].next = idx;
+        prev = idx;
+        flatten_kids(d, idx, ck, out);
+    }
+    if out.len() as u32 == first { NONE } else { first }
 }
 
 #[derive(Clone)]
@@ -865,6 +924,74 @@ fn collect_styles(el: &AnyElement, css: &mut String, title: &mut Option<String>,
 }
 
 impl<'a> Builder<'a> {
+    /// Element `i` and its built siblings before it, counted by tag (type positions of the
+    /// siblings after it).
+    fn built_tags(&self, i: usize) -> smallvec::SmallVec<[(&str, usize); 8]> {
+        let mut out: smallvec::SmallVec<[(&str, usize); 8]> = smallvec::SmallVec::new();
+        let mut cur = Some(self.subject(i));
+        while let Some(s) = cur {
+            let tag = self.els[self.nodes[s.i].el as usize].tag;
+            match out.iter_mut().find(|t| t.0.eq_ignore_ascii_case(tag)) {
+                Some(t) => t.1 += 1,
+                None => out.push((tag, 1)),
+            }
+            cur = s.prev_sibling();
+        }
+        out
+    }
+
+    /// Answers to the author sheet's `Query::LaterMatches` queries (`:nth-last-child(An+B of S)`)
+    /// for element `i` at `pos`: how many of its following siblings `later` match `S`. They are
+    /// matched on the declarative elements, under `i`'s built ancestors (`S` may name them); only
+    /// queries whose `S` the element matches itself are answered.
+    fn later_matches<'s>(&'s self, i: usize, pos: (usize, usize), later: &'s [AnyElement])
+        -> smallvec::SmallVec<[(u16, u32); 1]> {
+        let mut out = smallvec::SmallVec::new();
+        let me = self.subject(i);
+        let mut queries = self.author.has.iter().enumerate().filter(|(_, q)| {
+            q.kind == crate::css::Query::LaterMatches && q.rels.iter().any(|r| r.sel.matches(&me))
+        }).peekable();
+        if queries.peek().is_none() {
+            return out;
+        }
+        // the built ancestors from the root down, then `i` itself
+        let mut chain: smallvec::SmallVec<[usize; 16]> = smallvec::SmallVec::new();
+        let mut n = Some(i);
+        while let Some(k) = n {
+            if self.nodes[k].el != NONE {
+                chain.push(k);
+            }
+            n = self.nodes[k].parent;
+        }
+        let mut flat: Vec<Flat<'s>> = Vec::with_capacity(chain.len() + later.len());
+        for &k in chain.iter().rev() {
+            let (node, el) = (&self.nodes[k], &self.els[self.nodes[k].el as usize]);
+            let idx = flat.len() as u32;
+            let parent = idx.checked_sub(1).unwrap_or(NONE);
+            flat.push(Flat { tag: el.tag, id: el.id.as_deref(), attrs: &el.attrs, parent, first: NONE, next: NONE,
+                             prev: NONE, pos: node.pos, tpos: self.subject(k).type_position(), key: node.key });
+            if parent != NONE {
+                flat[parent as usize].first = idx;
+            }
+        }
+        let at = flat.len() as u32 - 1;
+        let parent = flat[at as usize].parent;
+        let parent_key = self.nodes[i].parent.map_or(self.nodes[i].key, |p| self.nodes[p].key);
+        let built = self.built_tags(i);
+        let first = flatten_later(later, usize::MAX, at, pos, parent, parent_key, &built, &mut flat);
+        for (id, q) in queries {
+            let mut count = 0u32;
+            let mut k = first;
+            while k != NONE {
+                let s = DivSubject { flat: &flat, state: self.state, i: k as usize };
+                count += u32::from(q.rels.iter().any(|r| r.sel.matches(&s)));
+                k = flat[k as usize].next;
+            }
+            out.push((id as u16, count));
+        }
+        out
+    }
+
     fn subject(&self, i: usize) -> NodeRef<'_> {
         NodeRef { nodes: &self.nodes, els: &self.els, state: self.state, containers: self.containers, i }
     }
@@ -997,6 +1124,7 @@ impl<'a> Builder<'a> {
             self.nodes[i].fp.hash(&mut h);
             self.nodes[i].styled.hash(&mut h);
             self.containers.generation.hash(&mut h);
+            self.author_hash.hash(&mut h); // media results follow the theme's mode
             self.viewport.0.to_bits().hash(&mut h);
             self.viewport.1.to_bits().hash(&mut h);
             h.finish()
@@ -1038,6 +1166,8 @@ impl<'a> Builder<'a> {
         n.tpos.hash(&mut h);
         if let Some(e) = (n.el != NONE).then(|| &self.els[n.el as usize]) {
             e.has.hash(&mut h);
+            e.empty.hash(&mut h);
+            e.later.hash(&mut h);
             e.tag.hash(&mut h);
             e.id.as_deref().hash(&mut h);
             for (a, v) in &e.attrs {
@@ -1057,22 +1187,19 @@ impl<'a> Builder<'a> {
     fn declared<'d>(&self, i: usize, div: &'d Div, ua: &[&'d Rule], au: &[&'d Rule])
         -> smallvec::SmallVec<[&'d Decl; 24]> {
         let key = self.nodes[i].key;
-        let mut decls = smallvec::SmallVec::new();
-        decls.extend(ua.iter().flat_map(|r| r.decls.iter()));
-        decls.extend(au.iter().flat_map(|r| r.decls.iter()));
-        decls.extend(div.decls.iter());
+        let mut own: smallvec::SmallVec<[&'d Decl; 16]> = div.decls.iter().collect();
         if let Some(st) = &div.states {
             if self.state.hovered.contains(&key) {
-                decls.extend(st.hover.iter());
+                own.extend(st.hover.iter());
             }
             if self.state.active.contains(&key) {
-                decls.extend(st.active.iter());
+                own.extend(st.active.iter());
             }
             if self.state.focused == Some(key) {
-                decls.extend(st.focus.iter());
+                own.extend(st.focus.iter());
             }
         }
-        decls
+        cascade_order(ua, au, &own)
     }
 
     fn compute(&mut self, parent: StyleId, decls: &[&Decl]) -> Computed {
@@ -1100,6 +1227,7 @@ impl<'a> Builder<'a> {
         } else {
             pvars
         };
+        let root = parent == ROOT_STYLE;
         let parent = &self.styles[parent];
         let mut c = Computed::inherit(parent);
         c.vars = vars;
@@ -1114,7 +1242,6 @@ impl<'a> Builder<'a> {
         const FONT_SIZE: Prop = Prop::named("font-size");
         const FONT: Prop = Prop::named("font");
         let font_first = |d: &&Decl| d.prop == FONT_SIZE || d.prop == FONT;
-        let units = |fs: f32| Units { font_size: fs, viewport: self.viewport };
         let run = |c: &mut Computed, u: Units, d: &Decl| {
             if crate::vars::uses_vars(&d.value) {
                 if let Some(d) = subst(d) {
@@ -1127,20 +1254,19 @@ impl<'a> Builder<'a> {
         for important in [false, true] {
             // font-size first: em lengths in the other properties depend on it
             for d in decls.iter().filter(|d| d.important == important && font_first(d)) {
-                run(&mut c, units(parent.font_size), d);
+                run(&mut c, parent.units(self.viewport), d);
             }
         }
-        let u = units(c.font_size);
+        if root {
+            c.root_font_size = c.font_size; // `rem` everywhere (the root's own font-size used the initial)
+        }
+        let u = c.units(self.viewport);
         for important in [false, true] {
             for d in decls.iter().filter(|d| d.important == important && !font_first(d)) {
                 run(&mut c, u, d);
             }
         }
         c
-    }
-
-    fn units(&self, font_size: f32) -> Units {
-        Units { font_size, viewport: self.viewport }
     }
 
     /// A new box. `link`: append it to its parent's child list (elements and
@@ -1210,7 +1336,9 @@ impl<'a> Builder<'a> {
     }
 
     /// Build an element; returns its index (None when not rendered).
-    fn element(&mut self, mut div: Div, parent: Option<usize>, key: Key, pos: (usize, usize)) -> Option<usize> {
+    /// `later`: the siblings after it (for `:has()` with `+` / `~`).
+    fn element(&mut self, mut div: Div, parent: Option<usize>, key: Key, pos: (usize, usize), later: &[AnyElement])
+        -> Option<usize> {
         let parent_style = parent.map(|p| self.nodes[p].style).unwrap_or(ROOT_STYLE);
         let i = self.push(parent, Content::Element, None, parent_style, key, true);
         self.nodes[i].pos = pos;
@@ -1225,26 +1353,42 @@ impl<'a> Builder<'a> {
             listeners: std::mem::take(&mut div.listeners),
             has: 0,
             reactive,
+            empty: div.children.iter().all(|c| matches!(c, AnyElement::Text(t) if t.is_empty())),
+            later: smallvec::SmallVec::new(),
         });
         if !self.author.has.is_empty() {
             // :has() looks at the element's subtree, which isn't built yet:
             // evaluate it on the declarative children instead
             let mut bits = 0u64;
             let mut flat = Vec::new();
+            let is_has = |e: &&crate::css::HasEntry| e.kind == crate::css::Query::Has;
             for (id, entry) in self.author.has.iter().enumerate().take(64) {
-                if !entry.host_matches(&self.subject(i)) {
+                if !is_has(&entry) || !entry.host_matches(&self.subject(i)) {
                     continue;
                 }
                 if flat.is_empty() {
-                    flatten(&div, key, &mut flat);
+                    // the following siblings as far as any `:has()` reaches with `+` / `~`
+                    let reach = self.author.has.iter().take(64).filter(is_has)
+                        .map(crate::css::HasEntry::sibling_reach).max().unwrap_or(0);
+                    let parent_key = parent.map_or(key, |p| self.nodes[p].key);
+                    // the anchor (index 0) and its subtree, then the siblings it reaches
+                    flat.push(Flat { tag: div.tag, id: None, attrs: &[], parent: NONE, first: NONE, next: NONE,
+                                     prev: NONE, pos, tpos: self.subject(i).type_position(), key });
+                    flatten_kids(&div, 0, key, &mut flat);
+                    if reach > 0 {
+                        let built = self.built_tags(i);
+                        flatten_later(later, reach, 0, pos, NONE, parent_key, &built, &mut flat);
+                    }
                 }
                 let anchor = DivSubject { flat: &flat, state: self.state, i: 0 };
                 if crate::css::has_match(&entry.rels, &anchor) {
                     bits |= 1 << id;
                 }
             }
+            let counts = self.later_matches(i, pos, later);
             if let Some(e) = self.els.last_mut() {
                 e.has = bits;
+                e.later = counts;
             }
         }
         self.nodes[i].fp = self.fingerprint(i);
@@ -1285,7 +1429,7 @@ impl<'a> Builder<'a> {
                     spec.html = !self.nodes[i].styled && self.attr(i, "bui-blender").is_none();
                     spec.bare = spec.html && self.styles[style].border_drawn.iter().all(|d| !d);
                     let own = &self.styles[style];
-                    let u = self.units(own.font_size);
+                    let u = own.units(self.viewport);
                     spec.radius = own.radius.iter().filter_map(|r| r.to_px(&u)).reduce(f32::max).filter(|r| *r > 0.0);
                     if spec.html && matches!(spec.kind, crate::widgets::WKind::TextArea) {
                         let own = &self.styles[style];
@@ -1437,8 +1581,7 @@ impl<'a> Builder<'a> {
         let sid = match found {
             Some(id) => id,
             None => {
-                let decls: smallvec::SmallVec<[&Decl; 24]> =
-                    ua.iter().chain(au.iter()).flat_map(|r| r.decls.iter()).collect();
+                let decls = cascade_order(&ua, &au, &[]);
                 let mut c = self.compute(parent, &decls);
                 if matches!(self.st(i).display, DisplayKind::Flex | DisplayKind::InlineFlex
                             | DisplayKind::Grid | DisplayKind::InlineGrid) && c.display == DisplayKind::Inline {
@@ -1479,7 +1622,8 @@ impl<'a> Builder<'a> {
         let key = child_key(self.nodes[i].key, tag, 0);
         let g = self.push(Some(i), Content::Element, None, sid, key, true);
         self.nodes[g].el = self.els.len() as u32;
-        self.els.push(ElData { tag, id: None, attrs: Vec::new(), listeners: None, has: 0, reactive: false });
+        self.els.push(ElData { tag, id: None, attrs: Vec::new(), listeners: None, has: 0, reactive: false,
+                               empty: text.is_empty(), later: smallvec::SmallVec::new() });
         if !text.is_empty() {
             self.push(Some(g), Content::Text(text.into()), Some(g), sid, child_key(key, "#text", 1), true);
         }
@@ -1521,7 +1665,9 @@ impl<'a> Builder<'a> {
         }
         let (mut k, mut n) = (0, 0);
         let parent_key = self.nodes[i].key;
-        for child in children.drain(..) {
+        // taken one at a time: the siblings after each child stay in place for `:has(+ / ~)`
+        for at in 0..children.len() {
+            let child = std::mem::replace(&mut children[at], AnyElement::Text(SharedString::Borrowed("")));
             n += 1;
             match child {
                 AnyElement::Element(d) => {
@@ -1534,7 +1680,7 @@ impl<'a> Builder<'a> {
                         t.2 += 1;
                         self.next_tpos = (t.2, t.1);
                     }
-                    self.element(d, Some(i), key, (k, count));
+                    self.element(d, Some(i), key, (k, count), &children[at + 1..]);
                 }
                 // an empty text run renders nothing (`None` as a child)
                 AnyElement::Text(t) if t.is_empty() => {}
@@ -1662,7 +1808,7 @@ impl<'a> Builder<'a> {
                 Content::Element => {
                     let inner = self.max_content(c);
                     let st = self.st(c);
-                    let u = self.units(st.font_size);
+                    let u = st.units(self.viewport);
                     let px = |v: LengthPercentage| match v.into_raw() {
                         r if r.tag() == taffy::CompactLength::LENGTH_TAG => r.value(),
                         _ => 0.0,
@@ -2183,7 +2329,7 @@ impl<'a> Builder<'a> {
         let (tab, break_all) = (c.tab_size, c.break_all);
         let flags = text::flags(c);
         let line_h = c.line_px();
-        let indent = if first { c.text_indent.resolve(&self.units(size), 0.0) } else { 0.0 };
+        let indent = if first { c.text_indent.resolve(&c.units(self.viewport), 0.0) } else { 0.0 };
         // the processed text, kept in the box
         let Content::Text(raw) = std::mem::replace(&mut self.nodes[src].content, Content::Anon) else { return };
         let mut text = match transform(&raw, tt, ws, tab) {
@@ -2454,7 +2600,9 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         next_tpos: (1, 1),
         author: &author.sheet,
         ua_styled: &ua_styled,
-        author_hash: author.hash,
+        // the theme's mode is part of what the sheet means (`light-dark()`, system colors,
+        // `prefers-color-scheme`): styles computed in the other mode are not reused
+        author_hash: author.hash ^ u64::from(crate::color4::dark()),
         ua_media: ua_stylesheet().media_results(&crate::css::MediaEnv::viewport(viewport)),
         ua_styled_media: ua_styled.media_results(&crate::css::MediaEnv::viewport(viewport)),
         au_media: author.sheet.media_results(&crate::css::MediaEnv::viewport(viewport)),
@@ -2477,7 +2625,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         }
     };
     let s = span(Phase::Build);
-    let root = match b.element(root_div, None, ROOT_KEY, (1, 1)) {
+    let root = match b.element(root_div, None, ROOT_KEY, (1, 1), &[]) {
         Some(r) => r,
         None => b.push(None, Content::Element, None, ROOT_STYLE, ROOT_KEY, false),
     };
@@ -2608,7 +2756,7 @@ impl Walk<'_> {
         let (mut sx, mut sy) = (0.0, 0.0);
         if let Some(i) = self.box_of.get(slot(id)).filter(|&&b| b != NONE).map(|&b| b as usize) {
             let st = &self.styles[nodes[i].style];
-            let u = Units { font_size: st.font_size, viewport: self.vp };
+            let u = st.units(self.vp);
             // a word carries its owner's style: the owner's translate already moved the line it is in,
             // unless the owner is an inline element (no box of its own to carry it)
             let own_translate = !matches!(nodes[i].content, Content::Word { .. }) || nodes[nodes[i].owner].taffy.is_none();

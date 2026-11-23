@@ -8,6 +8,7 @@ mod animation;
 mod app_root;
 mod basic_css;
 mod css_redraw;
+mod css_spec;
 mod damage_drag;
 mod effects;
 mod features;
