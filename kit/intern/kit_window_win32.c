@@ -930,7 +930,8 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_NCMOUSEMOVE:
     case WM_NCLBUTTONDOWN:
     case WM_NCLBUTTONDBLCLK:
-      if (wp == HTMAXBUTTON) { /* the app's maximize button: its pointer, as the client's */
+      /* the app's maximize button: its pointer, as the client's (the system's stays the system's) */
+      if (wp == HTMAXBUTTON && win->override == 2) {
         POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         ScreenToClient(hwnd, &pt);
         if (msg == WM_NCMOUSEMOVE) {
@@ -950,7 +951,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       }
       break;
     case WM_SETCURSOR:
-      if (LOWORD(lp) == HTCLIENT || LOWORD(lp) == HTMAXBUTTON) {
+      if (LOWORD(lp) == HTCLIENT || (LOWORD(lp) == HTMAXBUTTON && win->override == 2)) {
         SetCursor(cursor_handle(win->cursor));
         return TRUE;
       }
