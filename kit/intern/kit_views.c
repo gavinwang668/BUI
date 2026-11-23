@@ -395,11 +395,42 @@ static int rv_cursor(BKNode *n, int x, int y)
   return n->edit ? BK_CURSOR_TEXT : BK_CURSOR_DEFAULT;
 }
 
+/* Accessibility (a11y/a11y.c): the rows in view, as options of a list box or items of a tree. */
+static bool rv_a11y_item(BKNode *n, int i, BKA11yNode *r)
+{
+  const RowOps *ops = row_ops(n);
+  const int row = n->scroll + i;
+  if (i >= rv_visible(n) || row >= ops->count(n)) {
+    return false;
+  }
+  r->role = n->cls == &bk_cls_tree ? BK_ROLE_TREE_ITEM : BK_ROLE_LIST_BOX_OPTION;
+  r->name = ops->text(n, row);
+  r->flags = BK_A11Y_SELECTABLE | BK_A11Y_CLICKABLE |
+             (rv_selected_row(n, row, ops->selected(n)) ? BK_A11Y_SELECTED : 0);
+  r->x = (float)n->x;
+  r->y = (float)rv_row_y(n, row);
+  r->w = (float)(n->w - rv_bar_w(n));
+  r->h = (float)u();
+  return true;
+}
+
+/* A reader picks a row: as a click on it selects it. */
+static int rv_a11y_do(BKNode *n, int item, int action)
+{
+  if (item < 0 || action != BK_A11Y_CLICK) {
+    return 0;
+  }
+  BKEvent e;
+  memset(&e, 0, sizeof(e));
+  rv_click_select(n, n->scroll + item, &e);
+  return 1;
+}
+
 #define ROWVIEW_CLASS_COMMON \
   .flags = CLS_INTERACTIVE | CLS_VALUE, .measure = rv_measure, .draw = rv_draw, \
   .press = rv_press, .dbl = rv_dbl, .move = rv_move, .leave = rv_leave, .key = rv_key, \
   .wheel = rv_wheel, .finish_edit = rv_finish, .cursor_at = rv_cursor, .step = rv_step, \
-  .view = rv_view, .set_view = rv_set_view
+  .view = rv_view, .set_view = rv_set_view, .a11y_item = rv_a11y_item, .a11y_do = rv_a11y_do
 
 /** \} */
 
@@ -512,7 +543,7 @@ static void list_init(BKNode *n)
   n->vmin = 0;
 }
 
-const BKClass bk_cls_list = {.name = "list",
+const BKClass bk_cls_list = {.name = "list", .a11y_role = BK_ROLE_LIST_BOX,
                              ROWVIEW_CLASS_COMMON,
                              .init = list_init,
                              .to_text = list_to_text,
@@ -1185,7 +1216,7 @@ static void tree_reset(BKNode *n)
 {
 }
 
-const BKClass bk_cls_tree = {.name = "tree",
+const BKClass bk_cls_tree = {.name = "tree", .a11y_role = BK_ROLE_TREE,
                              ROWVIEW_CLASS_COMMON,
                              .init = tree_init,
                              .free_ext = tree_free,
@@ -1452,7 +1483,7 @@ static void gridview_step(BKNode *n, int dir)
   bk_set_value(n, BK_CLAMP((int)n->value - dir, 0, BK_MAX(0, n->items.n - 1)));
 }
 
-const BKClass bk_cls_gridview = {.name = "gridview",
+const BKClass bk_cls_gridview = {.name = "gridview", .a11y_role = BK_ROLE_LIST_BOX,
                                  .flags = CLS_INTERACTIVE | CLS_VALUE,
                                  .init = gridview_init,
                                  .free_ext = gridview_free,

@@ -987,7 +987,7 @@ static void ta_draw(BKNode *n)
   bk_clip_pop();
 }
 
-const BKClass bk_cls_textarea = {.name = "textarea",
+const BKClass bk_cls_textarea = {.name = "textarea", .a11y_role = BK_ROLE_MULTILINE_TEXT_INPUT,
                                  .flags = CLS_INTERACTIVE,
                                  .cursor = BK_CURSOR_TEXT,
                                  .init = ta_init,

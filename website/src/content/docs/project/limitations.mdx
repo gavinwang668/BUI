@@ -10,7 +10,10 @@ Read this page before you pick BUI for something you will ship. Everything here 
 
 ## Accessibility
 
-BUI has **no accessibility support**. It draws its own widgets and doesn't talk to the platform's accessibility APIs (UI Automation on Windows, AT-SPI on Linux, NSAccessibility on macOS), so screen readers can't see them. Don't use BUI for software that has to be accessible. Accessibility is planned.
+- **Windows:** screen readers see BUI apps through UI Automation ([AccessKit](https://accesskit.dev)): the HTML page and the Blender widgets in one tree, with roles and names mapped as browsers map HTML and ARIA, values and states, and actions (press, toggle, set a value, increment, expand, focus). The tree is built only once a reader asks, so apps nobody inspects pay nothing.
+- **macOS and Linux:** not yet (NSAccessibility and AT-SPI are next).
+- **Gaps on Windows:** no text-range navigation inside fields, no Tab traversal between HTML elements (readers use their own navigation), Blender widgets other than text fields take no keyboard focus of their own, and some items (grid views, menu bars, pie menus) aren't exposed yet.
+- **Bindings:** Rust (and so Node) has it on by default; the C kit's other bindings get it with the `a11y` feature, which needs cargo to build.
 
 ## Text
 

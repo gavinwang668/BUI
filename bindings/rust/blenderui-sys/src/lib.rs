@@ -10,6 +10,13 @@ use std::os::raw::{c_char, c_double, c_float, c_int, c_uchar, c_void};
 mod anim;
 pub use anim::*;
 
+// Accessibility: the kit's C calls into bui-a11y (its adapters) resolve against this crate, and its
+// node types are the ABI of `BK_a11y_*` (`BKA11yNode` is `bui_a11y::Node`, ...).
+#[cfg(feature = "a11y")]
+pub use bui_a11y as a11y;
+#[cfg(feature = "a11y")]
+pub use bui_a11y::{Node as BKA11yNode, Request as BKA11yRequest};
+
 /// A kit node (widget, frame, canvas ...).
 #[repr(C)]
 pub struct BKNode {
@@ -58,6 +65,10 @@ pub const BK_EV_AREA: c_int = 21;
 pub const BK_EV_MOVE: c_int = 22;
 /// An area's region resized, hidden or shown: a = size, b = hidden.
 pub const BK_EV_RESIZE: c_int = 23;
+/// A screen reader reads the window now (on the root): set the accessibility subtrees.
+pub const BK_EV_A11Y_TREE: c_int = 24;
+/// A screen reader asks for an action on a subtree node: ref = `*const BKA11yRequest`.
+pub const BK_EV_A11Y_ACTION: c_int = 25;
 /// `BK_EV_AREA`'s b: a new area (on the screen), one leaving or opened in a window (on the area).
 pub const BK_AREA_NEW: c_int = 1;
 pub const BK_AREA_CLOSE: c_int = 2;
@@ -469,6 +480,16 @@ unsafe extern "C" {
         -> c_int;
     pub fn BK_key_taken(ctx: *mut BKContext);
 
+    // accessibility (BUI_kit.h; the `a11y` feature)
+    pub fn BK_a11y_supported() -> c_int;
+    pub fn BK_a11y_wanted(node: *const BKNode) -> c_int;
+    #[cfg(feature = "a11y")]
+    pub fn BK_a11y_set_subtree(node: *mut BKNode, nodes: *const BKA11yNode, n: c_int) -> c_int;
+    #[cfg(feature = "a11y")]
+    pub fn BK_a11y_tree(ctx: *mut BKContext, title: *const c_char, r_nodes: *mut *const BKA11yNode,
+                        r_focus: *mut u64) -> c_int;
+    #[cfg(feature = "a11y")]
+    pub fn BK_a11y_action(ctx: *mut BKContext, req: *const BKA11yRequest) -> c_int;
     pub fn BK_key_release(ctx: *mut BKContext, keysym: *const c_char, mods: c_int) -> c_int;
     pub fn BK_button(ctx: *mut BKContext, x: c_int, y: c_int, button: c_int, release: c_int,
                      mods: c_int) -> c_int;

@@ -417,6 +417,10 @@ struct RawEvent {
     text: String,
     a: f64,
     b: f64,
+    /// `BK_EV_A11Y_ACTION`: the element a screen reader's request is for (a: the action, b and
+    /// text: its value); 0 for every other kind.
+    #[cfg_attr(not(feature = "a11y"), allow(dead_code))]
+    key: Key,
 }
 
 /// The application state (gpui's `App`).
@@ -1054,19 +1058,64 @@ impl App {
     }
 }
 
+/// Accessibility (the `a11y` feature): what a screen reader gets of a window, and its requests.
+#[cfg(feature = "a11y")]
+impl App {
+    /// The window's accessibility tree as a screen reader gets it: the window, the kit's widgets
+    /// and the page (see [`crate::a11y`]). The first call starts it, as a reader attaching does.
+    pub fn accessibility_tree(&mut self, window: WindowId) -> crate::a11y::AccessTree {
+        let mut tree = crate::a11y::AccessTree::default();
+        // a reader's first look: the page hears of it and gives its subtree, then the tree is read
+        for _ in 0..2 {
+            self.input(window, |ctx, _| {
+                let (mut nodes, mut focus) = (std::ptr::null(), 0u64);
+                // SAFETY: the live context; the nodes live until the next call, and are copied now.
+                unsafe {
+                    let n = sys::BK_a11y_tree(ctx, std::ptr::null(), &raw mut nodes, &raw mut focus);
+                    tree = crate::a11y::AccessTree { nodes: crate::a11y::snapshot(nodes, n), focus };
+                }
+            });
+        }
+        tree
+    }
+
+    /// Ask for `action` on node `id` of [`accessibility_tree`](Self::accessibility_tree), as a
+    /// screen reader does (`value`: `SetValue`'s text; `num`: its number). True when it was done.
+    pub fn accessibility_action(&mut self, window: WindowId, id: u64, action: crate::a11y::Action,
+                                value: Option<&str>, num: f64) -> bool {
+        let text = value.map(|v| CString::new(v.replace('\0', "")).unwrap_or_default());
+        let req = sys::BKA11yRequest { id, action: action as i32, num,
+                                       text: text.as_deref().map_or(std::ptr::null(), CStr::as_ptr) };
+        let mut done = false;
+        // SAFETY: the live context and a request valid for the call.
+        self.input(window, |ctx, _| done = unsafe { sys::BK_a11y_action(ctx, &raw const req) } != 0);
+        done
+    }
+}
+
 // ==========================================================================
 // Kit callbacks
 
 unsafe extern "C" fn on_emit(data: *mut c_void, node: *mut sys::BKNode, kind: c_int, ref_: *mut c_void,
                              a: c_double, b: c_double) {
     crate::screen::kit_event(node, kind, a, b); // areas made and freed: known at once
+    #[cfg(feature = "a11y")]
+    if kind == sys::BK_EV_A11Y_ACTION {
+        // SAFETY: the kit's request, valid for this call: copied now.
+        if let Some(r) = unsafe { crate::a11y::Request::from_kit(ref_.cast()) } {
+            queue_push(RawEvent { window: data as usize, node, kind, text: r.text.unwrap_or_default(),
+                                  a: f64::from(r.action as i32), b: r.num, key: r.key });
+            with_running_app(App::flush);
+        }
+        return;
+    }
     let text = if ref_.is_null() || kind < sys::BK_EV_PRESS {
         String::new()
     } else {
         // SAFETY: raw events carry a C string in `ref`.
         unsafe { CStr::from_ptr(ref_ as *const c_char) }.to_string_lossy().into_owned()
     };
-    queue_push(RawEvent { window: data as usize, node, kind, text, a, b });
+    queue_push(RawEvent { window: data as usize, node, kind, text, a, b, key: 0 });
     with_running_app(|app| app.flush());
 }
 
@@ -1288,6 +1337,9 @@ pub struct Window {
     sel_repaint: bool,
     /// Called when the selection changes, with the selected text if any.
     selection_hooks: Vec<Box<dyn FnMut(Option<&str>, &mut Window, &mut App)>>,
+    /// The page's accessibility subtree, kept while a screen reader reads the window (`a11y`).
+    #[cfg(feature = "a11y")]
+    a11y: Option<Box<crate::a11y::Accessibility>>,
 }
 
 impl Window {
@@ -1362,6 +1414,8 @@ impl Window {
                 same_frame: false,
                 sel_repaint: false,
                 selection_hooks: Vec::new(),
+                #[cfg(feature = "a11y")]
+                a11y: None,
             };
             if headless {
                 win.scale = sys::BK_scale().max(0.25);
@@ -2145,6 +2199,8 @@ impl Window {
         if let Some(t) = frame.title.clone() {
             self.set_window_title(&t);
         }
+        #[cfg(feature = "a11y")]
+        self.publish_a11y(&frame);
         self.frame = Some(frame);
         self.update_hover(app, false);
         drop(_rest);
@@ -2322,6 +2378,20 @@ impl Window {
     }
 
     fn dispatch(&mut self, ev: RawEvent, app: &mut App) {
+        #[cfg(feature = "a11y")]
+        match ev.kind {
+            sys::BK_EV_A11Y_TREE => {
+                // a screen reader reads the window: the page's subtree from now on, this frame's first
+                self.a11y.get_or_insert_default();
+                if let Some(frame) = self.frame.take() {
+                    self.publish_a11y(&frame);
+                    self.frame = Some(frame);
+                }
+                return;
+            }
+            sys::BK_EV_A11Y_ACTION => return self.a11y_request(&ev, app),
+            _ => {}
+        }
         if !self.canvases.contains(&ev.node) {
             if let Some(target) = self.screens.target(ev.node) {
                 self.screen_event(&target, &ev, app);
@@ -2421,11 +2491,8 @@ impl Window {
                 // a press that selected text is a selection, not a click (as in a browser)
                 let dragged = self.end_press(button);
                 if let (Some(target), MouseButton::Left, false) = (common, button, dragged) {
-                    self.toggle_details(target);
                     let down = MouseDownEvent { button, position: point(px(x), px(y)), modifiers, click_count: 1 };
-                    let e = ClickEvent { down, up };
-                    self.emit(app, target, &e, |l| l.click.iter().collect());
-                    self.run_control_area(target);
+                    self.click(app, target, &ClickEvent { down, up });
                 }
             }
             sys::BK_EV_WHEEL => {
@@ -2471,6 +2538,50 @@ impl Window {
             }
             _ => {}
         }
+    }
+
+    /// A click on element `target`: its `<details>` opens or closes, its listeners run, its window
+    /// control acts.
+    fn click(&mut self, app: &mut App, target: Key, e: &ClickEvent) {
+        self.toggle_details(target);
+        self.emit(app, target, e, |l| l.click.iter().collect());
+        self.run_control_area(target);
+    }
+
+    /// The page as the canvas's accessibility subtree, while a screen reader reads the window.
+    #[cfg(feature = "a11y")]
+    fn publish_a11y(&mut self, frame: &Frame) {
+        let Some(a) = self.a11y.as_deref_mut() else { return };
+        let (widgets, screens) = (&self.widgets, &self.screens);
+        let kit = |k: Key| widgets.nodes.get(&k).map(|w| w.node).or_else(|| screens.node(k));
+        let page = crate::a11y::Page { frame, state: &self.state, kit: &kit, scale: self.scale };
+        a.update(&page, self.canvas);
+    }
+
+    /// A screen reader's request for an element of the page, done as the input it stands for.
+    #[cfg(feature = "a11y")]
+    fn a11y_request(&mut self, ev: &RawEvent, app: &mut App) {
+        use crate::a11y::Action;
+        let Some(f) = &self.frame else { return };
+        let Some(&i) = f.by_key().get(&ev.key) else { return };
+        let b = f.nodes[i].bounds;
+        let at = point(px(b.origin.x + b.size.width / 2.0), px(b.origin.y + b.size.height / 2.0));
+        match Action::from_raw(ev.a as i32) {
+            Some(Action::Click) => {
+                let down = MouseDownEvent { button: MouseButton::Left, position: at, modifiers: Modifiers::default(),
+                                            click_count: 1 };
+                let up = MouseUpEvent { button: MouseButton::Left, position: at, modifiers: Modifiers::default() };
+                self.click(app, ev.key, &ClickEvent { down, up });
+            }
+            Some(Action::Focus) => {
+                let path: Vec<Key> = f.path_to(Some(i)).into_iter().map(|j| f.nodes[j].key).collect();
+                self.set_focus(&path);
+            }
+            Some(Action::Expand | Action::Collapse) => self.toggle_details(ev.key),
+            Some(Action::ScrollIntoView) => self.reveal = Some(Reveal { key: ev.key, at: 0.0, glide: None }),
+            _ => return,
+        }
+        self.dirty = true;
     }
 
     fn state_deepest(&self) -> Option<Key> {
@@ -2599,7 +2710,7 @@ impl Window {
             // a new screen: its layout reaches `change` listeners as every later one does (the
             // areas a JavaScript screen renders come from it)
             queue_push(RawEvent { window: self.id, node: made, kind: sys::BK_EV_CHANGE, text: String::new(),
-                                  a: 0.0, b: 0.0 });
+                                  a: 0.0, b: 0.0, key: 0 });
         }
     }
 

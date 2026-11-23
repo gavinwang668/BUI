@@ -4,6 +4,7 @@
 
 mod common;
 #[cfg(feature = "a11y")]
+mod a11y;
 mod animation;
 mod app_root;
 mod basic_css;

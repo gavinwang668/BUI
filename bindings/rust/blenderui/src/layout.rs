@@ -603,7 +603,7 @@ fn slot(id: NodeId) -> usize {
 }
 
 /// Children of box `i` in the arena `nodes`.
-fn kids(nodes: &[BoxNode], i: usize) -> impl Iterator<Item = usize> + '_ {
+pub(crate) fn kids(nodes: &[BoxNode], i: usize) -> impl Iterator<Item = usize> + '_ {
     let mut k = nodes[i].first;
     std::iter::from_fn(move || {
         (k != NONE).then(|| {

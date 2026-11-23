@@ -82,6 +82,8 @@ fn main() {
         // Android: the NDK's bitcode is not rustc's (the Rust side does its own LTO)
         .define("BUI_ANDROID_LTO", "OFF")
         .define("BUI_BUILD_ANDROID_APP", "OFF") // cargo builds only the kit; the shell links it
+        // `a11y`: this crate links bui-a11y (a dependency), so CMake doesn't build it with cargo
+        .define("BUI_A11Y_CARGO", "OFF")
         .define("BUI_IMGUI_BLENDER_WIDGETS", if std::env::var("CARGO_FEATURE_IMGUI_BLENDER_WIDGETS").is_ok() { "ON" } else { "OFF" })
         // Always optimized; on MSVC also the release C runtime Rust links.
         .profile("Release")
@@ -158,7 +160,7 @@ fn main() {
         println!("cargo:rustc-link-lib=m");
         println!("cargo:rustc-link-lib=pthread");
     }
-    for dir in ["kit", "gpu", "core", "CMakeLists.txt", "bindings/imgui"] {
+    for dir in ["kit", "gpu", "core", "CMakeLists.txt", "bindings/imgui", "a11y/include"] {
         println!("cargo:rerun-if-changed={}", root.join(dir).display());
     }
     println!("cargo:rerun-if-env-changed=BUI_SOURCE_DIR");

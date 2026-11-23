@@ -17,6 +17,7 @@
     {"name": "anim", "option": "BUI_ANIM", "default": true, "group": "ui", "markers": ["animate", "timeline", "fromTo", "quickTo", "stagger", "whileHover", "whileTap", "whileInView", "useSpring", "useMotionValue"], "doc": "Animation: GSAP-style and Motion-style tweens, timelines, springs and every easing (kit/intern/anim)"},
     {"name": "filebrowser", "option": "BUI_FILEBROWSER", "default": true, "group": "ui", "tags": ["filebrowser"], "markers": ["fileDialog", "file_dialog", "filebrowser"], "doc": "Blender's File Browser (the filebrowser node and BK_file_dialog)"},
     {"name": "imgui", "option": "BUI_BUILD_IMGUI", "default": true, "cargo_default": false, "group": "ui", "doc": "Dear ImGui on BUI (C++; the blenderui-imgui crate and Python's blenderui.imgui turn it on)"},
+    {"name": "a11y", "option": "BUI_A11Y", "default": false, "cargo_default": true, "group": "ui", "doc": "Screen readers: each window's accessibility tree, served to UI Automation (Windows) through AccessKit (the a11y/ crate; C builds run cargo for it)"},
     {"name": "lua", "option": "BUI_BUILD_LUA_BINDINGS", "default": false, "group": "ui", "doc": "Lua 5.4 host (bui-lua executable and bui.so/bui.dll loadable module)"}
   ],
   "runtimes": [
