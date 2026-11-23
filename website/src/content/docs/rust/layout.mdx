@@ -4,7 +4,7 @@ description: Block flow, wrapping text, flexbox, grid with named areas, tables, 
 section: Rust
 order: 55
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/layout.rs", "bindings/rust/blenderui/src/style.rs", "bindings/rust/blenderui/tests/headless.rs", "bindings/rust/blenderui/tests/modern_css.rs", "bindings/rust/blenderui/tests/effects.rs", "bindings/rust/blenderui/Cargo.toml"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/layout.rs", "bindings/rust/blenderui/src/style.rs", "bindings/rust/blenderui/tests/suite/headless.rs", "bindings/rust/blenderui/tests/suite/modern_css.rs", "bindings/rust/blenderui/tests/suite/effects.rs", "bindings/rust/blenderui/Cargo.toml"]
 ---
 
 Getting boxes to sit where you want is most of UI work. **BUI lays out your elements with the CSS layout rules**: block flow, flexbox, grid and tables, following the W3C specs. Under the hood it's [taffy](https://github.com/DioxusLabs/taffy), the Rust layout engine, with BUI's own line boxes and tables on top.

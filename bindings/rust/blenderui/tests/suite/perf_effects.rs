@@ -2,7 +2,7 @@
 //! long song's lyrics (300 lines of text): CSS transitions, animated scale on
 //! text, blur (still, moving, animated, a wide backdrop). Headless, so drawn
 //! by the software rasterizer. Run in release:
-//! `cargo test --release --test perf_effects -- --ignored --nocapture --test-threads=1`
+//! `cargo test --release --test suite perf_effects:: -- --ignored --nocapture --test-threads=1`
 
 use std::fmt::Write as _;
 use std::time::{Duration, Instant};

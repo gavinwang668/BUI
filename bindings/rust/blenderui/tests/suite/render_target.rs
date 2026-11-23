@@ -1,7 +1,7 @@
 //! Render targets: effects that draw into textures, with feedback. Needs a GPU device (Direct3D 11 or
 //! OpenGL 3.3); without one each test says so and passes.
 
-mod common;
+use crate::common;
 
 use blenderui::{GpuTarget, RenderTarget, ShaderEffect, TargetFormat};
 use common::gpu_lock;

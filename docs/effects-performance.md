@@ -13,8 +13,8 @@ per frame.
 
 ## What it costs now
 
-`cargo test --release --test perf_effects -- --ignored --nocapture --test-threads=1`
-(`bindings/rust/blenderui/tests/perf_effects.rs`): a 1280×800 headless window,
+`cargo test --release --test suite perf_effects:: -- --ignored --nocapture --test-threads=1`
+(`bindings/rust/blenderui/tests/suite/perf_effects.rs`): a 1280×800 headless window,
 300 rows of text, 60 frames of 16 ms each.
 
 | Scene | First frame | BUI per frame (mean / worst) |

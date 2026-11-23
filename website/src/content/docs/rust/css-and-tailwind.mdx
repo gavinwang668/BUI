@@ -4,7 +4,7 @@ description: Style Rust UIs with typed methods, compile-checked CSS, stylesheets
 section: Rust
 order: 40
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/style.rs", "bindings/rust/blenderui/src/styled.rs", "bindings/rust/blenderui/src/color.rs", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui-macros/src/lib.rs", "bindings/rust/blenderui-macros/src/rsx.rs", "bindings/rust/blenderui-tailwind/src/lib.rs", "bindings/rust/blenderui/tests/modern_css.rs", "bindings/rust/blenderui/tests/rsx.rs", "bindings/rust/blenderui/tests/parity.rs", "CHANGELOG.md"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/style.rs", "bindings/rust/blenderui/src/styled.rs", "bindings/rust/blenderui/src/color.rs", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui-macros/src/lib.rs", "bindings/rust/blenderui-macros/src/rsx.rs", "bindings/rust/blenderui-tailwind/src/lib.rs", "bindings/rust/blenderui/tests/suite/modern_css.rs", "bindings/rust/blenderui/tests/suite/rsx.rs", "bindings/rust/blenderui/tests/suite/parity.rs", "CHANGELOG.md"]
 ---
 
 Whatever way you like to style, it works here. Chain typed methods, write a CSS block, drop in a `<style>` sheet, or reach for Tailwind classes. **They all feed one cascade, the same way a browser's does**, so you can mix them without surprises. And when you make a typo, the compiler usually catches it before you run anything.
@@ -191,7 +191,7 @@ The suggestions come from `blenderui_tailwind::suggest`, so misspelled variants,
 
 ## Coverage
 
-These numbers come from the repository's coverage test (`cargo test --test parity -- --nocapture`):
+These numbers come from the repository's coverage test (`cargo test --test suite parity:: -- --nocapture`):
 
 | Area | Coverage |
 | --- | --- |
