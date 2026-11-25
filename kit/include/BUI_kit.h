@@ -756,8 +756,8 @@ typedef struct BKCustomClass {
    * reach the kit's shortcuts). */
   int (*event)(void *data, BKNode *node, const BKCustomEvent *e);
   void (*frame)(void *data, BKNode *node);
-  /* `rect` = node x, y, w, h in raster pixels; the raster's clip is already set */
-  void (*draw)(void *data, BKNode *node, BuiRaster *r, const int rect[4]);
+  /* `rect` = 4 ints: node x, y, w, h in raster pixels; the raster's clip is already set */
+  void (*draw)(void *data, BKNode *node, BuiRaster *r, const int *rect);
   void (*free)(void *data, BKNode *node); /* the node is being freed */
   int natural_w, natural_h;               /* natural size (0: 8 x 8 widget units) */
 } BKCustomClass;

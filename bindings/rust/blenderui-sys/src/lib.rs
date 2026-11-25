@@ -122,6 +122,9 @@ pub const BUI_GPU_API_DEFAULT: c_int = 0;
 pub const BUI_GPU_API_D3D11: c_int = 1;
 pub const BUI_GPU_API_D3D12: c_int = 2;
 pub const BUI_GPU_API_OPENGL: c_int = 3;
+/// Which GPU renders on a machine with two (`BuiGpuAdapter`, `BUI_gpu_set_adapter`; Windows).
+pub const BUI_GPU_ADAPTER_DEFAULT: c_int = 0;
+pub const BUI_GPU_ADAPTER_HIGH_PERFORMANCE: c_int = 1;
 pub const BK_EFFECT_MAX_FLOATS: usize = 256;
 pub const BK_EFFECT_MAX_SOURCE: usize = 65536;
 
@@ -591,6 +594,10 @@ unsafe extern "C" {
     pub fn BUI_gpu_api() -> c_int;
     /// The API a raster's device runs on (after any fall back); `BUI_GPU_API_DEFAULT` on the CPU.
     pub fn BUI_raster_gpu_api(r: *const BuiRaster) -> c_int;
+    /// The app's GPU choice for devices created from now on (`BUI_GPU_ADAPTER_*`).
+    pub fn BUI_gpu_set_adapter(adapter: c_int);
+    /// What new devices use: `BUI_GPU_ADAPTER`, else `BUI_gpu_set_adapter`, else the display's GPU.
+    pub fn BUI_gpu_adapter() -> c_int;
     pub fn BK_window_set_gpu(win: *mut BKWindow, on: c_int);
     pub fn BK_window_gpu(win: *mut BKWindow) -> c_int;
     pub fn BUI_text_add_font(family: *const c_char, flags: c_int, data: *const c_void,
