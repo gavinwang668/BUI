@@ -9,7 +9,7 @@
     BUI
   </h1>
 
-**Blender's user interface, as a library you can use from Python, Rust, JavaScript (React, Svelte, Vue), C, C++, D and Dear ImGui.**
+**Blender's user interface, as a library you can use from Python, Rust, JavaScript (React, Svelte, Vue), C, C++, Go, Lua, Ruby, D and Dear ImGui.**
 
 People spent decades building and optimizing Blender's GUI. It's battery and memory efficient, and super duper fast. We decoupled it, to give everyone a chance to build their own products with it. It supports multiple languages and frameworks, so you won't miss a beat!
 
@@ -19,7 +19,7 @@ People spent decades building and optimizing Blender's GUI. It's battery and mem
 [![@blender-ui/react](https://img.shields.io/npm/v/@blender-ui/react?label=%40blender-ui%2Freact)](https://www.npmjs.com/package/@blender-ui/react)
 [![Wheels](https://github.com/ppmpreetham/BUI/actions/workflows/wheels.yml/badge.svg)](https://github.com/ppmpreetham/BUI/actions/workflows/wheels.yml)
 [![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](#45-license-and-credits)
-![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
+![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS%20%7C%20Android%20%7C%20WebAssembly-lightgrey)
 [![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/MWXZfdyM3D)
 
 <table>
@@ -198,6 +198,7 @@ all get the same widgets and interactions:
 | **D** (the `bui` DUB package in `bindings/d`)                                                                                                            | Idiomatic D wrappers, the complete raw C API and an HTML/CSS/RSX authoring layer                                                                                                | Working               |
 | **Go**: the kit's nodes (`bindings/go/bui`), or [MyGo](https://github.com/egoist/mygo)-style views (`ui.Column(c).Children(...)`, `ui.Checkbox(c, &v, "Sync")`) | Blender's widgets from Go, with a headless `Tester` for `go test` | Working |
 | **Ruby** (the `blenderui` gem in `bindings/ruby`) | A C extension over the kit (no FFI): nodes, windows and menus, interfaces built from blocks, headless tests | Working |
+| **Lua** 5.4 (`luarocks install blenderui`, or the `bui-lua` host in `bindings/lua`) | The kit's nodes, widgets and windows as a native Lua module; the same scripts run as Android apps | Working |
 
 Not sure which to pick? If you already have code, use the row that matches it.
 If you're starting fresh in Python, the Blender components are the friendliest.
@@ -1984,17 +1985,19 @@ py bindings/python/bench/tk_canvas_bench.py 3000 one    # move one
 
 ## 36. Platforms
 
-|                              | Windows                          | Linux                                                    | macOS                  |
-| ---------------------------- | -------------------------------- | -------------------------------------------------------- | ---------------------- |
-| Window                       | Native (Win32)                   | Native (X11, and Wayland: experimental)                  | Native (Cocoa)         |
-| Python (`pip install`)       | Works: wheels                    | Works: wheels (native X11 host)                          | Works: wheels          |
-| Rust (`cargo add blenderui`) | Works                            | Works                                                    | Works                  |
-| JavaScript / React           | Works: prebuilt on npm           | Works: prebuilt on npm (glibc 2.35+); native X11 windows | Headless (see below)   |
-| C, C++, Dear ImGui           | Works                            | Works                                                    | Works                  |
-| Renderer                     | CPU raster, or GPU (Direct3D 11; 12 opt-in) | CPU raster, or GPU (OpenGL 3.3)                          | CPU raster             |
-| HiDPI                        | Per-monitor DPI                  | `Xft.dpi`                                                | Retina (backing scale) |
+|                              | Windows                          | Linux                                                    | macOS                  | Android                                   | Web (WebAssembly)                      |
+| ---------------------------- | -------------------------------- | -------------------------------------------------------- | ---------------------- | ----------------------------------------- | -------------------------------------- |
+| Window                       | Native (Win32)                   | Native (X11, and Wayland: experimental)                  | Native (Cocoa)         | Native (a `NativeActivity` surface)       | A `<canvas>` in the page               |
+| Python (`pip install`)       | Works: wheels                    | Works: wheels (native X11 host)                          | Works: wheels          | Not yet                                   | Not yet                                |
+| Rust (`cargo add blenderui`) | Works                            | Works                                                    | Works                  | Works (`android_main!`)                   | Works (`blenderui-web`, `wasm32-wasip1`) |
+| JavaScript / React           | Works: prebuilt on npm           | Works: prebuilt on npm (glibc 2.35+); native X11 windows | Headless (see below)   | Works: React, Vue, Svelte on QuickJS      | Not yet                                |
+| C, C++, Dear ImGui           | Works                            | Works                                                    | Works                  | Works                                     | Not yet (Rust apps only)               |
+| Lua, Ruby                    | Works                            | Works                                                    | Works                  | Lua works                                 | Not yet                                |
+| Go, D                        | Works                            | Works                                                    | Untested               | Not yet                                   | Not yet                                |
+| Renderer                     | CPU raster, or GPU (Direct3D 11; 12 opt-in) | CPU raster, or GPU (OpenGL 3.3)               | CPU raster             | CPU raster                                | CPU raster                             |
+| HiDPI                        | Per-monitor DPI                  | `Xft.dpi`                                                | Retina (backing scale) | Display density (a CSS pixel is a dp)     | `devicePixelRatio`                     |
 
-**Works** means it works and is tested. **Experimental** means it's written
+**Works** means it works and is tested; **Untested** means it should build but no one has run it there yet. **Experimental** means it's written
 but has had little hands-on testing on real hardware (today, the native Wayland host).
 
 **macOS.** The macOS window host is a port of Blender's Cocoa code
@@ -2020,6 +2023,8 @@ and on an NVIDIA GPU.
 | `blenderui` on PyPI                                                                       | Windows x86_64, Linux x86_64 (manylinux), macOS arm64 and x86_64 | CPython 3.11 to 3.14. No musllinux or 32-bit wheels.                                    |
 | `blenderui` on crates.io                                                                  | Any platform with CMake and a C compiler                         | Rust 1.88+. `blenderui-imgui` (Dear ImGui) is on crates.io too.                         |
 | `@blender-ui/native`, `@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue` on npm | Windows x64, Linux x64 (glibc 2.35+), macOS arm64 and x64        | Node.js 18+ (22.15+ for Svelte and Vue) or Bun. Elsewhere, build the addon from source. |
+| `blenderui` on LuaRocks                                                                   | Linux, macOS (Windows untested)                                  | Lua 5.4; builds the kit from the release tag (CMake and a C and C++20 compiler).        |
+| Go (`bindings/go`), Ruby (`bindings/ruby`), D (`bindings/d`)                              | Windows, Linux (macOS for Ruby)                                  | From this repository for now; they build the kit with CMake.                            |
 | C and C++ (CMake)                                                                         | Windows, Linux, macOS                                            | CMake 3.20+, a C11 and C++20 compiler.                                                  |
 
 ## 37. Environment variables
@@ -2408,6 +2413,14 @@ code available. If that doesn't fit your project, talk to a lawyer before you
 ship. (This is a summary, not legal advice.)
 </details>
 
+## Contributors
+
+Thank you to everyone who has reported an issue, tested a platform or sent a pull request.
+
+<a href="https://github.com/ppmpreetham/BUI/graphs/contributors">
+  <img src="https://contrib.rocks/image?repo=ppmpreetham/BUI" alt="BUI's contributors" />
+</a>
+
 ## Star History
 
 <a href="https://www.star-history.com/?repos=ppmpreetham%2Fbui&type=timeline&legend=bottom-right">
@@ -2428,7 +2441,8 @@ now. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and please follow the
 [SECURITY.md](SECURITY.md) describes.
 
 Releases go to PyPI (`blenderui`, wheels built by CI on a `v*` tag), crates.io
-(the eight Rust crates, in dependency order) and npm (`@blender-ui/native`, `@blender-ui/react`). The steps are
+(the nine Rust crates, in dependency order), npm (`@blender-ui/native` and its platform packages,
+`@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue`) and LuaRocks (`blenderui`). The steps are
 in [docs/publishing.md](docs/publishing.md).
 
 ## 45. License and credits
