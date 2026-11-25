@@ -104,6 +104,11 @@ const app = await mount(document.querySelector('canvas'), './app.wasm')
 // app.stop()
 ```
 
+An app can export more functions of its own next to `export!`'s and call them through `app.exports`.
+`putString(exports, text)` writes a string into the module's memory with `bui_alloc` and returns
+`[ptr, len]` for such a function, which frees it as `bui_key` does. `addons/bui-charts/web` (the live
+charts on the website's `/charts` pages) is an example: `bui_charts_show(ptr, len, example)`.
+
 ## Size
 
 The counter in `examples/wasm/counter` is a 4.2 MB module (1.6 MB gzipped), release build with

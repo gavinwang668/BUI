@@ -6,7 +6,7 @@ description = "Charts for BUI's Rust binding (blenderui): time series, gauges, h
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-blenderui = { path = "../../bindings/rust/blenderui" }
+blenderui = { path = "../../bindings/rust/blenderui", default-features = false }
 bui-charts-macros = { path = "macros" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -14,6 +14,10 @@ anyhow = "1"
 nucleo-matcher = "0.3"
 regex = "1"
 web-time = "1"
+
+[features]
+# blenderui's own defaults; a WebAssembly build (web/) turns them off and picks the kit features it can build
+default = ["blenderui/default"]
 
 [dev-dependencies]
 bui-panels = { path = "../bui-panels" }

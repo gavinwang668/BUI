@@ -326,6 +326,13 @@ graph's zoom buttons, theme switching (`tests/charts.rs`), and every gallery exa
 headless (`tests/gallery.rs`). A chart's tooltip card has the id `chart-tooltip`, legend entries
 `legend-<index>`.
 
+`web/` is the gallery in a web page, one example at a time: the live render of the website's chart
+pages. It takes the gallery's modules by `#[path]` and is built with
+`python platform/wasm/build.py addons/bui-charts/web` (see `docs/wasm.md`). Besides blenderui-web's
+exports it has `bui_charts_catalog`, `bui_charts_show`, `bui_charts_set_dark` and `bui_charts_reseed`
+(`web/src/lib.rs`). It turns off blenderui's default features, which this crate and bui-panels pass
+through as their own `default` feature.
+
 ## Coming from zopra-charts
 
 Change the imports (`zopra_charts` → `bui_charts`, `gpui_kit` / `zopra` → `blenderui::prelude`) and

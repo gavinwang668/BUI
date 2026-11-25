@@ -1,0 +1,20 @@
+---
+import ChartsLayout from "../../layouts/ChartsLayout.astro";
+import ChartPage, { loadChart, staticPaths, tocItems } from "../../components/chart-docs/chart-page";
+import { Examples, LiveStage } from "../../components/chart-docs/islands";
+import { MediaGrid } from "../../components/chart-docs/media";
+import { Toc } from "../../components/chart-docs/toc";
+
+export const getStaticPaths = staticPaths;
+
+const { meta, doc, generated, title, description, image } = await loadChart(Astro.params.slug);
+---
+
+<ChartsLayout title={title} description={description} image={`charts/images/${meta.slug}.webp`}>
+  <ChartPage meta={meta} doc={doc} generated={generated}>
+    <LiveStage slot="stage" client:load name={meta.name} image={image} items={generated.examples.map(({ title, description }) => ({ title, description }))} />
+    <Examples slot="examples" client:visible items={generated.examples} />
+    {doc && doc.media.length > 0 && <MediaGrid slot="media" client:visible items={doc.media} />}
+    <Toc slot="toc" client:idle items={tocItems(doc)} />
+  </ChartPage>
+</ChartsLayout>

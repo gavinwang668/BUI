@@ -56,6 +56,7 @@ export const languageIds = languages.map((l) => l.id) as unknown as [LanguageId,
 export const topLinks = [
   { label: "Docs", href: "docs/start/introduction/", match: {} },
   { label: "Tutorials", href: "docs/tutorials/first-app-python/", match: { sections: ["Tutorials"] } },
+  { label: "Charts", href: "charts/", match: {} },
   { label: "Benchmarks", href: "docs/performance/benchmarks/", match: { sections: ["Performance"] } },
   { label: "Roadmap", href: "docs/project/roadmap/", match: { pages: ["project/roadmap"] } },
 ] as const;
