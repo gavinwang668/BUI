@@ -1,0 +1,802 @@
+[
+  {
+    "slug": "xy-chart",
+    "name": "XY Chart",
+    "tag": "XYChart",
+    "group": "base",
+    "dir": "xy-chart",
+    "family": "Core charts",
+    "blurb": "numeric x against numeric y: scatter plots, bubbles, paths",
+    "examples": 17
+  },
+  {
+    "slug": "trend",
+    "name": "Trend",
+    "tag": "Trend",
+    "group": "base",
+    "dir": "trend",
+    "family": "Core charts",
+    "blurb": "series against a numeric x that only goes up: speed, distance, load",
+    "examples": 18
+  },
+  {
+    "slug": "candlestick",
+    "name": "Candlestick",
+    "tag": "Candlestick",
+    "group": "base",
+    "dir": "candlestick",
+    "family": "Core charts",
+    "blurb": "open, high, low and close per period, with volume",
+    "examples": 12
+  },
+  {
+    "slug": "heatmap",
+    "name": "Heatmap",
+    "tag": "Heatmap",
+    "group": "base",
+    "dir": "heatmap",
+    "family": "Core charts",
+    "blurb": "how values are spread over time and value: latency, sizes, day × hour grids",
+    "examples": 14
+  },
+  {
+    "slug": "state-timeline",
+    "name": "State Timeline",
+    "tag": "StateTimeline",
+    "group": "base",
+    "dir": "state-timeline",
+    "family": "Core charts",
+    "blurb": "which state each thing was in over time: up/down, modes, levels",
+    "examples": 14
+  },
+  {
+    "slug": "flame-graph",
+    "name": "Flame Graph",
+    "tag": "FlameGraph",
+    "group": "base",
+    "dir": "flame-graph",
+    "family": "Core charts",
+    "blurb": "CPU, memory and time profiles, and before/after comparisons",
+    "examples": 16
+  },
+  {
+    "slug": "bar-gauge",
+    "name": "Bar Gauge",
+    "tag": "BarGauge",
+    "group": "base",
+    "dir": "bar-gauge",
+    "family": "Core charts",
+    "blurb": "how full each value is between a minimum and a maximum",
+    "examples": 14
+  },
+  {
+    "slug": "time-series",
+    "name": "Time Series",
+    "tag": "TimeSeries",
+    "group": "derived",
+    "dir": "time-series",
+    "family": "Core charts",
+    "blurb": "values over time, with annotations, exemplars and time compare",
+    "examples": 14
+  },
+  {
+    "slug": "histogram",
+    "name": "Histogram",
+    "tag": "Histogram",
+    "group": "derived",
+    "dir": "histogram",
+    "family": "Core charts",
+    "blurb": "how values are spread: counts per bucket",
+    "examples": 13
+  },
+  {
+    "slug": "status-history",
+    "name": "Status History",
+    "tag": "StatusHistory",
+    "group": "derived",
+    "dir": "status-history",
+    "family": "Core charts",
+    "blurb": "a grid of samples: checks, jobs or totals, one cell each",
+    "examples": 12
+  },
+  {
+    "slug": "stat",
+    "name": "Stat",
+    "tag": "Stat",
+    "group": "derived",
+    "dir": "stat",
+    "family": "Core charts",
+    "blurb": "one big number per value, with its history and change",
+    "examples": 14
+  },
+  {
+    "slug": "gauge",
+    "name": "Gauge",
+    "tag": "Gauge",
+    "group": "derived",
+    "dir": "gauge",
+    "family": "Core charts",
+    "blurb": "a value on an arc or ring against its range and thresholds",
+    "examples": 13
+  },
+  {
+    "slug": "honeycomb",
+    "name": "HoneyComb",
+    "tag": "HoneyComb",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "traces",
+    "name": "Traces",
+    "tag": "Traces",
+    "group": "derived",
+    "dir": "traces",
+    "family": "Core charts",
+    "blurb": "one distributed trace: spans across services on a timeline",
+    "examples": 14
+  },
+  {
+    "slug": "node-graph",
+    "name": "Node Graph",
+    "tag": "NodeGraph",
+    "group": "derived",
+    "dir": "node-graph",
+    "family": "Core charts",
+    "blurb": "services and the calls between them, with health arcs",
+    "examples": 13
+  },
+  {
+    "slug": "heikin-ashi",
+    "name": "Heikin-Ashi",
+    "tag": "HeikinAshi",
+    "group": "derived",
+    "dir": "finance",
+    "family": "Finance charts",
+    "blurb": "Price trends without the noise.",
+    "examples": 10
+  },
+  {
+    "slug": "renko",
+    "name": "Renko",
+    "tag": "Renko",
+    "group": "derived",
+    "dir": "finance",
+    "family": "Finance charts",
+    "blurb": "Price trends without the noise.",
+    "examples": 10
+  },
+  {
+    "slug": "kagi",
+    "name": "Kagi",
+    "tag": "Kagi",
+    "group": "derived",
+    "dir": "finance",
+    "family": "Finance charts",
+    "blurb": "Price trends without the noise.",
+    "examples": 10
+  },
+  {
+    "slug": "point-figure",
+    "name": "Point & Figure",
+    "tag": "PointFigure",
+    "group": "derived",
+    "dir": "finance",
+    "family": "Finance charts",
+    "blurb": "Price trends without the noise.",
+    "examples": 10
+  },
+  {
+    "slug": "pareto",
+    "name": "Pareto",
+    "tag": "Pareto",
+    "group": "derived",
+    "dir": "quality",
+    "family": "Quality charts",
+    "blurb": "Causes, process stability, method agreement.",
+    "examples": 10
+  },
+  {
+    "slug": "ishikawa",
+    "name": "Ishikawa",
+    "tag": "Ishikawa",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "control-chart",
+    "name": "Control Chart",
+    "tag": "ControlChart",
+    "group": "derived",
+    "dir": "quality",
+    "family": "Quality charts",
+    "blurb": "Causes, process stability, method agreement.",
+    "examples": 10
+  },
+  {
+    "slug": "bland-altman",
+    "name": "Bland-Altman",
+    "tag": "BlandAltman",
+    "group": "derived",
+    "dir": "quality",
+    "family": "Quality charts",
+    "blurb": "Causes, process stability, method agreement.",
+    "examples": 10
+  },
+  {
+    "slug": "lollipop",
+    "name": "Lollipop",
+    "tag": "Lollipop",
+    "group": "derived",
+    "dir": "category",
+    "family": "Category charts",
+    "blurb": "One bar, dot or line per named item.",
+    "examples": 10
+  },
+  {
+    "slug": "dumbbell",
+    "name": "Dumbbell",
+    "tag": "Dumbbell",
+    "group": "derived",
+    "dir": "category",
+    "family": "Category charts",
+    "blurb": "One bar, dot or line per named item.",
+    "examples": 10
+  },
+  {
+    "slug": "slope",
+    "name": "Slope",
+    "tag": "Slope",
+    "group": "derived",
+    "dir": "category",
+    "family": "Category charts",
+    "blurb": "One bar, dot or line per named item.",
+    "examples": 10
+  },
+  {
+    "slug": "bump",
+    "name": "Bump",
+    "tag": "Bump",
+    "group": "derived",
+    "dir": "category",
+    "family": "Category charts",
+    "blurb": "One bar, dot or line per named item.",
+    "examples": 10
+  },
+  {
+    "slug": "back-to-back",
+    "name": "Back-to-Back",
+    "tag": "BackToBack",
+    "group": "derived",
+    "dir": "category",
+    "family": "Category charts",
+    "blurb": "One bar, dot or line per named item.",
+    "examples": 10
+  },
+  {
+    "slug": "waterfall",
+    "name": "Waterfall",
+    "tag": "Waterfall",
+    "group": "derived",
+    "dir": "category",
+    "family": "Category charts",
+    "blurb": "One bar, dot or line per named item.",
+    "examples": 10
+  },
+  {
+    "slug": "bullet",
+    "name": "Bullet",
+    "tag": "Bullet",
+    "group": "derived",
+    "dir": "category",
+    "family": "Category charts",
+    "blurb": "One bar, dot or line per named item.",
+    "examples": 10
+  },
+  {
+    "slug": "funnel",
+    "name": "Funnel",
+    "tag": "Funnel",
+    "group": "derived",
+    "dir": "category",
+    "family": "Category charts",
+    "blurb": "One bar, dot or line per named item.",
+    "examples": 10
+  },
+  {
+    "slug": "mekko",
+    "name": "Mekko",
+    "tag": "Mekko",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "forest",
+    "name": "Forest",
+    "tag": "Forest",
+    "group": "derived",
+    "dir": "category",
+    "family": "Category charts",
+    "blurb": "One bar, dot or line per named item.",
+    "examples": 10
+  },
+  {
+    "slug": "barcode",
+    "name": "Barcode",
+    "tag": "Barcode",
+    "group": "derived",
+    "dir": "distribution",
+    "family": "Distribution charts",
+    "blurb": "Every value, distribution shapes, dense series.",
+    "examples": 10
+  },
+  {
+    "slug": "beeswarm",
+    "name": "Beeswarm",
+    "tag": "Beeswarm",
+    "group": "derived",
+    "dir": "distribution",
+    "family": "Distribution charts",
+    "blurb": "Every value, distribution shapes, dense series.",
+    "examples": 10
+  },
+  {
+    "slug": "ridgeline",
+    "name": "Ridgeline",
+    "tag": "Ridgeline",
+    "group": "derived",
+    "dir": "distribution",
+    "family": "Distribution charts",
+    "blurb": "Every value, distribution shapes, dense series.",
+    "examples": 10
+  },
+  {
+    "slug": "horizon",
+    "name": "Horizon",
+    "tag": "Horizon",
+    "group": "derived",
+    "dir": "distribution",
+    "family": "Distribution charts",
+    "blurb": "Every value, distribution shapes, dense series.",
+    "examples": 10
+  },
+  {
+    "slug": "spectrogram",
+    "name": "Spectrogram",
+    "tag": "Spectrogram",
+    "group": "derived",
+    "dir": "matrix",
+    "family": "Matrix charts",
+    "blurb": "Frequencies over time, weight matrices, shares of a whole.",
+    "examples": 10
+  },
+  {
+    "slug": "attention-map",
+    "name": "Attention Map",
+    "tag": "AttentionMap",
+    "group": "derived",
+    "dir": "matrix",
+    "family": "Matrix charts",
+    "blurb": "Frequencies over time, weight matrices, shares of a whole.",
+    "examples": 10
+  },
+  {
+    "slug": "waffle",
+    "name": "Waffle",
+    "tag": "Waffle",
+    "group": "derived",
+    "dir": "matrix",
+    "family": "Matrix charts",
+    "blurb": "Frequencies over time, weight matrices, shares of a whole.",
+    "examples": 10
+  },
+  {
+    "slug": "venn",
+    "name": "Venn",
+    "tag": "Venn",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "upset",
+    "name": "UpSet",
+    "tag": "UpSet",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "warped-waffle",
+    "name": "Warped Waffle",
+    "tag": "WarpedWaffle",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "word-cloud",
+    "name": "Word Cloud",
+    "tag": "WordCloud",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "gantt",
+    "name": "Gantt",
+    "tag": "Gantt",
+    "group": "derived",
+    "dir": "flow",
+    "family": "Flow, tree and profile charts",
+    "blurb": "Plans, flows, funnels, trees, clusters and multi-measure profiles.",
+    "examples": 10
+  },
+  {
+    "slug": "sankey",
+    "name": "Sankey",
+    "tag": "Sankey",
+    "group": "derived",
+    "dir": "flow",
+    "family": "Flow, tree and profile charts",
+    "blurb": "Plans, flows, funnels, trees, clusters and multi-measure profiles.",
+    "examples": 10
+  },
+  {
+    "slug": "sankey-matrix",
+    "name": "Sankey Matrix",
+    "tag": "SankeyMatrix",
+    "group": "derived",
+    "dir": "hybrid",
+    "family": "Hybrid charts",
+    "blurb": "Flows between two sets with exact values, and grouped networks sized by value.",
+    "examples": 11
+  },
+  {
+    "slug": "treemap-force",
+    "name": "Treemap Force",
+    "tag": "TreemapForce",
+    "group": "derived",
+    "dir": "hybrid",
+    "family": "Hybrid charts",
+    "blurb": "Flows between two sets with exact values, and grouped networks sized by value.",
+    "examples": 12
+  },
+  {
+    "slug": "chord-diagram",
+    "name": "Chord Diagram",
+    "tag": "ChordDiagram",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "circos",
+    "name": "Circos",
+    "tag": "Circos",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "arc-diagram",
+    "name": "Arc Diagram",
+    "tag": "ArcDiagram",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "alluvial",
+    "name": "Alluvial",
+    "tag": "Alluvial",
+    "group": "derived",
+    "dir": "flow",
+    "family": "Flow, tree and profile charts",
+    "blurb": "Plans, flows, funnels, trees, clusters and multi-measure profiles.",
+    "examples": 10
+  },
+  {
+    "slug": "sankey-funnel",
+    "name": "Sankey Funnel",
+    "tag": "SankeyFunnel",
+    "group": "derived",
+    "dir": "flow",
+    "family": "Flow, tree and profile charts",
+    "blurb": "Plans, flows, funnels, trees, clusters and multi-measure profiles.",
+    "examples": 10
+  },
+  {
+    "slug": "dendrogram",
+    "name": "Dendrogram",
+    "tag": "Dendrogram",
+    "group": "derived",
+    "dir": "flow",
+    "family": "Flow, tree and profile charts",
+    "blurb": "Plans, flows, funnels, trees, clusters and multi-measure profiles.",
+    "examples": 10
+  },
+  {
+    "slug": "icicle",
+    "name": "Icicle",
+    "tag": "Icicle",
+    "group": "derived",
+    "dir": "flow",
+    "family": "Flow, tree and profile charts",
+    "blurb": "Plans, flows, funnels, trees, clusters and multi-measure profiles.",
+    "examples": 10
+  },
+  {
+    "slug": "sunburst",
+    "name": "Sunburst",
+    "tag": "Sunburst",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "spider",
+    "name": "Spider",
+    "tag": "Spider",
+    "group": "derived",
+    "dir": "flow",
+    "family": "Flow, tree and profile charts",
+    "blurb": "Plans, flows, funnels, trees, clusters and multi-measure profiles.",
+    "examples": 10
+  },
+  {
+    "slug": "nightingale-rose",
+    "name": "Nightingale Rose",
+    "tag": "NightingaleRose",
+    "group": "derived",
+    "dir": "flow",
+    "family": "Flow, tree and profile charts",
+    "blurb": "Plans, flows, funnels, trees, clusters and multi-measure profiles.",
+    "examples": 10
+  },
+  {
+    "slug": "parallel-coordinates",
+    "name": "Parallel Coordinates",
+    "tag": "ParallelCoordinates",
+    "group": "derived",
+    "dir": "flow",
+    "family": "Flow, tree and profile charts",
+    "blurb": "Plans, flows, funnels, trees, clusters and multi-measure profiles.",
+    "examples": 10
+  },
+  {
+    "slug": "oscilloscope",
+    "name": "Oscilloscope",
+    "tag": "Oscilloscope",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 11
+  },
+  {
+    "slug": "efficient-frontier",
+    "name": "Efficient Frontier",
+    "tag": "EfficientFrontier",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 11
+  },
+  {
+    "slug": "phase-portrait",
+    "name": "Phase Portrait",
+    "tag": "PhasePortrait",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 10
+  },
+  {
+    "slug": "poincare-map",
+    "name": "Poincaré Map",
+    "tag": "PoincareMap",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 10
+  },
+  {
+    "slug": "bifurcation",
+    "name": "Bifurcation",
+    "tag": "Bifurcation",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 10
+  },
+  {
+    "slug": "h-r-diagram",
+    "name": "H-R Diagram",
+    "tag": "HrDiagram",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 11
+  },
+  {
+    "slug": "ramachandran",
+    "name": "Ramachandran",
+    "tag": "Ramachandran",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 10
+  },
+  {
+    "slug": "harker",
+    "name": "Harker",
+    "tag": "Harker",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 10
+  },
+  {
+    "slug": "root-locus",
+    "name": "Root Locus",
+    "tag": "RootLocus",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 12
+  },
+  {
+    "slug": "radiation-pattern",
+    "name": "Radiation Pattern",
+    "tag": "RadiationPattern",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 10
+  },
+  {
+    "slug": "quiver",
+    "name": "Quiver",
+    "tag": "Quiver",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 11
+  },
+  {
+    "slug": "hodograph",
+    "name": "Hodograph",
+    "tag": "Hodograph",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 10
+  },
+  {
+    "slug": "smith-chart",
+    "name": "Smith Chart",
+    "tag": "SmithChart",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 10
+  },
+  {
+    "slug": "eye-diagram",
+    "name": "Eye Diagram",
+    "tag": "EyeDiagram",
+    "group": "derived",
+    "dir": "science",
+    "family": "Science charts",
+    "blurb": "Electronics, finance, dynamics, astronomy, biochemistry, geology, control, antennas, fields, weather, RF, high-speed links.",
+    "examples": 10
+  },
+  {
+    "slug": "sequence-logo",
+    "name": "Sequence Logo",
+    "tag": "SequenceLogo",
+    "group": "derived",
+    "dir": "diagram",
+    "family": "Diagram charts",
+    "blurb": "Market maps, status grids, hierarchies, flows, links, root causes, set overlaps, genomes, alignments, text.",
+    "examples": 10
+  },
+  {
+    "slug": "ternary",
+    "name": "Ternary",
+    "tag": "Ternary",
+    "group": "derived",
+    "dir": "earth",
+    "family": "Earth and lab science charts",
+    "blurb": "Three-part mixtures, water chemistry, atmospheric soundings, maps.",
+    "examples": 10
+  },
+  {
+    "slug": "ternary-contour",
+    "name": "Ternary Contour",
+    "tag": "TernaryContour",
+    "group": "derived",
+    "dir": "earth",
+    "family": "Earth and lab science charts",
+    "blurb": "Three-part mixtures, water chemistry, atmospheric soundings, maps.",
+    "examples": 10
+  },
+  {
+    "slug": "piper",
+    "name": "Piper",
+    "tag": "Piper",
+    "group": "derived",
+    "dir": "earth",
+    "family": "Earth and lab science charts",
+    "blurb": "Three-part mixtures, water chemistry, atmospheric soundings, maps.",
+    "examples": 10
+  },
+  {
+    "slug": "stuve",
+    "name": "Stüve",
+    "tag": "Stuve",
+    "group": "derived",
+    "dir": "earth",
+    "family": "Earth and lab science charts",
+    "blurb": "Three-part mixtures, water chemistry, atmospheric soundings, maps.",
+    "examples": 10
+  },
+  {
+    "slug": "tephigram",
+    "name": "Tephigram",
+    "tag": "Tephigram",
+    "group": "derived",
+    "dir": "earth",
+    "family": "Earth and lab science charts",
+    "blurb": "Three-part mixtures, water chemistry, atmospheric soundings, maps.",
+    "examples": 10
+  },
+  {
+    "slug": "choropleth",
+    "name": "Choropleth",
+    "tag": "Choropleth",
+    "group": "derived",
+    "dir": "earth",
+    "family": "Earth and lab science charts",
+    "blurb": "Three-part mixtures, water chemistry, atmospheric soundings, maps.",
+    "examples": 10
+  }
+]

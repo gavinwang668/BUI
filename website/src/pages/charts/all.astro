@@ -1,0 +1,13 @@
+---
+import ChartsLayout from "../../layouts/ChartsLayout.astro";
+import AllPage, { allGridProps, metadata } from "../../components/chart-docs/all-page";
+import { AllCharts } from "../../components/chart-docs/islands";
+
+const grid = await allGridProps();
+---
+
+<ChartsLayout title={metadata.title} description={metadata.description}>
+  <AllPage>
+    <AllCharts slot="grid" client:load {...grid} />
+  </AllPage>
+</ChartsLayout>

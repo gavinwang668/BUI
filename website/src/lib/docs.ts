@@ -3,15 +3,11 @@ import { statSync } from "node:fs";
 import { getCollection, type CollectionEntry } from "astro:content";
 import { sections, type SectionLabel } from "../config/nav";
 import { site } from "../config/site";
+import { href } from "./href";
 
 export type Doc = CollectionEntry<"docs">;
 
-/** Prefix a site-relative path with the configured base (works under a sub-path deploy). */
-export function href(path = ""): string {
-  const base = import.meta.env.BASE_URL.replace(/\/$/, "");
-  if (/^(https?:|mailto:|#)/.test(path)) return path;
-  return `${base}/${path.replace(/^\//, "")}`;
-}
+export { href } from "./href";
 
 export const docHref = (doc: Doc) => href(`docs/${doc.id}/`);
 
