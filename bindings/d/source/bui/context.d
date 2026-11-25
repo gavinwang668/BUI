@@ -12,10 +12,12 @@ module bui.context;
 
 import core.stdc.stdlib : cfree = free, malloc;
 import core.stdc.string : memcpy;
+import core.memory : GC;
 
 import bui.errors : BuiException;
 import bui.gpu : BuiRaster;
 import bui.internal.callback : CallbackBox;
+import bui.internal.collected : deferFree, freeCollected;
 import bui.internal.refs : ensureRefHooks;
 import bui.internal.util : cslice, cstr;
 import bui.kit;
@@ -50,6 +52,9 @@ struct ImeState {
 }
 
 /// One instance of a node tree.
+/// What a collected context calls back: nothing (every callback NULL, which the kit checks).
+private __gshared BKHost noHost;
+
 final class Context {
     /// The C handle, for calls into the raw `bui.kit` API.
     BKContext* handle;
@@ -71,6 +76,7 @@ final class Context {
             throw new BuiException("Context", "no root node");
         }
         ensureRefHooks();
+        freeCollected();
         rootNode = root;
         handle = BK_context_new(root.handle);
         if (handle is null) {
@@ -88,7 +94,17 @@ final class Context {
     }
 
     ~this() {
-        windows = 0; // only reachable at teardown; a finalizer cannot throw
+        if (GC.inFinalizer) {
+            // the root and the host handlers may be gone already (bui.internal.collected): the
+            // kit calls no D code for this context any more, and frees it at a safe point
+            if (handle !is null) {
+                BK_context_set_host(handle, &noHost);
+                deferFree(handle, true);
+                handle = null;
+            }
+            return;
+        }
+        windows = 0;
         free();
     }
 
@@ -169,6 +185,7 @@ final class Context {
         }
         auto c = ctx();
         check();
+        freeCollected();
         const n = BK_render(c, raster, width, height, full ? 1 : 0);
         check();
         return n;
@@ -252,6 +269,34 @@ final class Context {
         auto c = ctx();
         check();
         const changed = BK_scroll(c, x, y, dx, dy, mods) != 0;
+        check();
+        return changed;
+    }
+
+    /// A touch screen contact: `phase` is `BK_TOUCH_DOWN` / `MOVE` / `UP` / `CANCEL`, `timeMs`
+    /// the event's own time on any monotonic clock (<= 0: now).
+    bool touch(int id, int phase, float x, float y, double timeMs = 0, int mods = 0) {
+        auto c = ctx();
+        check();
+        const changed = BK_touch(c, id, phase, x, y, timeMs, mods) != 0;
+        check();
+        return changed;
+    }
+
+    /// A trackpad pinch about `x`, `y`: `delta` is the scale change (0.1 = 10% larger).
+    bool magnify(int x, int y, float delta, int mods = 0) {
+        auto c = ctx();
+        check();
+        const changed = BK_magnify(c, x, y, delta, mods) != 0;
+        check();
+        return changed;
+    }
+
+    /// A trackpad turn about `x`, `y`, in degrees (> 0 counter-clockwise).
+    bool rotate(int x, int y, float degrees, int mods = 0) {
+        auto c = ctx();
+        check();
+        const changed = BK_rotate(c, x, y, degrees, mods) != 0;
         check();
         return changed;
     }

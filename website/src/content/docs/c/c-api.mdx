@@ -5,7 +5,7 @@ description: Use BUI's runtime directly from C. Nodes, properties, layout, the c
 section: C & C++
 order: 10
 languages: ["c", "cpp"]
-sources: ["docs/c-api.md", "kit/include/BUI_kit.h", "gpu/include/GPU_raster.h", "examples/kit_hello.c", "examples/CMakeLists.txt", "kit/intern/kit_core.c", "CMakeLists.txt"]
+sources: ["docs/c-api.md", "kit/include/BUI_kit.h", "gpu/include/GPU_raster.h", "examples/kit_hello.c", "examples/CMakeLists.txt", "kit/intern/kit_core.c", "kit/intern/kit_touch.c", "CMakeLists.txt"]
 ---
 
 **The kit is BUI's runtime, written in C, and `BUI_kit.h` is its whole public API.** Use it directly and you get Blender's widgets, layout, input handling and damage rendering with nothing in between: no interpreter, no garbage collector, one static library.
@@ -186,7 +186,9 @@ The host is a struct of optional callbacks:
 
 A `BKWindow` fills in all of them except `emit`, which you keep. If you host the kit yourself, the [embedding page](../embedding/) shows how.
 
-**Input goes in** through `BK_press`, `BK_release`, `BK_motion`, `BK_cancel` (the host lost the pointer mid-press: a drag is cancelled as Escape cancels it and the press ends with no click), `BK_wheel`, `BK_scroll` (precise deltas), `BK_key`, `BK_key_release`, `BK_button` and `BK_context_menu`. Each returns non-zero when something changed.
+**Input goes in** through `BK_press`, `BK_release`, `BK_motion`, `BK_cancel` (the host lost the pointer mid-press: the pressed widget's interaction is cancelled as Escape cancels it, moved or not, the press ends with no click, and every finger on the screen is cancelled too), `BK_wheel`, `BK_scroll` (precise deltas), `BK_scroll_px` (exact pixels), `BK_key`, `BK_key_release`, `BK_button` and `BK_context_menu`. Each returns non-zero when something changed.
+
+**Touch screens and trackpads** go in through `BK_touch(ctx, id, BK_TOUCH_DOWN | MOVE | UP | CANCEL, x, y, time_ms, mods)`, one call per finger, and `BK_magnify` / `BK_rotate` for a trackpad's pinch and turn. The kit makes taps, scrolls, flings, long presses and two-finger gestures of them, the same on every platform, and marks what it makes with `BK_FROM_TOUCH` in the mods. The window hosts do this for you; [Touch and gestures](../../concepts/touch/) has the model and a host example.
 
 **Input methods (IME)** follow Blender's model (`GHOST_ImeWin32`, `wmIMEData`). The IME is off until a text field or text area is being edited, so shortcuts keep working with a CJK keyboard. A window host forwards the platform's composition events with `BK_ime_event(ctx, BK_IME_COMPOSITION_START | BK_IME_COMPOSITION | BK_IME_COMPOSITION_END, &event)`, where `BKImeEvent` carries the committed `result`, the `composite` text still being composed, the IME `cursor_pos` and the `sel_start`/`sel_end` clause being converted. After each render it calls `BK_ime_state(ctx, &state)`, which returns non-zero only when the IME must be started, ended or moved (`state.enabled`, `state.restart`, `state.x`, `state.y` is where the candidate window goes). The kit draws the composition underlined at the caret and inserts the result like typed text. The Windows window host does all of this; an embedder with its own window can use the same two calls. Number fields and password fields take no IME.
 
@@ -204,7 +206,7 @@ Your `emit` callback gets `(data, node, kind, ref, a, b)`. The `kind`s you'll us
 | `BK_EV_SUBMIT` | A text field was confirmed with <Kbd>Enter</Kbd> |
 | `BK_EV_RENAME`, `BK_EV_ACTIVATE`, `BK_EV_TOGGLE`, `BK_EV_BROWSE` | List and tree renames, double-clicks, toggle columns, path-field browse buttons |
 
-Set a node's `"events"` property to also get raw input: `PRESS`, `RELEASE`, `DOUBLE`, `MOTION`, `ENTER`, `LEAVE`, `KEY`, `KEYRELEASE`, `WHEEL` and `CONFIGURE`. Scroll views add `VIEW` (with `"viewevents"`) and `SCROLL`.
+Set a node's `"events"` property to also get raw input: `PRESS`, `RELEASE`, `DOUBLE`, `MOTION`, `ENTER`, `LEAVE`, `KEY`, `KEYRELEASE`, `WHEEL`, `CONFIGURE` and `GESTURE` (a pinch or a turn: `ref` is `"mods kind x y"`, `a` the amount). Scroll views add `VIEW` (with `"viewevents"`) and `SCROLL`.
 
 Keyboard shortcuts are one line: `BK_bind(ctx, "ctrl+s", ref)` sends `BK_EV_CALL` with your `ref`.
 
@@ -247,6 +249,7 @@ BK_custom_set(node, &cls, my_data);
 - **`frame`** runs at the start of `BK_render` when you asked with `BK_custom_request_frame(node, ms)`: the place for immediate-mode UIs to build their frame.
 - **`draw`** gets the raster and the node's rect. It may be called several times per render, once per damaged region, so it must draw the current state without changing it.
 - **`BK_custom_set_cursor(node, cursor)`** sets the pointer shape over the node.
+- **`BK_custom_set_touch(node, mode)`** decides what a finger does on the node: `BK_TOUCH_MODE_SCROLL` (the default: a tap clicks, a drag scrolls), `BK_TOUCH_MODE_POINTER` (the finger is the pointer, for your own drags) or `BK_TOUCH_MODE_RAW` (every contact arrives as `BK_CUSTOM_TOUCH` with `touch_id` and `touch_phase`). Pinches and turns arrive as `BK_CUSTOM_MAGNIFY` and `BK_CUSTOM_ROTATE` (`e->magnify`, `e->rotate`).
 
 ## Everything else
 

@@ -31,7 +31,8 @@ type Tsfn = ThreadsafeFunction<BuiEvent, ErrorStrategy::Fatal>;
 // Values crossing the boundary
 
 /// An event from a window (`kind`: click, mousedown, mouseup, mousemove,
-/// mouseenter, mouseleave, wheel, keydown, keyup, change, input, frame, close).
+/// mouseenter, mouseleave, wheel, keydown, keyup, change, input, pinch, rotate, pan, frame,
+/// close); the fields as in `blenderui_jsview::Event`.
 #[napi(object)]
 #[derive(Clone, Default)]
 pub struct BuiEvent {
@@ -45,6 +46,9 @@ pub struct BuiEvent {
     pub button: u32,
     pub click_count: u32,
     pub delta: f64,
+    pub delta_x: f64,
+    pub delta_y: f64,
+    pub phase: Option<String>,
     pub key: Option<String>,
     pub key_char: Option<String>,
     pub value: Option<String>,
@@ -62,7 +66,8 @@ impl From<view::Event> for BuiEvent {
     fn from(e: view::Event) -> BuiEvent {
         BuiEvent {
             kind: e.kind, window: e.window, target: e.target, x: e.x, y: e.y, button: e.button,
-            click_count: e.click_count, delta: e.delta, key: e.key, key_char: e.key_char, value: e.value,
+            click_count: e.click_count, delta: e.delta, delta_x: e.delta_x, delta_y: e.delta_y,
+            phase: e.phase.map(str::to_owned), key: e.key, key_char: e.key_char, value: e.value,
             checked: e.checked, number: e.number, shift: e.shift, ctrl: e.ctrl, alt: e.alt, values: e.values,
         }
     }
@@ -549,6 +554,19 @@ impl NativeApp {
     #[napi]
     pub fn simulate_pointer(&self, window: u32, kind: u32, x: f64, y: f64) {
         self.link.send(move |cx| view::simulate_pointer(cx, window, kind, x, y));
+    }
+
+    /// A touch screen contact in window `window` (tests; logical pixels): `phase` 0 down, 1 move, 2 up, 3 cancel.
+    #[napi]
+    pub fn simulate_touch(&self, window: u32, id: i32, phase: u32, x: f64, y: f64) {
+        self.link.send(move |cx| view::simulate_touch(cx, window, id, phase, x, y));
+    }
+
+    /// A trackpad gesture in window `window` (tests; logical pixels): `kind` 0 pinches by `amount`
+    /// (the scale change), 1 turns by `amount` degrees.
+    #[napi]
+    pub fn simulate_gesture(&self, window: u32, kind: u32, x: f64, y: f64, amount: f64) {
+        self.link.send(move |cx| view::simulate_gesture(cx, window, kind, x, y, amount));
     }
 }
 

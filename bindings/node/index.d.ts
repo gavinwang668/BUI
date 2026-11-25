@@ -44,7 +44,7 @@ export interface LayerShellOptions {
 }
 
 export type EventType = 'click' | 'mousedown' | 'mouseup' | 'mousemove' | 'mouseenter' | 'mouseleave' |
-  'wheel' | 'keydown' | 'keyup' | 'change' | 'input'
+  'wheel' | 'keydown' | 'keyup' | 'change' | 'input' | 'pinch' | 'rotate' | 'pan'
 
 export class BuiEvent {
   type: EventType
@@ -56,7 +56,16 @@ export class BuiEvent {
   y: number
   button: number
   detail: number
+  /** `pan`: pixels the content follows the fingers, right (0 for other events). */
+  deltaX: number
+  /** `wheel`: the DOM's, positive scrolls down; `pan`: pixels the content follows the fingers, down. */
   deltaY: number
+  /** `pinch`: the scale change since the last one (0.1 = 10% larger: a zoom is multiplied by
+   *  `1 + delta`); `rotate`: degrees since the last one, positive counter-clockwise. */
+  delta: number
+  /** `pan`: `'drag'` while a finger is down, `'fling'` as the content coasts on, `'end'` when it
+   *  lifted (deltas 0). */
+  phase?: 'drag' | 'fling' | 'end'
   key?: string
   char?: string
   shiftKey: boolean
@@ -357,6 +366,13 @@ export class Window {
   mouseDown (x: number, y: number): void
   /** Let go of the left button (tests). */
   mouseUp (x: number, y: number): void
+  /** A touch screen contact (tests): `id` tells the fingers apart; taps, scrolls, pans, pinches and
+   *  turns follow. */
+  touch (id: number, phase: 'down' | 'move' | 'up' | 'cancel', x: number, y: number): void
+  /** A trackpad pinch (tests): `delta` is the scale change (0.1 = 10% larger). */
+  pinch (x: number, y: number, delta: number): void
+  /** A trackpad turn (tests): degrees, positive counter-clockwise. */
+  rotate (x: number, y: number, degrees: number): void
   close (): void
   /** `focus` / `blur`: the window got or lost the keyboard focus. */
   on (event: 'close' | 'focus' | 'blur', listener: () => void): this

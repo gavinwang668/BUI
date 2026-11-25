@@ -58,6 +58,9 @@ pub(crate) struct Listeners {
     pub mouse_move: Vec<Listener<MouseMoveEvent>>,
     pub hover: Vec<Listener<bool>>,
     pub scroll: Vec<Listener<ScrollWheelEvent>>,
+    pub pan: Vec<Listener<PanEvent>>,
+    pub pinch: Vec<Listener<PinchEvent>>,
+    pub rotate: Vec<Listener<RotateEvent>>,
     pub key_down: Vec<Listener<KeyDownEvent>>,
     pub key_up: Vec<Listener<KeyUpEvent>>,
     pub change: Vec<Listener<ChangeEvent>>,
@@ -372,6 +375,22 @@ impl Div {
     pub fn on_scroll_wheel(mut self,
                            f: impl Fn(&ScrollWheelEvent, &mut Window, &mut App) + 'static) -> Self {
         self.listeners_mut().scroll.push(Box::new(f));
+        self
+    }
+    /// A finger dragging the content (a touch scroll and its fling), before it scrolls: stop the
+    /// propagation to take it (see [`PanEvent`]).
+    pub fn on_pan(mut self, f: impl Fn(&PanEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.listeners_mut().pan.push(Box::new(f));
+        self
+    }
+    /// Two fingers spreading or closing, or a trackpad pinch (see [`PinchEvent`]).
+    pub fn on_pinch(mut self, f: impl Fn(&PinchEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.listeners_mut().pinch.push(Box::new(f));
+        self
+    }
+    /// Two fingers turning, or a trackpad turn (see [`RotateEvent`]).
+    pub fn on_rotate(mut self, f: impl Fn(&RotateEvent, &mut Window, &mut App) + 'static) -> Self {
+        self.listeners_mut().rotate.push(Box::new(f));
         self
     }
     pub fn on_key_down(mut self, f: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static) -> Self {

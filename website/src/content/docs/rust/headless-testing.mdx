@@ -4,7 +4,7 @@ description: Run your Rust UI without a window, click and type into it from a te
 section: Rust
 order: 80
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/suite/headless.rs", "bindings/rust/blenderui/tests/suite/animation.rs", "bindings/rust/blenderui/tests/suite/rsx.rs", "bindings/rust/blenderui/tests/suite/hooks.rs", "bindings/rust/blenderui/tests/suite/parity.rs", "bindings/rust/blenderui/tests/wpt/main.rs", "bindings/rust/blenderui/examples/hello.rs"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/suite/headless.rs", "bindings/rust/blenderui/tests/suite/animation.rs", "bindings/rust/blenderui/tests/suite/rsx.rs", "bindings/rust/blenderui/tests/suite/hooks.rs", "bindings/rust/blenderui/tests/suite/parity.rs", "bindings/rust/blenderui/tests/suite/touch.rs", "bindings/rust/blenderui/tests/wpt/main.rs", "bindings/rust/blenderui/examples/hello.rs"]
 ---
 
 The best UI bug is the one your test catches before anyone sees it. **BUI can run your whole app off-screen**: same code, same layout, same pixels, no window. Your tests click buttons, type text, scroll lists and check the result, in plain `cargo test`, on CI machines with no display.
@@ -59,6 +59,8 @@ Run it with `cargo test`. Here's what each piece does:
 | `simulate_click_with(window, x, y, ctrl, shift)`, `simulate_key_with(window, text, keysym, ctrl, shift)` | The same with modifier keys held (Shift+click, Ctrl+A) |
 | `simulate_scroll(window, x, y, lines)` | Turn the wheel at a point: positive `lines` scroll the content up, negative scroll down |
 | `simulate_key(window, text, keysym)` | Type text, or press a key by its X11 keysym name: `"Return"`, `"BackSpace"`, `"a"` … |
+| `simulate_touch(window, id, phase, x, y)` | One finger of a touch screen: `TouchPhase::Down`, `Move`, `Up` or `Cancel`, with `id` telling fingers apart. A tap clicks, a drag scrolls, two fingers pinch and turn, as on a real screen |
+| `simulate_magnify(window, x, y, delta)`, `simulate_rotate(window, x, y, degrees)` | A trackpad's pinch (0.1 is 10% larger) and turn (positive counter-clockwise) |
 
 Coordinates are logical pixels. Each call handles the events it caused and re-renders before returning, so you can assert right after it.
 
@@ -190,6 +192,7 @@ cargo test --test suite parity:: -- --nocapture  # print the HTML and CSS covera
 | `tests/suite/animation.rs` | Keyframes, fill modes, easing, transitions and the virtual clock |
 | `tests/suite/effects.rs` | Filters, transforms, clip paths, masks, blend modes, scroll snap, Blender components |
 | `tests/suite/basic_css.rs`, `tests/suite/modern_css.rs` | Borders, counters, `styled`, variables, grid areas, selectors, at-rules |
+| `tests/suite/touch.rs` | Taps, a finger's scroll, `on_pan`, `on_pinch` and `on_rotate` |
 | `tests/suite/parity.rs` | The coverage numbers |
 
 ### The web-platform-tests

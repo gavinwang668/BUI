@@ -133,6 +133,22 @@ func (c *Context) Scroll(x, y int, dx, dy float32, mods int) bool {
 	return settled(C.BK_scroll(c.h, C.int(x), C.int(y), C.float(dx), C.float(dy), C.int(mods)))
 }
 
+// Touch sends a touch screen contact: phase is TouchDown, TouchMove, TouchUp or TouchCancel,
+// timeMs the event's own time on any monotonic clock (<= 0: now).
+func (c *Context) Touch(id, phase int, x, y float32, timeMs float64, mods int) bool {
+	return settled(C.BK_touch(c.h, C.int(id), C.int(phase), C.float(x), C.float(y), C.double(timeMs), C.int(mods)))
+}
+
+// Magnify is a trackpad pinch about (x, y): delta is the scale change (0.1 = 10% larger).
+func (c *Context) Magnify(x, y int, delta float32, mods int) bool {
+	return settled(C.BK_magnify(c.h, C.int(x), C.int(y), C.float(delta), C.int(mods)))
+}
+
+// Rotate is a trackpad turn about (x, y), in degrees (> 0 counter-clockwise).
+func (c *Context) Rotate(x, y int, degrees float32, mods int) bool {
+	return settled(C.BK_rotate(c.h, C.int(x), C.int(y), C.float(degrees), C.int(mods)))
+}
+
 // Key presses a key: the text it types and its X11 keysym ("Return", "a",
 // "Up"); either may be empty.
 func (c *Context) Key(text, keysym string, mods int) bool {

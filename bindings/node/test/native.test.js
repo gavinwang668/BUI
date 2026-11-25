@@ -197,3 +197,44 @@ test('window kinds: layer-shell names are checked', (t) => {
   assert.throws(() => app.window({ layerShell: { keyboard: 'all' } }), /layerShell.keyboard/)
   app.window({ alwaysOnTop: true, frame: false, layerShell: { layer: 'top', anchor: ['top', 'left'], exclusiveZone: 24 } })
 })
+
+test('touch screen and trackpad gestures: pinch, rotate and pan bubble with their amounts (headless)', async (t) => {
+  const { App, EVENT_BITS } = require('..')
+  const { applyProps, NO_PROPS } = require('../host')
+  const app = new App({ headless: true })
+  t.after(() => app.quit())
+  const win = app.window({ width: 300, height: 200 })
+  win.body.style = 'margin: 0'
+  const map = win.createElement('div')
+  map.style = 'width: 300px; height: 200px'
+  win.body.appendChild(map)
+  const got = { pinch: [], rotate: [], pan: [] }
+  applyProps(map, NO_PROPS, { onPinch: (e) => got.pinch.push(e), onRotate: (e) => got.rotate.push(e), onPan: (e) => got.pan.push(e) })
+  const bubbled = []
+  win.body.addEventListener('pan', (e) => bubbled.push(e.currentTarget === win.body && e.target === map))
+  assert.deepStrictEqual([EVENT_BITS.pinch, EVENT_BITS.rotate, EVENT_BITS.pan], [1024, 2048, 4096])
+  const tick = () => new Promise(r => setTimeout(r, 30))
+  await map.getBoundingClientRect() // laid out: the gestures find it
+
+  win.pinch(120, 80, 0.25)
+  win.rotate(120, 80, 30)
+  await tick()
+  assert.strictEqual(got.pinch.length, 1)
+  assert.strictEqual(got.pinch[0].type, 'pinch')
+  assert.deepStrictEqual([got.pinch[0].x, got.pinch[0].y, got.pinch[0].delta], [120, 80, 0.25])
+  assert.deepStrictEqual([got.rotate.length, got.rotate[0].delta], [1, 30])
+
+  // a finger dragged up 58 px (8 of them the touch slop): the content follows it by 50
+  win.touch(1, 'down', 150, 150)
+  for (let i = 1; i <= 4; i++) win.touch(1, 'move', 150, 150 - 14.5 * i)
+  await tick()
+  await new Promise(r => setTimeout(r, 60)) // rest before lifting: no fling
+  win.touch(1, 'up', 150, 92)
+  await tick()
+  const drags = got.pan.filter((e) => e.phase === 'drag')
+  assert.ok(drags.length > 0 && drags.every((e) => e.type === 'pan' && e.deltaX === 0), 'vertical drags')
+  const dy = drags.reduce((s, e) => s + e.deltaY, 0)
+  assert.ok(Math.abs(dy + 50) < 0.5, `followed by ${dy}`)
+  assert.strictEqual(got.pan.at(-1).phase, 'end')
+  assert.ok(bubbled.length === got.pan.length && bubbled.every(Boolean), 'pan bubbles once through the JS tree')
+})

@@ -26,6 +26,16 @@
 #  include <X11/Xutil.h>
 #  include <X11/cursorfont.h>
 #  include <X11/keysym.h>
+/* XInput 2.2 touch screens (and 2.4 touchpad pinches) when the libXi headers are there; without
+ * them a touch screen stays the server's emulated pointer. */
+#  if defined(__has_include)
+#    if __has_include(<X11/extensions/XInput2.h>)
+#      include <X11/extensions/XInput2.h>
+#    endif
+#  endif
+#  ifdef XI_TouchBegin
+#    define BK_X11_XI2
+#  endif
 
 #  include <errno.h>
 #  include <fcntl.h>
@@ -43,6 +53,11 @@
  * X11 headers (every Linux wheel) imports fine on servers and containers
  * without X11, and draws native windows wherever X11 (or XWayland) exists.
  * Every Xlib function below goes through a pointer filled by dlsym. */
+#  ifdef BK_X11_XI2 /* libX11's generic event cookies (libX11 1.4, which every XI 2.2 server has) */
+#    define BK_X11_XI2_FUNCS(F) F(XQueryExtension) F(XGetEventData) F(XFreeEventData)
+#  else
+#    define BK_X11_XI2_FUNCS(F)
+#  endif
 #  define BK_X11_FUNCS(F)   F(XAllocSizeHints) \
   F(XChangeProperty) \
   F(XCheckTypedWindowEvent) \
@@ -96,7 +111,8 @@
   F(XMatchVisualInfo) \
   F(XCreateColormap) \
   F(XFreeColormap) \
-  F(XGetWindowAttributes)
+  F(XGetWindowAttributes) \
+  BK_X11_XI2_FUNCS(F)
 
 #  define BK_X11_DECL(f) static __typeof__(&f) p_##f;
 BK_X11_FUNCS(BK_X11_DECL)
@@ -178,6 +194,41 @@ static int x11_load(void)
 #  define XFreeColormap (*p_XFreeColormap)
 #  define XGetWindowAttributes (*p_XGetWindowAttributes)
 
+#  ifdef BK_X11_XI2
+#    define XQueryExtension (*p_XQueryExtension)
+#    define XGetEventData (*p_XGetEventData)
+#    define XFreeEventData (*p_XFreeEventData)
+
+/* libXi, loaded with the display: without it (or on a server older than XI 2.2) the server
+ * emulates the pointer for a touch screen's first finger, as before. */
+#    define BK_XI_FUNCS(F) F(XIQueryVersion) F(XISelectEvents) F(XIQueryDevice) F(XIFreeDeviceInfo)
+BK_XI_FUNCS(BK_X11_DECL)
+
+/* The XInput 2 minor version libXi takes: 2 touch, 4 also gestures (libXi 1.8); 0 no libXi. */
+static int xi_load(void)
+{
+  void *lib = dlopen("libXi.so.6", RTLD_NOW | RTLD_LOCAL);
+  if (!lib) {
+    lib = dlopen("libXi.so", RTLD_NOW | RTLD_LOCAL);
+  }
+  if (!lib) {
+    return 0;
+  }
+  BK_XI_FUNCS(BK_X11_LOAD)
+#    ifdef XI_GesturePinchBegin
+  if (dlsym(lib, "XIGrabPinchGestureBegin")) { /* new in libXi 1.8, with the gesture events */
+    return 4;
+  }
+#    endif
+  return 2;
+}
+
+#    define XIQueryVersion (*p_XIQueryVersion)
+#    define XISelectEvents (*p_XISelectEvents)
+#    define XIQueryDevice (*p_XIQueryDevice)
+#    define XIFreeDeviceInfo (*p_XIFreeDeviceInfo)
+#  endif
+
 #  define MAX_TIMERS 64
 
 typedef struct Timer {
@@ -204,6 +255,9 @@ struct BKWindow {
   double frame_start, frame_due;
   float scale;
   int w, h;
+#  ifdef XI_GesturePinchBegin
+  double pinch_scale; /* an XI 2.4 pinch's scale at its last event (1 at its begin) */
+#  endif
   Timer timers[MAX_TIMERS];
   Cursor cursors[12];
   struct BKWindow *next;
@@ -217,6 +271,11 @@ static int (*g_stop)(void) = NULL;
 static void (*g_wake_cb)(void) = NULL;
 static int g_wake_pipe[2] = {-1, -1};
 static char *g_clip_text = NULL; /* what we own on CLIPBOARD */
+#  ifdef BK_X11_XI2
+/* XInputExtension's major opcode (extension opcodes are >= 128): 0 without XI 2.2 touch; and the
+ * minor version the server took (2, or 4 with gestures). */
+static int g_xi_opcode = 0, g_xi_minor = 0;
+#  endif
 
 static double now_ms(void)
 {
@@ -224,6 +283,20 @@ static double now_ms(void)
   clock_gettime(CLOCK_MONOTONIC, &ts);
   return ts.tv_sec * 1000.0 + ts.tv_nsec / 1e6;
 }
+
+#  ifdef BK_X11_XI2
+/* XI 2.2 touch events (2.4 pinches) on this display when libXi and the server have them. */
+static void xi_init(void)
+{
+  int opcode = 0, event, error, major = 2, minor = xi_load();
+  if (minor && XQueryExtension(g_dpy, "XInputExtension", &opcode, &event, &error) &&
+      XIQueryVersion(g_dpy, &major, &minor) == Success && major == 2 && minor >= 2)
+  {
+    g_xi_opcode = opcode; /* the server's version, never above the one asked */
+    g_xi_minor = minor;
+  }
+}
+#  endif
 
 static int open_display(void)
 {
@@ -243,6 +316,9 @@ static int open_display(void)
   a_utf8 = XInternAtom(g_dpy, "UTF8_STRING", False);
   a_targets = XInternAtom(g_dpy, "TARGETS", False);
   a_bui_sel = XInternAtom(g_dpy, "BUI_SELECTION", False);
+#  ifdef BK_X11_XI2
+  xi_init();
+#  endif
   return 1;
 }
 
@@ -582,6 +658,123 @@ static void handle_key(BKWindow *win, XKeyEvent *ke, int press)
   BK_key(win->ctx, printable ? text : "", name, mods);
 }
 
+#  ifdef BK_X11_XI2
+/* -- XInput 2 touch screens and touchpad pinches (all gestures are the kit's: kit_touch.c) -- */
+
+/* Touch events (and pinches) on the window, from every master device. Selecting touches makes the
+ * server send this window a touch screen's contacts instead of its emulated pointer (XI 2.2). */
+static void xi_select(Window xid)
+{
+  if (!g_xi_opcode) {
+    return;
+  }
+  unsigned char bits[XIMaskLen(XI_LASTEVENT)];
+  memset(bits, 0, sizeof(bits));
+  XISetMask(bits, XI_TouchBegin); /* the three together, or BadValue */
+  XISetMask(bits, XI_TouchUpdate);
+  XISetMask(bits, XI_TouchEnd);
+#    ifdef XI_GesturePinchBegin
+  if (g_xi_minor >= 4) {
+    XISetMask(bits, XI_GesturePinchBegin);
+    XISetMask(bits, XI_GesturePinchUpdate);
+    XISetMask(bits, XI_GesturePinchEnd);
+  }
+#    endif
+  XIEventMask mask = {XIAllMasterDevices, (int)sizeof(bits), bits};
+  XISelectEvents(g_dpy, xid, &mask, 1);
+}
+
+/* A touch screen's contacts (XIDirectTouch) are touches; a touchpad's (XIDependentTouch) are
+ * already the pointer's motion. */
+static bool xi_direct_touch(int device)
+{
+  int n = 0;
+  XIDeviceInfo *info = XIQueryDevice(g_dpy, device, &n);
+  bool direct = false;
+  for (int i = 0; info && i < n; i++) {
+    for (int k = 0; k < info[i].num_classes; k++) {
+      const XIAnyClassInfo *c = info[i].classes[k];
+      direct |= c->type == XITouchClass && ((const XITouchClassInfo *)c)->mode == XIDirectTouch;
+    }
+  }
+  if (info) {
+    XIFreeDeviceInfo(info);
+  }
+  return direct;
+}
+
+/* XI_TouchBegin / Update / End: one contact, `detail` its id, at window pixels as MotionNotify's.
+ * An update with XITouchPendingEnd is a finger already lifted whose end waits for a grab: it
+ * moves, and its XI_TouchEnd lifts it. */
+static void xi_touch(int evtype, const XIDeviceEvent *de)
+{
+  BKWindow *win = find_window(de->event);
+  if (!win || !win->xid || (evtype == XI_TouchBegin && !xi_direct_touch(de->sourceid))) {
+    return; /* a touchpad's contact is never down, so its updates and end are not followed */
+  }
+  const int phase = evtype == XI_TouchBegin  ? BK_TOUCH_DOWN :
+                    evtype == XI_TouchUpdate ? BK_TOUCH_MOVE :
+                                               BK_TOUCH_UP;
+  BK_touch(win->ctx, de->detail, phase, (float)de->event_x, (float)de->event_y, (double)de->time,
+           mods_of((unsigned)de->mods.effective));
+}
+
+#    ifdef XI_GesturePinchBegin
+/* XI 2.4 touchpad pinch: `scale` is the fingers' spread over the begin's, so the change since the
+ * last event is scale / last - 1 (NSEvent.magnification's units); `delta_angle` is degrees
+ * clockwise since the last event, BK_rotate's are counter-clockwise. A cancelled end applies
+ * nothing. */
+static void xi_pinch(int evtype, const XIGesturePinchEvent *ge)
+{
+  BKWindow *win = find_window(ge->event);
+  if (!win || !win->xid) {
+    return;
+  }
+  if (evtype == XI_GesturePinchBegin) {
+    win->pinch_scale = 1.0;
+    return;
+  }
+  if (evtype == XI_GesturePinchEnd && (ge->flags & XIGesturePinchEventCancelled)) {
+    return;
+  }
+  const int x = (int)ge->event_x, y = (int)ge->event_y;
+  const int mods = mods_of((unsigned)ge->mods.effective);
+  if (ge->scale > 0.0 && ge->scale != win->pinch_scale) {
+    if (win->pinch_scale > 0.0) { /* 0: its begin went to another window */
+      BK_magnify(win->ctx, x, y, (float)(ge->scale / win->pinch_scale - 1.0), mods);
+    }
+    win->pinch_scale = ge->scale;
+  }
+  if (ge->delta_angle != 0.0) {
+    BK_rotate(win->ctx, x, y, (float)-ge->delta_angle, mods);
+  }
+}
+#    endif
+
+/* A GenericEvent: XInput 2's from our selections, others ignored. */
+static void xi_event(XGenericEventCookie *cookie)
+{
+  if (!g_xi_opcode || cookie->extension != g_xi_opcode || !XGetEventData(g_dpy, cookie)) {
+    return;
+  }
+  switch (cookie->evtype) {
+    case XI_TouchBegin:
+    case XI_TouchUpdate:
+    case XI_TouchEnd:
+      xi_touch(cookie->evtype, (const XIDeviceEvent *)cookie->data);
+      break;
+#    ifdef XI_GesturePinchBegin
+    case XI_GesturePinchBegin:
+    case XI_GesturePinchUpdate:
+    case XI_GesturePinchEnd:
+      xi_pinch(cookie->evtype, (const XIGesturePinchEvent *)cookie->data);
+      break;
+#    endif
+  }
+  XFreeEventData(g_dpy, cookie);
+}
+#  endif
+
 static void close_window(BKWindow *win)
 {
   if (!win->xid) {
@@ -614,6 +807,12 @@ static void handle_event(XEvent *ev)
     XSendEvent(g_dpy, rq->requestor, False, 0, (XEvent *)&sn);
     return;
   }
+#  ifdef BK_X11_XI2
+  if (ev->type == GenericEvent) { /* no xany.window: the cookie's data names it */
+    xi_event(&ev->xcookie);
+    return;
+  }
+#  endif
   BKWindow *win = find_window(ev->xany.window);
   if (!win || !win->xid) {
     return;
@@ -778,6 +977,9 @@ static bool create_xid(BKWindow *win, bool transparent)
     return false;
   }
   XSetWMProtocols(g_dpy, win->xid, &a_delete, 1);
+#  ifdef BK_X11_XI2
+  xi_select(win->xid);
+#  endif
   win->gc = XCreateGC(g_dpy, win->xid, 0, NULL);
   BK_window_set_title(win, win->title);
   BUI_raster_set_alpha(win->raster, win->depth == 32);

@@ -1,11 +1,10 @@
 /* A Dear ImGui app: ImGui::* calls inside `frame`, in a BUI window (bindings/imgui). The kit's window
- * host is the activity's surface, so this is the code it would be on a desktop, plus one line:
- * a drag on the ImGui node is ImGui's (sliders, window moves), not a scroll.
+ * host is the activity's surface, so this is the code it would be on a desktop (a drag on the ImGui
+ * node is ImGui's, sliders and window moves, as the backend sets BK_TOUCH_MODE_POINTER).
  *
  * SPDX-License-Identifier: GPL-2.0-or-later
  */
 
-#include "BUI_kit.h"
 #include "bui_app.h"
 #include "imgui.h"
 #include "imgui_impl_bui.h"
@@ -40,7 +39,6 @@ void bui_app_main(void)
 {
   ImGui::CreateContext();
   ImGui_ImplBUI_App *app = ImGui_ImplBUI_CreateApp("Dear ImGui", 360, 720, frame, nullptr);
-  BK_window_wm(ImGui_ImplBUI_AppWindow(app), "touch_drag", 1, 0);
   ImGui_ImplBUI_RunApp(app);
   ImGui_ImplBUI_DestroyApp(app);
   ImGui::DestroyContext();

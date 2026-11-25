@@ -30,6 +30,8 @@ void main() {
     testTree();
     testMenus();
     testCustom();
+    testTouch();
+    testCollected();
     testHostErrors();
     testTheme();
     testCss();
@@ -347,6 +349,112 @@ private void testCustom() {
     raster.free();
     context.free();
     root.free();
+}
+
+/* Touch screens and trackpad gestures: a tap clicks, a spread over an "events" node and a
+ * trackpad pinch are BK_EV_GESTURE, a raw custom node gets its contacts as they are. */
+private void testTouch() {
+    import std.conv : to;
+    import std.string : split;
+
+    auto root = new Node("column");
+    int clicks;
+    auto button = new Node("button");
+    button.set("text", "Go");
+    button.onClick((NodeEvent) {
+        ++clicks;
+    });
+    root.add(button);
+    auto pad = new Node("canvas");
+    pad.set("events", 1);
+    pad.set("height", 200);
+    string[] gestures;
+    double[] amounts;
+    pad.on(BK_EV_GESTURE, (NodeEvent e) {
+        gestures ~= e.text.idup;
+        amounts ~= e.a;
+    });
+    root.add(pad);
+    int[3][] touches;
+    auto raw = new Node("custom");
+    setCustom(raw, CustomHandlers(
+        (Node, CustomEvent e) {
+            if (e.type == BK_CUSTOM_TOUCH) {
+                touches ~= [e.touchId, e.touchPhase, e.mods];
+            }
+            return e.type == BK_CUSTOM_TOUCH ? 1 : 0;
+        },
+        null, null, null, 200, 100));
+    setTouch(raw, BK_TOUCH_MODE_RAW);
+    root.add(raw);
+
+    auto context = new Context(root);
+    auto raster = new Raster(400, 500);
+    context.render(raster, true);
+
+    const b = button.rect();
+    const bx = b[0] + b[2] / 2, by = b[1] + b[3] / 2;
+    context.touch(1, BK_TOUCH_DOWN, bx, by);
+    check(clicks == 0, "touch: no click before the finger lifts");
+    context.touch(1, BK_TOUCH_UP, bx + 2, by);
+    check(clicks == 1, "touch: a tap clicks");
+
+    const p = pad.rect();
+    const cx = p[0] + p[2] / 2, cy = p[1] + p[3] / 2;
+    context.touch(2, BK_TOUCH_DOWN, cx - 20, cy);
+    context.touch(3, BK_TOUCH_DOWN, cx + 20, cy);
+    foreach (i; 1 .. 4) {
+        context.touch(2, BK_TOUCH_MOVE, cx - 20 - 10 * i, cy);
+        context.touch(3, BK_TOUCH_MOVE, cx + 20 + 10 * i, cy);
+    }
+    context.touch(2, BK_TOUCH_UP, cx - 50, cy);
+    context.touch(3, BK_TOUCH_UP, cx + 50, cy);
+    check(gestures.length == 3, "touch: a spread is three magnify gestures");
+    const fields = gestures[0].split(" ");
+    check((fields[0].to!int & BK_FROM_TOUCH) != 0, "touch: gesture mods carry BK_FROM_TOUCH");
+    check(fields[1].to!int == BK_GESTURE_MAGNIFY && amounts[0] > 0, "touch: a spread magnifies");
+    check(fields[2].to!int == cx - p[0] && fields[3].to!int == cy - p[1], "touch: gesture centre");
+
+    gestures = null;
+    amounts = null;
+    check(context.magnify(cx, cy, 0.25f), "magnify changed something");
+    check(gestures.length == 1 && amounts[0] == 0.25f, "magnify: a gesture event");
+    check(gestures[0] == "0 1 " ~ (cx - p[0]).to!string ~ " " ~ (cy - p[1]).to!string,
+        "magnify: gesture text");
+
+    const r = raw.rect();
+    context.touch(4, BK_TOUCH_DOWN, r[0] + 10, r[1] + 10);
+    context.touch(4, BK_TOUCH_CANCEL, r[0] + 10, r[1] + 10);
+    check(touches.length == 2 && touches[0][0] == 4 && touches[0][1] == BK_TOUCH_DOWN &&
+        touches[1][1] == BK_TOUCH_CANCEL && (touches[0][2] & BK_FROM_TOUCH) != 0,
+        "touch: raw custom contacts");
+
+    raster.free();
+    context.free();
+    root.free();
+}
+
+/* Wrappers the garbage collector finalizes: their native nodes and contexts are queued and freed at
+ * the next safe point, never from the finalizer, which must reach no other D object (the crash
+ * this guards against was a finalizer walking a handler store the GC had already freed). */
+private void testCollected() {
+    foreach (i; 0 .. 20) {
+        auto root = new Node("column");
+        root.add(new Node("button"));
+        auto custom = new Node("custom");
+        setCustom(custom, CustomHandlers((Node, CustomEvent) { return 0; }, null, null, null, 10, 10));
+        root.add(custom);
+        root.on(BK_EV_CLICK, (NodeEvent) {});
+        auto context = new Context(root);
+        auto raster = new Raster(64, 64);
+        context.render(raster, true);
+        raster.free();
+        new Node("label"); // detached, never freed by hand
+    }
+    GC.collect();
+    auto after = new Node("frame"); // frees what the collection queued
+    check(after.handle !is null, "collected: a node after a collection");
+    after.free();
 }
 
 private void testHostErrors() {

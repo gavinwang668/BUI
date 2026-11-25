@@ -56,10 +56,15 @@ win.body.appendChild(button)
   globals, for DOM-based frameworks), and `bui build` bundling with the Bun
   plugin a `@blender-ui/*` package declares (`"bui": { "bunPlugin" }`).
 - **Events:** `addEventListener` for `click`, `mousedown`, `mouseup`,
-  `mousemove`, `mouseenter`, `mouseleave`, `wheel`, `keydown`, `keyup`, `input`
-  and `change` arrive from the UI thread; other types fire through
+  `mousemove`, `mouseenter`, `mouseleave`, `wheel`, `keydown`, `keyup`, `input`,
+  `change`, and the touch screen / trackpad gestures `pinch` (`delta`: the
+  scale change), `rotate` (`delta`: degrees, counter-clockwise) and `pan`
+  (`deltaX` / `deltaY`: pixels the content follows the fingers; `phase`:
+  `drag`, `fling` or `end`) arrive from the UI thread; other types fire through
   `dispatchEvent`.
   - They bubble through the tree, and `stopPropagation()` works.
+  - An element listening for `pan` takes the drag, as CSS's
+    `touch-action: none`: nothing under it scrolls by touch.
   - They arrive after BUI has handled them, so `preventDefault()` only marks
     the event.
 - **Frames and measurement:** `win.requestAnimationFrame(cb)` is paced by the

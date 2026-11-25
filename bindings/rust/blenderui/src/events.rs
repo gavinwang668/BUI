@@ -95,6 +95,70 @@ pub struct ScrollWheelEvent {
     pub modifiers: Modifiers,
 }
 
+/// Content a finger (or two) drags: the scroll a touch screen makes, Blender's MOUSEPAN
+/// (`on_pan`). It comes before the scroll; a listener that calls `cx.stop_propagation()` takes
+/// it, and nothing scrolls (a map that pans itself).
+#[derive(Clone, Debug)]
+pub struct PanEvent {
+    /// Where the drag began (the fingers' centre for two), relative to the window.
+    pub position: Point<Pixels>,
+    /// Logical pixels the content follows the fingers since the last one: x right, y down. Each
+    /// axis can come as an event of its own; the last one (`ScrollPhase::End`) is zero.
+    pub delta: Point<Pixels>,
+    /// `Drag` while a finger is down, `Fling` as the content coasts on after it, `End` when it
+    /// lifted.
+    pub phase: ScrollPhase,
+    pub modifiers: Modifiers,
+}
+
+/// A pinch: two fingers spreading or closing about their centre, or a trackpad's (Blender's
+/// MOUSEZOOM; `on_pinch`).
+#[derive(Clone, Debug)]
+pub struct PinchEvent {
+    /// The centre: between the fingers, or the pointer for a trackpad.
+    pub position: Point<Pixels>,
+    /// The scale change since the last one: 0.1 is 10% larger, -0.1 10% smaller (a zoom is
+    /// multiplied by `1.0 + delta`).
+    pub delta: f32,
+    pub modifiers: Modifiers,
+    /// From a touch screen (`false`: a trackpad).
+    pub touch: bool,
+}
+
+/// A turn of two fingers about their centre, or a trackpad's (Blender's MOUSEROTATE;
+/// `on_rotate`).
+#[derive(Clone, Debug)]
+pub struct RotateEvent {
+    /// The centre: between the fingers, or the pointer for a trackpad.
+    pub position: Point<Pixels>,
+    /// Degrees since the last one, positive counter-clockwise.
+    pub degrees: f32,
+    pub modifiers: Modifiers,
+    /// From a touch screen (`false`: a trackpad).
+    pub touch: bool,
+}
+
+/// One step of a touch screen contact ([`App::simulate_touch`](crate::App::simulate_touch)).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum TouchPhase {
+    Down,
+    Move,
+    Up,
+    /// The platform took the contact back: nothing it did is kept.
+    Cancel,
+}
+
+impl TouchPhase {
+    pub(crate) const fn to_kit(self) -> i32 {
+        match self {
+            Self::Down => sys::BK_TOUCH_DOWN,
+            Self::Move => sys::BK_TOUCH_MOVE,
+            Self::Up => sys::BK_TOUCH_UP,
+            Self::Cancel => sys::BK_TOUCH_CANCEL,
+        }
+    }
+}
+
 /// A key: `key` is the keysym (`"a"`, `"Return"`, `"Left"` ...).
 #[derive(Clone, Debug)]
 pub struct Keystroke {

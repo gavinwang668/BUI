@@ -988,7 +988,7 @@ static void ta_draw(BKNode *n)
 }
 
 const BKClass bk_cls_textarea = {.name = "textarea", .a11y_role = BK_ROLE_MULTILINE_TEXT_INPUT,
-                                 .flags = CLS_INTERACTIVE,
+                                 .flags = CLS_INTERACTIVE | CLS_DRAGS,
                                  .cursor = BK_CURSOR_TEXT,
                                  .init = ta_init,
                                  .free_ext = ta_free,

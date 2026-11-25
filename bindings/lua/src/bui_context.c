@@ -136,7 +136,11 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
     lua_pushvalue(L, -3);
     lua_pushnumber(L, a);
     lua_pushnumber(L, b);
-    if (lua_pcall(L, 3, 0, 0) != LUA_OK) {
+    /* raw events and gestures: their text ("mods button ...", "mods kind x y") */
+    const int text = ref && ((kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) ||
+                             kind == BK_EV_KEYRELEASE || kind == BK_EV_GESTURE);
+    if (text) lua_pushstring(L, (const char *)ref);
+    if (lua_pcall(L, 3 + text, 0, 0) != LUA_OK) {
       luabui_report_error(L);
     }
     if (closing) g_closing = notice.outer;
@@ -332,6 +336,35 @@ static int l_ctx_scroll(lua_State *L) {
   lua_pushboolean(L, BK_scroll(cud->ctx, x, y, dx, dy, mods));
   return 1;
 }
+
+/* ctx:touch(id, phase, x, y [, time_ms [, mods]]): a touch screen contact (bui.TOUCH_*) */
+static int l_ctx_touch(lua_State *L) {
+  luabui_Context *cud = CHECK_CTX(L, 1);
+  if (!cud->ctx) return 0;
+  int id = (int)luaL_checkinteger(L, 2);
+  int phase = (int)luaL_checkinteger(L, 3);
+  float x = (float)luaL_checknumber(L, 4);
+  float y = (float)luaL_checknumber(L, 5);
+  double time_ms = luaL_optnumber(L, 6, 0.0);
+  int mods = (int)luaL_optinteger(L, 7, 0);
+  lua_pushboolean(L, BK_touch(cud->ctx, id, phase, x, y, time_ms, mods));
+  return 1;
+}
+
+/* ctx:magnify / ctx:rotate(x, y, amount [, mods]): a trackpad pinch or turn about x, y */
+static int ctx_gesture(lua_State *L, int (*call)(BKContext *, int, int, float, int)) {
+  luabui_Context *cud = CHECK_CTX(L, 1);
+  if (!cud->ctx) return 0;
+  int x = (int)luaL_checkinteger(L, 2);
+  int y = (int)luaL_checkinteger(L, 3);
+  float amount = (float)luaL_checknumber(L, 4);
+  int mods = (int)luaL_optinteger(L, 5, 0);
+  lua_pushboolean(L, call(cud->ctx, x, y, amount, mods));
+  return 1;
+}
+
+static int l_ctx_magnify(lua_State *L) { return ctx_gesture(L, BK_magnify); }
+static int l_ctx_rotate(lua_State *L) { return ctx_gesture(L, BK_rotate); }
 
 static int l_ctx_key(lua_State *L) {
   luabui_Context *cud = CHECK_CTX(L, 1);
@@ -740,6 +773,9 @@ static const luaL_Reg ctx_methods[] = {
   {"motion",        l_ctx_motion},
   {"wheel",         l_ctx_wheel},
   {"scroll",        l_ctx_scroll},
+  {"touch",         l_ctx_touch},
+  {"magnify",       l_ctx_magnify},
+  {"rotate",        l_ctx_rotate},
   {"key",           l_ctx_key},
   {"key_release",   l_ctx_key_release},
   {"button",        l_ctx_button},

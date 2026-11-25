@@ -901,7 +901,7 @@ static int panel_a11y_do(BKNode *n, int item, int action)
 const BKClass bk_cls_panel = {.name = "panel", .a11y_role = BK_ROLE_GROUP,
                               .a11y_do = panel_a11y_do,
                               .draw_tree = panel_draw_tree,
-                              .flags = CLS_INTERACTIVE,
+                              .flags = CLS_INTERACTIVE | CLS_DRAGS,
                               .drag_group = DRAG_GROUP_PANEL,
                               .init = panel_init,
                               .measure = panel_measure,
@@ -1546,7 +1546,7 @@ static void sb_init(BKNode *n)
 }
 
 const BKClass bk_cls_scrollbar = {.name = "scrollbar", .a11y_role = BK_ROLE_SCROLL_BAR,
-                                  .flags = CLS_INTERACTIVE,
+                                  .flags = CLS_INTERACTIVE | CLS_DRAGS,
                                   .init = sb_init,
                                   .measure = sb_measure,
                                   .draw = sb_draw,
@@ -2422,7 +2422,7 @@ static void number_draw(BKNode *n)
 }
 
 #define NUMBER_CLASS_COMMON \
-  .flags = CLS_INTERACTIVE | CLS_VALUE, .cursor = BK_CURSOR_EW, \
+  .flags = CLS_INTERACTIVE | CLS_VALUE | CLS_DRAGS, .cursor = BK_CURSOR_EW, \
   .drag_cursor = BK_CURSOR_NONE, .measure = number_measure, .press = number_press, \
   .dbl = number_dbl, .drag = number_drag, .release = number_release, .key = number_key, \
   .move = number_move, .leave = number_leave, .cursor_at = number_cursor_at, \
@@ -2655,7 +2655,7 @@ static void text_draw(BKNode *n)
 }
 
 #define TEXT_CLASS_COMMON \
-  .flags = CLS_INTERACTIVE | CLS_VALUE, .cursor = BK_CURSOR_TEXT, .measure = text_measure, \
+  .flags = CLS_INTERACTIVE | CLS_VALUE | CLS_DRAGS, .cursor = BK_CURSOR_TEXT, .measure = text_measure, \
   .draw = text_draw, .press = text_press, .dbl = text_dbl, .drag = text_drag, \
   .key = text_key, .cursor_at = text_cursor_at, .finish_edit = text_finish, \
   .to_text = text_to_text, .from_text = text_from_text, .reset = text_reset, \
@@ -3257,7 +3257,7 @@ static void swatch_draw(BKNode *n)
 }
 
 const BKClass bk_cls_swatch = {.name = "swatch", .a11y_role = BK_ROLE_COLOR_WELL,
-                               .flags = CLS_INTERACTIVE | CLS_VALUE,
+                               .flags = CLS_INTERACTIVE | CLS_VALUE | CLS_DRAGS,
                                .init = swatch_init,
                                .measure = swatch_measure,
                                .draw = swatch_draw,

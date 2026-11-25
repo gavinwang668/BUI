@@ -1516,6 +1516,13 @@ static const char *event_method(int kind)
   }
 }
 
+/* Raw events ("events" nodes) and gestures: their ref is a C string, not a Python object. */
+static int ref_is_text(int kind)
+{
+  return (kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE ||
+         kind == BK_EV_GESTURE;
+}
+
 static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, double b)
 {
   if (kind == BK_EV_CALL && ref) {
@@ -1534,8 +1541,7 @@ static void host_emit(void *data, BKNode *node, int kind, void *ref, double a, d
     }
     r = PyObject_CallMethod(target, method, "ii", (int)a, (int)b);
   }
-  else if ((kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE) {
-    /* raw events: ref is a C string */
+  else if (ref_is_text(kind)) {
     r = PyObject_CallMethod(target, "_on_event", "isdd", kind, ref ? (const char *)ref : "", a,
                             b);
   }
@@ -1615,8 +1621,8 @@ static void defer_emit(BKNode *node, int kind, void *ref, double a, double b)
     return;
   }
   PyObject *payload;
-  if ((kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE) {
-    payload = PyUnicode_FromString(ref ? (const char *)ref : ""); /* raw events: a C string */
+  if (ref_is_text(kind)) {
+    payload = PyUnicode_FromString(ref ? (const char *)ref : "");
   }
   else {
     payload = Py_NewRef(ref ? (PyObject *)ref : Py_None);
@@ -1798,6 +1804,40 @@ static PyObject *kitctx_wheel(KitContextObject *self, PyObject *args)
   }
   return PyBool_FromLong(r);
 }
+
+static PyObject *kitctx_touch(KitContextObject *self, PyObject *args)
+{
+  int id, phase, mods = 0;
+  float x, y;
+  double time_ms = 0.0;
+  if (!PyArg_ParseTuple(args, "iiff|di:touch", &id, &phase, &x, &y, &time_ms, &mods)) {
+    return NULL;
+  }
+  const int r = BK_touch(self->ctx, id, phase, x, y, time_ms, mods);
+  if (buipy_restore_error()) {
+    return NULL;
+  }
+  return PyBool_FromLong(r);
+}
+
+/* magnify / rotate: a trackpad pinch or turn about x, y */
+#define GESTURE(name, call) \
+  static PyObject *kitctx_##name(KitContextObject *self, PyObject *args) \
+  { \
+    int x, y, mods = 0; \
+    float amount; \
+    if (!PyArg_ParseTuple(args, "iif|i:" #name, &x, &y, &amount, &mods)) { \
+      return NULL; \
+    } \
+    const int r = call(self->ctx, x, y, amount, mods); \
+    if (buipy_restore_error()) { \
+      return NULL; \
+    } \
+    return PyBool_FromLong(r); \
+  }
+
+GESTURE(magnify, BK_magnify)
+GESTURE(rotate, BK_rotate)
 
 static PyObject *kitctx_key(KitContextObject *self, PyObject *args)
 {
@@ -2091,6 +2131,12 @@ static PyMethodDef kitctx_methods[] = {
     {"motion", (PyCFunction)kitctx_motion, METH_VARARGS, "motion(x, y, mods)"},
     {"context_menu", (PyCFunction)kitctx_context_menu, METH_VARARGS, "Right click."},
     {"wheel", (PyCFunction)kitctx_wheel, METH_VARARGS, "wheel(x, y, delta, mods)"},
+    {"touch", (PyCFunction)kitctx_touch, METH_VARARGS,
+     "touch(id, phase, x, y, time_ms=0, mods=0): a touch screen contact (TOUCH_DOWN/MOVE/UP/CANCEL)"},
+    {"magnify", (PyCFunction)kitctx_magnify, METH_VARARGS,
+     "magnify(x, y, delta, mods=0): a trackpad pinch (0.1 = 10% larger)"},
+    {"rotate", (PyCFunction)kitctx_rotate, METH_VARARGS,
+     "rotate(x, y, degrees, mods=0): a trackpad turn (> 0 counter-clockwise)"},
     {"key", (PyCFunction)kitctx_key, METH_VARARGS, "key(text, keysym, mods)"},
     {"focus_node", (PyCFunction)kitctx_focus_node, METH_O,
      "focus_node(node): start editing a text node (None ends editing)."},

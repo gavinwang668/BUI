@@ -20,9 +20,16 @@ EV_CHANGE, EV_CLICK, EV_CALL, EV_RENAME, EV_ACTIVATE, EV_TOGGLE, EV_BROWSE = ran
  EV_SUBMIT, EV_VIEW, EV_SCROLL, EV_CONFIGURE, EV_KEYRELEASE) = range(8, 21)
 # A screen's areas, a panel moved, a region resized: delivered to _on_area, _on_move, _on_resize.
 EV_AREA, EV_MOVE, EV_RESIZE = range(21, 24)
+# A pinch or turn over an "events" node: ref "mods kind x y" (kind GESTURE_*), a = the amount.
+EV_GESTURE = 26
+GESTURE_MAGNIFY, GESTURE_ROTATE = 1, 2
 
-# Modifier bits for KitContext input calls.
+# Modifier bits for KitContext input calls. FROM_TOUCH marks raw events made from touch contacts.
 SHIFT, CTRL, ALT, BUTTON1 = 1, 2, 4, 8
+FROM_TOUCH = 64
+
+# KitContext.touch phases (BK_TOUCH_*).
+TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP, TOUCH_CANCEL = range(4)
 
 # Cursor ids (BK_CURSOR_*).
 CURSORS = (None, "ew", "ns", "text", "crosshair", "hand", "move", "none")

@@ -1087,6 +1087,29 @@ impl App {
         });
     }
 
+    /// A touch screen contact at (x, y), logical pixels: `id` tells the fingers apart. The kit's
+    /// touch model makes of the contacts what it makes of a real screen's (taps, scrolls and
+    /// flings, long presses, two-finger pans, pinches and turns).
+    pub fn simulate_touch(&mut self, window: WindowId, id: i32, phase: TouchPhase, x: f32, y: f32) {
+        self.input(window, |ctx, s| unsafe {
+            sys::BK_touch(ctx, id, phase.to_kit(), x * s, y * s, 0.0, 0);
+        });
+    }
+
+    /// A trackpad pinch at (x, y): `delta` is the scale change (0.1 = 10% larger).
+    pub fn simulate_magnify(&mut self, window: WindowId, x: f32, y: f32, delta: f32) {
+        self.input(window, |ctx, s| unsafe {
+            sys::BK_magnify(ctx, (x * s) as c_int, (y * s) as c_int, delta, 0);
+        });
+    }
+
+    /// A trackpad turn at (x, y): degrees, positive counter-clockwise.
+    pub fn simulate_rotate(&mut self, window: WindowId, x: f32, y: f32, degrees: f32) {
+        self.input(window, |ctx, s| unsafe {
+            sys::BK_rotate(ctx, (x * s) as c_int, (y * s) as c_int, degrees, 0);
+        });
+    }
+
     /// Type text / press a key (`keysym` as in Tk: "Return", "BackSpace", "a" ...).
     pub fn simulate_key(&mut self, window: WindowId, text: &str, keysym: &str) {
         let (t, k) = (CString::new(text).unwrap_or_default(), CString::new(keysym).unwrap_or_default());
@@ -2347,9 +2370,10 @@ impl Window {
         self.lent_bounds.first().map(|&(k, _)| k)
     }
 
+    /// True when a listener stopped the propagation (it took the event).
     fn emit<E: 'static>(&mut self, app: &mut App, key: Key, e: &E,
-                        pick: impl Fn(&Listeners) -> Vec<&Listener<E>>) {
-        let Some(frame) = self.frame.take() else { return };
+                        pick: impl Fn(&Listeners) -> Vec<&Listener<E>>) -> bool {
+        let Some(frame) = self.frame.take() else { return false };
         app.propagate = true;
         let mut cur = frame.by_key().get(&key).copied();
         self.lent_bounds.clear();
@@ -2369,11 +2393,13 @@ impl Window {
             }
             cur = frame.nodes[i].parent;
         }
+        let stopped = !app.propagate;
         app.propagate = true;
         self.lent_bounds.clear();
         if self.frame.is_none() {
             self.frame = Some(frame);
         }
+        stopped
     }
 
     /// The element keys under the pointer, and (when the pointer moved: `measure`) whether it is over
@@ -2600,19 +2626,34 @@ impl Window {
             }
             sys::BK_EV_WHEEL => {
                 let (modifiers, _) = self.pointer_event(&ev.text);
-                // the third number of the text: how the scroll came (BK_scroll_phase)
-                let phase = ScrollPhase::from_kit(ev.text.split_whitespace().nth(2).and_then(|v| v.parse().ok()).unwrap_or(0));
-                let (px_, py_) = self.pointer;
+                // after "mods button": how the scroll came (BK_scroll_phase), then where, relative
+                // to the canvas (a touch scroll moves no pointer there)
+                let mut rest = ev.text.split_whitespace().skip(2).map(|v| v.parse::<i32>().unwrap_or(0));
+                let phase = ScrollPhase::from_kit(rest.next().unwrap_or(0));
+                let (px_, py_) = match (rest.next(), rest.next()) {
+                    (Some(ex), Some(ey)) => (ex as f32 / self.scale, ey as f32 / self.scale),
+                    _ => self.pointer,
+                };
                 // `b`: the exact device pixels of a touch drag (BK_scroll_px), 0 for a wheel notch
                 let pixels = (ev.b != 0.0).then(|| ev.b as f32 / self.scale);
-                let e = ScrollWheelEvent { position: point(px(px_), px(py_)), delta: ev.a as f32, pixels, phase, modifiers };
+                let position = point(px(px_), px(py_));
                 let path = self.path_at(px_, py_);
-                if let Some(&deepest) = path.last() {
-                    self.emit(app, deepest, &e, |l| l.scroll.iter().collect());
+                let Some(&deepest) = path.last() else { return };
+                if phase != ScrollPhase::Wheel {
+                    // a finger drags the content: `on_pan` first, which may take it (a sideways
+                    // touch scroll comes as Shift + wheel)
+                    let d = px(pixels.unwrap_or(0.0));
+                    let delta = if modifiers.shift { point(d, px(0.0)) } else { point(px(0.0), d) };
+                    if self.emit(app, deepest, &PanEvent { position, delta, phase, modifiers }, |l| l.pan.iter().collect()) {
+                        return;
+                    }
                 }
+                let e = ScrollWheelEvent { position, delta: ev.a as f32, pixels, phase, modifiers };
+                self.emit(app, deepest, &e, |l| l.scroll.iter().collect());
                 // a touch drag follows the finger: it snaps no step (browsers snap such a gesture at its end)
                 self.scroll_by(&path, -pixels.unwrap_or(ev.a as f32 * 40.0), modifiers.shift, pixels.is_none());
             }
+            sys::BK_EV_GESTURE => self.gesture(app, &ev),
             sys::BK_EV_KEY | sys::BK_EV_KEYRELEASE => {
                 let mut parts = ev.text.splitn(2, '\t');
                 let ch = parts.next().unwrap_or("").to_owned();
@@ -2640,6 +2681,26 @@ impl Window {
                 } else {
                     self.emit(app, target, &KeyUpEvent { keystroke: ks }, |l| l.key_up.iter().collect());
                 }
+            }
+            _ => {}
+        }
+    }
+
+    /// A pinch or a turn (`BK_EV_GESTURE`: text "mods kind x y", device pixels from the canvas; `a`
+    /// the amount): `on_pinch` / `on_rotate` from the element under its centre up.
+    fn gesture(&mut self, app: &mut App, ev: &RawEvent) {
+        let mut it = ev.text.split_whitespace().map(|v| v.parse::<i32>().unwrap_or(0));
+        let (mods, kind) = (it.next().unwrap_or(0), it.next().unwrap_or(0));
+        let (x, y) = (it.next().unwrap_or(0) as f32 / self.scale, it.next().unwrap_or(0) as f32 / self.scale);
+        let Some(&deepest) = self.path_at(x, y).last() else { return };
+        let (position, modifiers, touch) = (point(px(x), px(y)), Modifiers::from_kit(mods), mods & sys::BK_FROM_TOUCH != 0);
+        let amount = ev.a as f32;
+        match kind {
+            sys::BK_GESTURE_MAGNIFY => {
+                self.emit(app, deepest, &PinchEvent { position, delta: amount, modifiers, touch }, |l| l.pinch.iter().collect());
+            }
+            sys::BK_GESTURE_ROTATE => {
+                self.emit(app, deepest, &RotateEvent { position, degrees: amount, modifiers, touch }, |l| l.rotate.iter().collect());
             }
             _ => {}
         }
@@ -2783,8 +2844,12 @@ impl Window {
             let Some(&i) = f.by_key().get(key) else { continue };
             let n = &f.nodes[i];
             let (rx, ry) = n.scroll_range;
-            let (sx, sy) = n.scroll_pos;
-            let (nx, ny) = if horizontal || ry <= 0.0 {
+            // where an earlier scroll of this turn put it (a diagonal touch scroll comes as two
+            // events before the next layout), else where it was drawn
+            let (sx, sy) = self.state.scroll.get(key).copied().unwrap_or(n.scroll_pos);
+            // a wheel over content with no vertical range scrolls it sideways; a finger keeps to
+            // the axis it moved along
+            let (nx, ny) = if horizontal || (ry <= 0.0 && snaps) {
                 ((sx + dy).clamp(0.0, rx), sy)
             } else {
                 (sx, (sy + dy).clamp(0.0, ry))

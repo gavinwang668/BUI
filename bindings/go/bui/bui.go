@@ -167,7 +167,7 @@ func goHostEmit(id C.uintptr_t, n *C.BKNode, kind C.int, ref C.uintptr_t, a, b C
 	}
 	e := Event{Node: wrap(n), Kind: k, A: float64(a), B: float64(b)}
 	switch k {
-	case EventKey, EventKeyRelease:
+	case EventKey, EventKeyRelease, EventGesture:
 		if ref != 0 {
 			e.Text = C.GoString(C.bui_go_text(ref))
 		}

@@ -8,6 +8,7 @@
 
 #include "BUI_kit.h"
 #include "image/image.h"
+#include "kit_touch.h"
 
 typedef unsigned char uchar;
 
@@ -339,6 +340,9 @@ typedef struct BKClass {
   int (*key_up)(BKNode *n, BKEvent *e); /* a key release, sent to the top popup */
   void (*popup_pick)(BKNode *n, void *data); /* a menu this node opened: the picked item's `data` */
   int (*wheel)(BKNode *n, BKEvent *e);
+  /* a pinch or a turn about e->x, e->y (BK_GESTURE_*: the scale change, degrees counter-clockwise);
+   * 1 when used */
+  int (*gesture)(BKNode *n, BKEvent *e, int kind, float amount);
   int (*cursor_at)(BKNode *n, int x, int y);
   void (*finish_edit)(BKNode *n, bool confirm);
   int (*context_items)(BKNode *n, BKMenuSpec *items, int max);
@@ -385,6 +389,8 @@ enum {
   CLS_POPUP = 1 << 2,
   CLS_BUTTONS = 1 << 3, /* middle / right presses arrive as press, drag, release with
                          * BK_BUTTON2 / BK_BUTTON3 in the event's mods (editors) */
+  CLS_DRAGS = 1 << 4,   /* a drag of its own (a slider, a field, an editor): a finger that lands
+                         * on it is pressed at once; elsewhere a finger's drag scrolls (kit_touch.c) */
 };
 
 enum { DRAG_GROUP_TOGGLE = 1, DRAG_GROUP_PANEL = 2 };
@@ -539,6 +545,18 @@ void bk_window_focus(BKContext *ctx, BKWindow *win, const BKWindowCallbacks *cb,
  * the pointer from a press for a move, so its release won't come): no click or BK_EV_RELEASE, a
  * drag's value back, a modal ended. */
 void bk_cancel_press(BKContext *ctx, int mods);
+/* bk_cancel_press as an input of its own (BK_cancel without the touches): 1 when a press ended. */
+int bk_cancel_pointer(BKContext *ctx, int mods);
+bool bk_is_within(const BKNode *n, const BKNode *subtree); /* n is subtree or inside it */
+
+/* Input entry points: mark the input scope (undo grouping) and report the view changes the event
+ * caused (scrollbars follow). */
+#define INPUT_ENTRY(call) \
+  ctx->in_input++; \
+  const int r = call; \
+  ctx->in_input--; \
+  bk_views_check(ctx); \
+  return r
 bool bk_contains(const BKNode *n, int x, int y);
 /* Whole pixels out of a fractional scroll distance: the part below one pixel stays in `*rem`
  * and carries into the next event, so slow smooth scrolling never rounds away to nothing. */
@@ -691,6 +709,7 @@ struct BKContext {
   int next_button;     /* the button the next in_BK_press / in_BK_release is for (0 = 1) */
   int in_custom_frame; /* inside custom frame callbacks: no host requests */
   double custom_timer_due; /* armed BK_TIMER_CUSTOM (bk_time), 0 = none */
+  BKTouch touch; /* touch screen contacts (kit_touch.c) */
   /* every live context (BK_set_theme redraws them all) */
   BKContext *next_ctx;
   /* its accessibility tree, made when a screen reader first asks (a11y/a11y.c) */
@@ -710,6 +729,14 @@ int bk_custom_event(BKNode *n, BKCustomEvent *e, int wx, int wy);
 void bk_custom_frames(BKContext *ctx);       /* BK_render: frame callbacks due */
 bool bk_custom_animating(BKContext *ctx);    /* a visible node wants the next frame */
 void bk_custom_timer(BKContext *ctx);        /* BK_TIMER_CUSTOM fired */
+int bk_custom_touch_mode(const BKNode *n);   /* BK_TOUCH_MODE_* (a custom node's, else SCROLL) */
+/* One contact of a BK_TOUCH_MODE_RAW node (BK_CUSTOM_TOUCH; the first one down takes the focus). */
+int bk_custom_touch(BKNode *n, int id, int phase, int x, int y, int mods);
+/* Pinches and turns (kit_core.c): the node they go to at x, y, and the first of `target` and its
+ * parents that takes one ("events" nodes get BK_EV_GESTURE on the way). */
+BKNode *bk_wheel_target(BKContext *ctx, int x, int y); /* the widget there, else the deepest node */
+BKNode *bk_gesture_target(BKContext *ctx, int x, int y);
+int bk_gesture(BKContext *ctx, BKNode *target, int x, int y, int kind, float amount, int mods);
 /* Arms the context's frame timer (BK_TIMER_CUSTOM) for the earliest of its
  * custom nodes' wakes and its animated images' next frames. */
 void bk_ctx_arm_timer(BKContext *ctx);

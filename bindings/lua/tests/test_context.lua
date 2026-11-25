@@ -84,6 +84,71 @@ ctx:context_menu(100, 100, 0)
 -- Scroll
 ctx:scroll(50, 50, 10.5, -20.3, 0)
 
+-- ── Touch screens and trackpad gestures ─────────────────────────────
+
+do
+  local troot = bui.Node("column")
+  local tbtn = bui.Node("button")
+  tbtn:set("text", "Go")
+  local taps = 0
+  tbtn:on(bui.EV_CLICK, function() taps = taps + 1 end)
+  local pad = bui.Node("canvas")
+  pad:set("events", 1)
+  pad:set("height", 200)
+  local gestures = {}
+  pad:on(bui.EV_GESTURE, function(_, amount, _, text) gestures[#gestures + 1] = {amount, text} end)
+  local touches = {}
+  local raw = bui.Node("custom")
+  raw:custom_set({natural_w = 200, natural_h = 100, on_event = function(_, e)
+    if e.type == bui.CUSTOM_TOUCH then touches[#touches + 1] = {e.touch_id, e.touch_phase, e.mods} end
+    return e.type == bui.CUSTOM_TOUCH
+  end})
+  raw:custom_set_touch(bui.TOUCH_MODE_RAW)
+  troot:add(tbtn)
+  troot:add(pad)
+  troot:add(raw)
+  local tctx = bui.Context(troot)
+  tctx:render(400, 500, 1)
+  local bx, by, bw, bh = tbtn:rect()
+  local x, y = bx + bw // 2, by + bh // 2
+  -- a tap is a click once the finger lifts
+  tctx:touch(1, bui.TOUCH_DOWN, x, y)
+  check(taps == 0, "touch: clicked before the finger lifted")
+  tctx:touch(1, bui.TOUCH_UP, x + 2, y, 0, 0)
+  check(taps == 1, "touch: a tap did not click, taps " .. taps)
+  -- two fingers spreading over the pad: magnify gestures about their centre
+  local px, py, pw, ph = pad:rect()
+  local cx, cy = px + pw // 2, py + ph // 2
+  tctx:touch(2, bui.TOUCH_DOWN, cx - 20, cy)
+  tctx:touch(3, bui.TOUCH_DOWN, cx + 20, cy)
+  for i = 1, 3 do
+    tctx:touch(2, bui.TOUCH_MOVE, cx - 20 - 10 * i, cy)
+    tctx:touch(3, bui.TOUCH_MOVE, cx + 20 + 10 * i, cy)
+  end
+  tctx:touch(2, bui.TOUCH_UP, cx - 50, cy)
+  tctx:touch(3, bui.TOUCH_UP, cx + 50, cy)
+  check(#gestures == 3, "touch: expected 3 magnify gestures, got " .. #gestures)
+  local mods, kind, gx, gy = gestures[1][2]:match("^(%d+) (%d+) (%-?%d+) (%-?%d+)$")
+  check(tonumber(mods) & bui.MOD_FROM_TOUCH ~= 0, "touch: gesture mods lack MOD_FROM_TOUCH")
+  check(tonumber(kind) == bui.GESTURE_MAGNIFY and gestures[1][1] > 0, "touch: not a spread")
+  check(tonumber(gx) == cx - px and tonumber(gy) == cy - py, "touch: gesture centre " .. gestures[1][2])
+  -- a trackpad pinch
+  gestures = {}
+  check(tctx:magnify(cx, cy, 0.25), "magnify changed nothing")
+  check(#gestures == 1 and gestures[1][2] == string.format("0 %d %d %d", bui.GESTURE_MAGNIFY, cx - px, cy - py)
+        and math.abs(gestures[1][1] - 0.25) < 1e-6, "magnify: no gesture event")
+  tctx:rotate(cx, cy, -15)
+  check(#gestures == 2 and gestures[2][1] == -15, "rotate: no gesture event")
+  -- a raw custom node gets its contacts as they are
+  local rx, ry = raw:rect()
+  tctx:touch(4, bui.TOUCH_DOWN, rx + 10, ry + 10)
+  tctx:touch(4, bui.TOUCH_CANCEL, rx + 10, ry + 10)
+  check(#touches == 2 and touches[1][1] == 4 and touches[1][2] == bui.TOUCH_DOWN
+        and touches[2][2] == bui.TOUCH_CANCEL and touches[1][3] & bui.MOD_FROM_TOUCH ~= 0,
+        "touch: raw custom contacts " .. #touches)
+  tctx:free()
+end
+
 -- ── Cursor ───────────────────────────────────────────────────────────
 
 local cursor = ctx:cursor()

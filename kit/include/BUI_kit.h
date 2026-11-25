@@ -69,8 +69,18 @@ typedef struct BKNode BKNode;
 typedef struct BKContext BKContext;
 typedef struct BKTreeItem BKTreeItem;
 
-/* Modifier / button state bits for input calls. */
-enum { BK_SHIFT = 1, BK_CTRL = 2, BK_ALT = 4, BK_BUTTON1 = 8, BK_BUTTON2 = 16, BK_BUTTON3 = 32 };
+/* Modifier / button state bits for input calls. BK_FROM_TOUCH is the kit's own: it marks the
+ * pointer, scroll and gesture events it makes from touch screen contacts (BK_touch), so raw event
+ * handlers and custom nodes can tell a finger from the mouse. Hosts never pass it. */
+enum {
+  BK_SHIFT = 1,
+  BK_CTRL = 2,
+  BK_ALT = 4,
+  BK_BUTTON1 = 8,
+  BK_BUTTON2 = 16,
+  BK_BUTTON3 = 32,
+  BK_FROM_TOUCH = 64
+};
 
 /* Mouse cursors requested through BKHost.set_cursor. */
 enum {
@@ -118,8 +128,15 @@ enum {
   BK_EV_RESIZE, /* an area's region was resized, hidden or shown: a = size, b = hidden */
   /* Accessibility (see BK_a11y_set_subtree), on a node holding a host subtree, or the root: */
   BK_EV_A11Y_TREE,  /* a screen reader reads this window now: set your subtrees (on the root) */
-  BK_EV_A11Y_ACTION /* a screen reader asks for an action on a subtree node: ref = BKA11yRequest * */
+  BK_EV_A11Y_ACTION, /* a screen reader asks for an action on a subtree node: ref = BKA11yRequest * */
+  /* A pinch or a turn over an "events" node (two fingers, or a trackpad: BK_magnify / BK_rotate):
+   * ref = "mods kind x y", kind BK_GESTURE_*, x, y its centre relative to the node; a = the amount:
+   * MAGNIFY the scale change (0.1 = 10% larger), ROTATE degrees (> 0 counter-clockwise). */
+  BK_EV_GESTURE
 };
+
+/* BK_EV_GESTURE kinds: Blender's MOUSEZOOM and MOUSEROTATE. A pan is a scroll (BK_scroll_px). */
+enum { BK_GESTURE_MAGNIFY = 1, BK_GESTURE_ROTATE = 2 };
 
 typedef struct BKHost {
   void *data;
@@ -725,7 +742,9 @@ void BK_node_set_image_frame(BKNode *node, int frame);
  *  - `draw` with the raster, clipped to the redrawn region inside the node.
  *    It may be called several times per render (one per damaged region) and
  *    for regions other widgets damaged, so it must draw the current state
- *    without changing it.
+ *    without changing it;
+ *  - touch screen contacts as BK_custom_set_touch says (BK_TOUCH_MODE_*), and pinches and turns
+ *    (two fingers or a trackpad) as MAGNIFY / ROTATE.
  * Positions are in raster pixels relative to the node's top-left corner. */
 enum {
   BK_CUSTOM_PRESS = 1, /* button: 1 left, 2 middle, 3 right */
@@ -737,6 +756,23 @@ enum {
   BK_CUSTOM_KEYUP,     /* keysym */
   BK_CUSTOM_FOCUS,     /* keyboard focus gained */
   BK_CUSTOM_BLUR,      /* keyboard focus lost */
+  BK_CUSTOM_TOUCH,     /* one contact (BK_TOUCH_MODE_RAW): touch_id, touch_phase, x, y */
+  BK_CUSTOM_MAGNIFY,   /* magnify: a pinch about x, y */
+  BK_CUSTOM_ROTATE,    /* rotate: a turn about x, y */
+};
+
+/* What a touch screen finger that lands on a custom node does (BK_custom_set_touch). */
+enum {
+  /* The default, as on a phone: a tap is a click, a drag scrolls (the node gets wheel events; a
+   * contact in the widget-unit strip at its right edge is its scrollbar's: a press and a drag) and
+   * two fingers pan, pinch and turn. */
+  BK_TOUCH_MODE_SCROLL = 0,
+  /* The finger is the pointer: a press at once, and its drag is the node's (ImGui's sliders and
+   * window moves); two fingers still pan, pinch and turn. */
+  BK_TOUCH_MODE_POINTER,
+  /* Every contact that begins over the node arrives as BK_CUSTOM_TOUCH, any number at once, and
+   * the node does its own gestures. */
+  BK_TOUCH_MODE_RAW,
 };
 
 typedef struct BKCustomEvent {
@@ -749,6 +785,10 @@ typedef struct BKCustomEvent {
   float wheel_y;       /* notches; > 0: scroll up (wheel turned away) */
   const char *text;    /* KEY: UTF-8 text the key typed ("" for none) */
   const char *keysym;  /* KEY / KEYUP: X11 keysym name ("Return", "a", "F1"; "" for none) */
+  int touch_id;        /* TOUCH: the host's id of the contact (unique while it is down) */
+  int touch_phase;     /* TOUCH: BK_TOUCH_DOWN / MOVE / UP / CANCEL */
+  float magnify;       /* MAGNIFY: scale change since the last one (0.1 = 10% larger) */
+  float rotate;        /* ROTATE: degrees since the last one, > 0 counter-clockwise */
 } BKCustomEvent;
 
 typedef struct BKCustomClass {
@@ -772,6 +812,8 @@ void *BK_custom_data(BKNode *node);
 void BK_custom_request_frame(BKNode *node, int ms);
 /* Pointer shape over the node (BK_CURSOR_*), applied right away when hovered. */
 void BK_custom_set_cursor(BKNode *node, int cursor);
+/* What a finger that lands on the node does: BK_TOUCH_MODE_* (BK_TOUCH_MODE_SCROLL by default). */
+void BK_custom_set_touch(BKNode *node, int mode);
 int BK_custom_has_focus(BKNode *node);
 /* The context a node is shown in (NULL while detached). */
 BKContext *BK_node_context(const BKNode *node);
@@ -831,9 +873,11 @@ int BK_needs_render(BKContext *ctx);
 int BK_press(BKContext *ctx, int x, int y, int mods);
 int BK_release(BKContext *ctx, int x, int y, int mods);
 int BK_motion(BKContext *ctx, int x, int y, int mods);
-/* The host lost the pointer mid-press (a cancelled touch, a lost pointer capture, a dialog): Blender's
- * EVT_BUT_CANCEL. A drag is cancelled as Escape cancels it (the value goes back), a modal ends, and the
- * press ends where the pointer last was, with no click and no BK_EV_RELEASE. */
+/* The host lost the pointer mid-press (a lost pointer capture, a dialog): Blender's EVT_BUT_CANCEL.
+ * The pressed widget's interaction is cancelled whether it was dragged or not (a dragged value goes
+ * back, as with Escape), a modal ends, and the press ends where the pointer last was, with no click
+ * and no BK_EV_RELEASE. Every touch contact down is cancelled too (BK_TOUCH_CANCEL): the window
+ * hosts do all of this when the window loses the focus. */
 int BK_cancel(BKContext *ctx, int mods);
 int BK_wheel(BKContext *ctx, int x, int y, int delta, int mods);
 /* Precise scrolling (touchpads, tilt wheels): dx, dy in wheel notches,
@@ -857,6 +901,40 @@ enum {
   BK_SCROLL_END = 4,   /* the finger lifted */
 };
 void BK_scroll_phase(BKContext *ctx, int phase);
+
+/* -- Touch screens and trackpad gestures -----------------------------------------------------
+ * A host sends every contact of a touch screen: `id` is the platform's (unique while the finger is
+ * down), x, y window pixels as for BK_motion, `time_ms` the event's own time in milliseconds on any
+ * monotonic clock (only differences count; <= 0: now) for the fling's velocity. The kit turns them
+ * into what its widgets know, one model on every platform (Android's):
+ *  - a finger that lands on a widget with a drag of its own (a slider, a number or text field, a
+ *    scrollbar, an editor; BK_TOUCH_MODE_POINTER custom nodes) is the pointer at once: press,
+ *    drag, release, with BK_FROM_TOUCH in the mods;
+ *  - anywhere else the finger waits: lifted in place it is a click (a tap; two are a double
+ *    click), held still for half a second it opens the context menu (BK_context_menu), moved past
+ *    the touch slop it scrolls what is under it exactly as far as it went (BK_scroll_px with
+ *    BK_SCROLL_DRAG) and when it lifts the content flings on along Android's curve
+ *    (BK_SCROLL_FLING, then BK_SCROLL_END; BK_animating is non-zero meanwhile). A finger that
+ *    lands on a fling stops it and clicks nothing;
+ *  - a second finger cancels what the first one did (as BK_cancel: a dragged value goes back,
+ *    nothing is clicked) and the two are a gesture until they lift: moving together they scroll
+ *    (Blender's MOUSEPAN), spreading they magnify and turning they rotate about their centre
+ *    (MOUSEZOOM, MOUSEROTATE: as BK_magnify, BK_rotate). No finger is the pointer again until all
+ *    have lifted;
+ *  - a custom node in BK_TOUCH_MODE_RAW gets the contacts that begin over it as they are;
+ *  - no hover is left behind: the pointer leaves when the finger lifts.
+ * BK_TOUCH_CANCEL: the platform took the contact back (a system gesture, a lost capture); nothing
+ * it did is kept, and its x, y are not used. Returns non-zero when something changed. */
+enum { BK_TOUCH_DOWN = 0, BK_TOUCH_MOVE, BK_TOUCH_UP, BK_TOUCH_CANCEL };
+int BK_touch(BKContext *ctx, int id, int phase, float x, float y, double time_ms, int mods);
+/* A trackpad pinch (GHOST_kTrackpadEventMagnify, Blender's MOUSEZOOM) about x, y: `delta` is the
+ * scale change since the last one (0.1 = 10% larger). The node editor zooms; custom nodes get
+ * BK_CUSTOM_MAGNIFY and "events" nodes BK_EV_GESTURE. */
+int BK_magnify(BKContext *ctx, int x, int y, float delta, int mods);
+/* A trackpad turn (GHOST_kTrackpadEventRotate, MOUSEROTATE) about x, y: degrees since the last
+ * one, > 0 counter-clockwise (as NSEvent.rotation). */
+int BK_rotate(BKContext *ctx, int x, int y, float degrees, int mods);
+
 int BK_key(BKContext *ctx, const char *text, const char *keysym, int mods);
 /* Called by a binding while it handles a key's raw event (BK_EV_KEY) when it acted on the key:
  * BK_key then returns 1 and no widget or shortcut sees the key. A host acts on a key BK_key

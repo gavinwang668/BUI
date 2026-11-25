@@ -354,13 +354,15 @@ static int Bui_Event(void* data, BKNode* node, const BKCustomEvent* e)
     const ImGuiKey key = (e->type == BK_CUSTOM_KEY || e->type == BK_CUSTOM_KEYUP) ? KeysymToImGuiKey(e->keysym, &pulse) : ImGuiKey_None;
     if (e->type != BK_CUSTOM_FOCUS && e->type != BK_CUSTOM_BLUR)
         UpdateModifiers(bd, io, e, key);
+    // a finger (the kit made the event from a touch contact) or the mouse
+    const ImGuiMouseSource source = (e->mods & BK_FROM_TOUCH) ? ImGuiMouseSource_TouchScreen : ImGuiMouseSource_Mouse;
     switch (e->type)
     {
     case BK_CUSTOM_PRESS:
     case BK_CUSTOM_RELEASE:
     {
         const int b = MouseButton(e->button);
-        io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+        io.AddMouseSourceEvent(source);
         io.AddMousePosEvent(e->x, e->y);
         if (b >= 0)
         {
@@ -371,7 +373,7 @@ static int Bui_Event(void* data, BKNode* node, const BKCustomEvent* e)
         break;
     }
     case BK_CUSTOM_MOTION:
-        io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+        io.AddMouseSourceEvent(source);
         io.AddMousePosEvent(e->x, e->y);
         break;
     case BK_CUSTOM_LEAVE:
@@ -379,7 +381,7 @@ static int Bui_Event(void* data, BKNode* node, const BKCustomEvent* e)
             io.AddMousePosEvent(-FLT_MAX, -FLT_MAX);
         break;
     case BK_CUSTOM_WHEEL:
-        io.AddMouseSourceEvent(ImGuiMouseSource_Mouse);
+        io.AddMouseSourceEvent(source);
         io.AddMousePosEvent(e->x, e->y);
         io.AddMouseWheelEvent(-e->wheel_x, e->wheel_y); // ImGui: wheel_x > 0 scrolls left
         break;
@@ -414,6 +416,8 @@ static int Bui_Event(void* data, BKNode* node, const BKCustomEvent* e)
         bd->ButtonsDown = 0;
         bd->SuperDown = false;
         break;
+    default: // pinches, turns and raw contacts: ImGui has none
+        return 0;
     }
     InputHappened(bd);
     return used;
@@ -673,6 +677,7 @@ bool ImGui_ImplBUI_Init(BKNode* node, ImGui_ImplBUI_FrameFn frame, void* user, c
     cls.free = Bui_Free;
     cls.natural_w = cls.natural_h = 1; // takes the room its layout gives it ("fill")
     BK_custom_set(node, &cls, bd);
+    BK_custom_set_touch(node, BK_TOUCH_MODE_POINTER); // ImGui owns its drags: sliders, window moves
     bd->FramesPending = bd->Config.SettleFrames; // new windows size themselves over a few frames
     BK_custom_request_frame(node, 0);
     return true;

@@ -62,6 +62,9 @@ typedef struct NodeEdit {
   BKNode *hit;                 /* node pressed */
   int link_node, link_sock;    /* the fixed end of a dragged link */
   bool link_from_output;
+  /* M_LINK: the link the drag took off an input (from, out, to, in), put back by a cancel
+   * (node_link_cancel); picked_from < 0: none */
+  int picked_from, picked_out, picked_to, picked_in;
   int value_node, value_sock;
   double value_start;
   BKNode *ctl_node; /* the control pressed (M_CONTROL), or the one whose menu is open */
@@ -1137,8 +1140,13 @@ static int editor_press(BKNode *e, BKEvent *ev)
       d->link_node = old.from;
       d->link_sock = old.out;
       d->link_from_output = true;
+      d->picked_from = old.from;
+      d->picked_out = old.out;
+      d->picked_to = old.to;
+      d->picked_in = old.in;
     }
     else {
+      d->picked_from = -1;
       d->link_node = ni;
       d->link_sock = k;
       d->link_from_output = !input;
@@ -1362,6 +1370,9 @@ static void editor_cancel(BKNode *e)
   else if (d->mode == M_VALUE) {
     set_input_value(e->kids[d->value_node], d->value_sock, d->value_start);
   }
+  else if (d->mode == M_LINK && d->picked_from >= 0) { /* node_link_cancel: the graph as it was */
+    add_link(e, d->picked_from, d->picked_out, d->picked_to, d->picked_in);
+  }
   d->mode = M_NONE;
   bk_invalidate(e);
 }
@@ -1370,7 +1381,15 @@ static int editor_wheel(BKNode *e, BKEvent *ev)
 {
   NodeEdit *d = ed(e);
   const float step = 2.0f * u(); /* view2d scroll step */
-  if (EV_CTRL(ev)) { /* VIEW2D_OT_scroll_right / left */
+  if (ev->wheel_y != 0.0f) { /* MOUSEPAN (view_pan_invoke): the view follows the fingers exactly */
+    if (EV_SHIFT(ev)) {
+      d->panx += ev->wheel_y;
+    }
+    else {
+      d->pany += ev->wheel_y;
+    }
+  }
+  else if (EV_CTRL(ev)) { /* VIEW2D_OT_scroll_right / left */
     d->panx += ev->delta * step;
   }
   else if (EV_SHIFT(ev)) { /* VIEW2D_OT_scroll_up / down */
@@ -1383,9 +1402,23 @@ static int editor_wheel(BKNode *e, BKEvent *ev)
   return 1;
 }
 
+/* MOUSEZOOM about the fingers or the pointer (view_zoomstep_apply_ex); no rotation in 2D views. */
+static int editor_gesture(BKNode *e, BKEvent *ev, int kind, float amount)
+{
+  if (kind != BK_GESTURE_MAGNIFY) {
+    return 0;
+  }
+  zoom_at(e, 1.0f + amount, ev->x, ev->y);
+  return 1;
+}
+
 static int editor_key(BKNode *e, BKEvent *ev)
 {
   const char *k = ev->keysym;
+  const Mode mode = ed(e)->mode;
+  if ((bk_keysym_is(k, "x") || bk_keysym_is(k, "Delete")) && (mode == M_LINK || mode == M_VALUE)) {
+    return 1; /* the drag holds node indices a delete would shift */
+  }
   if (bk_keysym_is(k, "x") || bk_keysym_is(k, "Delete")) { /* NODE_OT_delete */
     bk_emit(e, BK_EV_CHANGE, NULL, EV_DELETE, 0);
     return 1;
@@ -1495,7 +1528,7 @@ static int editor_get_num(BKNode *e, const char *key, double *r)
 }
 
 const BKClass bk_cls_nodeeditor = {.name = "nodeeditor", .a11y_role = BK_ROLE_GROUP,
-                                   .flags = CLS_INTERACTIVE | CLS_BUTTONS,
+                                   .flags = CLS_INTERACTIVE | CLS_BUTTONS | CLS_DRAGS,
                                    .init = editor_init,
                                    .free_ext = editor_free,
                                    .measure = editor_measure,
@@ -1509,6 +1542,7 @@ const BKClass bk_cls_nodeeditor = {.name = "nodeeditor", .a11y_role = BK_ROLE_GR
                                    .cancel = editor_cancel,
                                    .popup_pick = editor_popup_pick,
                                    .wheel = editor_wheel,
+                                   .gesture = editor_gesture,
                                    .key = editor_key,
                                    .cursor_at = editor_cursor_at,
                                    .set_num = editor_set_num,
