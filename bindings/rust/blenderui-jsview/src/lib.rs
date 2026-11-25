@@ -19,8 +19,8 @@ pub mod motion;
 pub mod shell;
 
 /// An event from a window (`kind`: click, mousedown, mouseup, mousemove,
-/// mouseenter, mouseleave, wheel, keydown, keyup, change, input, frame,
-/// close).
+/// mouseenter, mouseleave, wheel, keydown, keyup, change, input, pinch,
+/// rotate, pan, frame, close).
 #[derive(Clone, Debug, Default)]
 pub struct Event {
     pub kind: String,
@@ -32,7 +32,14 @@ pub struct Event {
     /// 0 left, 1 middle, 2 right (DOM numbering).
     pub button: u32,
     pub click_count: u32,
+    /// `wheel`: lines (positive scrolls the content up); `pinch`: the scale change (0.1 = 10%
+    /// larger); `rotate`: degrees, positive counter-clockwise.
     pub delta: f64,
+    /// `pan`: logical pixels the content follows the fingers, x right, y down.
+    pub delta_x: f64,
+    pub delta_y: f64,
+    /// `pan`: "drag" while a finger is down, "fling" as the content coasts on, "end" when it lifted.
+    pub phase: Option<&'static str>,
     pub key: Option<String>,
     pub key_char: Option<String>,
     pub value: Option<String>,
@@ -146,6 +153,9 @@ pub mod ev {
     pub const KEY_UP: u32 = 128;
     pub const CHANGE: u32 = 256;
     pub const INPUT: u32 = 512;
+    pub const PINCH: u32 = 1024;
+    pub const ROTATE: u32 = 2048;
+    pub const PAN: u32 = 4096;
 }
 
 // ==========================================================================
@@ -417,6 +427,9 @@ impl JsView {
     }
 
     fn listeners(&self, mut d: Div, id: u32, bits: u32) -> Div {
+        fn at(e: &mut Event, p: Point<Pixels>) {
+            (e.x, e.y) = (f64::from(p.x.0), f64::from(p.y.0));
+        }
         let base = Event { window: self.window, target: id, ..Default::default() };
         let send = {
             let t = self.sink.clone();
@@ -488,6 +501,32 @@ impl JsView {
             (e.x, e.y) = (w.position.x.0 as f64, w.position.y.0 as f64);
             e.delta = w.delta as f64;
             mods(&mut e, &w.modifiers);
+        });
+        on!(ev::PINCH, on_pinch, |e, p| {
+            e.kind = "pinch".into();
+            at(&mut e, p.position);
+            e.delta = f64::from(p.delta);
+            mods(&mut e, &p.modifiers);
+        });
+        on!(ev::ROTATE, on_rotate, |e, r| {
+            e.kind = "rotate".into();
+            at(&mut e, r.position);
+            e.delta = f64::from(r.degrees);
+            mods(&mut e, &r.modifiers);
+        });
+        // Stopping the propagation here takes the drag (nothing scrolls under an element listening
+        // for `pan`, CSS's `touch-action: none`): JavaScript hears of it later, on its own thread.
+        on!(ev::PAN, on_pan, |e, p| {
+            e.kind = "pan".into();
+            at(&mut e, p.position);
+            (e.delta_x, e.delta_y) = (f64::from(p.delta.x.0), f64::from(p.delta.y.0));
+            e.phase = Some(match p.phase {
+                ScrollPhase::Wheel => "wheel",
+                ScrollPhase::Drag => "drag",
+                ScrollPhase::Fling => "fling",
+                ScrollPhase::End => "end",
+            });
+            mods(&mut e, &p.modifiers);
         });
         on!(ev::KEY_DOWN, on_key_down, |e, k| {
             e.kind = "keydown".into();
@@ -726,6 +765,32 @@ pub fn simulate_pointer(cx: &mut App, window: u32, kind: u32, x: f64, y: f64) {
             0 => cx.simulate_mouse_move(h.id, x, y),
             1 => cx.simulate_press(h.id, x, y),
             _ => cx.simulate_release(h.id, x, y),
+        }
+    }
+}
+
+/// A touch screen contact at (x, y) in window `window` (tests; logical pixels): `id` tells the
+/// fingers apart, `phase` 0 down, 1 move, 2 up, 3 cancel.
+pub fn simulate_touch(cx: &mut App, window: u32, id: i32, phase: u32, x: f64, y: f64) {
+    if let Some(h) = cx.global::<UiState>().windows.get(&window).cloned() {
+        let phase = match phase {
+            0 => TouchPhase::Down,
+            1 => TouchPhase::Move,
+            2 => TouchPhase::Up,
+            _ => TouchPhase::Cancel,
+        };
+        cx.simulate_touch(h.id, id, phase, x as f32, y as f32);
+    }
+}
+
+/// A trackpad gesture at (x, y) in window `window` (tests; logical pixels): `kind` 0 pinches by
+/// `amount` (the scale change), 1 turns by `amount` degrees.
+pub fn simulate_gesture(cx: &mut App, window: u32, kind: u32, x: f64, y: f64, amount: f64) {
+    if let Some(h) = cx.global::<UiState>().windows.get(&window).cloned() {
+        let (x, y, amount) = (x as f32, y as f32, amount as f32);
+        match kind {
+            0 => cx.simulate_magnify(h.id, x, y, amount),
+            _ => cx.simulate_rotate(h.id, x, y, amount),
         }
     }
 }

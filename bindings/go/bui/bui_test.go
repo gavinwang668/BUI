@@ -3,6 +3,7 @@
 package bui
 
 import (
+	"fmt"
 	"runtime"
 	"strings"
 	"testing"
@@ -37,6 +38,60 @@ func TestPropertiesAndTree(t *testing.T) {
 	d.Free()
 	if root.ChildCount() != 1 {
 		t.Errorf("remove")
+	}
+}
+
+// A tap clicks; a spread over an "events" node and a trackpad pinch are EventGesture.
+func TestTouchAndGestures(t *testing.T) {
+	root := NewNode("column")
+	defer root.Free()
+	b := NewNode("button").Set("text", "Go")
+	pad := NewNode("canvas").Set("events", 1).Set("height", 120)
+	root.Add(b).Add(pad)
+	clicks := 0
+	b.OnClick(func(Event) { clicks++ })
+	var gestures []Event
+	pad.On(EventGesture, func(e Event) { gestures = append(gestures, e) })
+	ctx := NewContext(root)
+	defer ctx.Free()
+	r := NewRaster(320, 240)
+	defer r.Free()
+	ctx.Render(r, 320, 240, true)
+
+	x, y := b.Rect().Center()
+	ctx.Touch(1, TouchDown, float32(x), float32(y), 0, 0)
+	if clicks != 0 {
+		t.Errorf("clicked before the finger lifted")
+	}
+	ctx.Touch(1, TouchUp, float32(x+2), float32(y), 0, 0)
+	if clicks != 1 {
+		t.Errorf("a tap: clicks %d", clicks)
+	}
+
+	pr := pad.Rect()
+	cx, cy := pr.Center()
+	fx, fy := float32(cx), float32(cy)
+	ctx.Touch(2, TouchDown, fx-20, fy, 0, 0)
+	ctx.Touch(3, TouchDown, fx+20, fy, 0, 0)
+	for i := float32(1); i <= 3; i++ {
+		ctx.Touch(2, TouchMove, fx-20-10*i, fy, 0, 0)
+		ctx.Touch(3, TouchMove, fx+20+10*i, fy, 0, 0)
+	}
+	ctx.Touch(2, TouchUp, fx-50, fy, 0, 0)
+	ctx.Touch(3, TouchUp, fx+50, fy, 0, 0)
+	if len(gestures) != 3 {
+		t.Fatalf("a spread: %d gestures", len(gestures))
+	}
+	var mods, kind, gx, gy int
+	fmt.Sscan(gestures[0].Text, &mods, &kind, &gx, &gy)
+	if mods&FromTouch == 0 || kind != GestureMagnify || gestures[0].A <= 0 || gx != cx-pr.X || gy != cy-pr.Y {
+		t.Errorf("a spread: %q, a %v", gestures[0].Text, gestures[0].A)
+	}
+
+	gestures = nil
+	if !ctx.Magnify(cx, cy, 0.25, 0) || len(gestures) != 1 || gestures[0].A != 0.25 ||
+		gestures[0].Text != fmt.Sprintf("0 %d %d %d", GestureMagnify, cx-pr.X, cy-pr.Y) {
+		t.Errorf("a trackpad pinch: %+v", gestures)
 	}
 }
 

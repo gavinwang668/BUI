@@ -109,7 +109,11 @@ button.addEventListener('click', (event) => {
 })
 ```
 
-The events are `click`, `mousedown`, `mouseup`, `mousemove`, `mouseenter`, `mouseleave`, `wheel`, `keydown`, `keyup`, `input` and `change`. The event object carries `target`, `currentTarget`, `clientX`/`clientY`, `button`, `deltaY`, `key`, the modifier flags (`shiftKey`, `ctrlKey`, `altKey`, `metaKey`) and `timeStamp`.
+The events are `click`, `mousedown`, `mouseup`, `mousemove`, `mouseenter`, `mouseleave`, `wheel`, `keydown`, `keyup`, `input` and `change`, and the touch screen and trackpad gestures `pinch`, `rotate` and `pan`. The event object carries `target`, `currentTarget`, `clientX`/`clientY`, `button`, `deltaX`/`deltaY`, `delta`, `phase`, `key`, the modifier flags (`shiftKey`, `ctrlKey`, `altKey`, `metaKey`) and `timeStamp`.
+
+- **`pinch`**: `delta` is the scale change since the last one (0.1 is 10% larger: multiply a zoom by `1 + delta`), about `clientX`/`clientY`.
+- **`rotate`**: `delta` is the degrees turned since the last one, positive counter-clockwise.
+- **`pan`**: `deltaX`/`deltaY` are the pixels the content follows the fingers (x right, y down); `phase` is `'drag'` while a finger is down, `'fling'` as the content coasts on, and `'end'` when it lifted. An element listening for `pan` takes the drag, like CSS's `touch-action: none`: nothing under it scrolls by touch.
 
 - **They bubble**, except `mouseenter` and `mouseleave`, as in the DOM. `stopPropagation()` and `stopImmediatePropagation()` work.
 - **`event.target`** is the deepest element listening for that event type.
@@ -164,7 +168,7 @@ win.setProgressBar(0.5)
 
 ## Testing without a window
 
-`new App({ headless: true })` renders off-screen. Combine it with `win.click(x, y)` and `win.screenshot()` to test a UI in CI:
+`new App({ headless: true })` renders off-screen. Combine it with `win.click(x, y)` and `win.screenshot()` to test a UI in CI (`win.mouseMove`, `win.mouseDown` and `win.mouseUp` drive the pointer, `win.touch(id, phase, x, y)` a touch screen's fingers, and `win.pinch(x, y, delta)` and `win.rotate(x, y, degrees)` a trackpad's gestures):
 
 ```js title="test.js"
 const { App } = require('@blender-ui/native')

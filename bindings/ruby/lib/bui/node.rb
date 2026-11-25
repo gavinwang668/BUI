@@ -81,7 +81,8 @@ module BUI
 
     # Events the kit sends only to nodes that ask for them ("events"), and :view
     # ("viewevents").
-    RAW_EVENTS = %i[press release double motion enter leave key wheel submit configure key_release].freeze
+    RAW_EVENTS = %i[press release double motion enter leave key wheel submit configure key_release
+                    gesture].freeze
 
     # Handles a kind of event (BUI::EVENT_KINDS), replacing the last handler; the
     # block gets a BUI::Event. Without a block, removes it. Returns self.

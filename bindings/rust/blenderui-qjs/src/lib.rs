@@ -332,6 +332,9 @@ fn event_object<'js>(ctx: &Ctx<'js>, e: view::Event) -> rquickjs::Result<Object<
     o.set("button", e.button)?;
     o.set("clickCount", e.click_count)?;
     o.set("delta", e.delta)?;
+    o.set("deltaX", e.delta_x)?;
+    o.set("deltaY", e.delta_y)?;
+    o.set("phase", e.phase)?;
     o.set("key", e.key)?;
     o.set("keyChar", e.key_char)?;
     o.set("value", e.value)?;

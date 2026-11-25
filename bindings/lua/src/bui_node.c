@@ -1124,7 +1124,7 @@ static int custom_event_cb(void *data, BKNode *node, const BKCustomEvent *e) {
     return 0;
   }
   luabui_push_node(L, node);
-  lua_createtable(L, 0, 10);
+  lua_createtable(L, 0, 14);
   lua_pushinteger(L, e->type);            lua_setfield(L, -2, "type");
   lua_pushnumber(L, e->x);                lua_setfield(L, -2, "x");
   lua_pushnumber(L, e->y);                lua_setfield(L, -2, "y");
@@ -1135,6 +1135,10 @@ static int custom_event_cb(void *data, BKNode *node, const BKCustomEvent *e) {
   lua_pushnumber(L, e->wheel_y);          lua_setfield(L, -2, "wheel_y");
   lua_pushstring(L, e->text ? e->text : "");       lua_setfield(L, -2, "text");
   lua_pushstring(L, e->keysym ? e->keysym : "");   lua_setfield(L, -2, "keysym");
+  lua_pushinteger(L, e->touch_id);        lua_setfield(L, -2, "touch_id");
+  lua_pushinteger(L, e->touch_phase);     lua_setfield(L, -2, "touch_phase");
+  lua_pushnumber(L, e->magnify);          lua_setfield(L, -2, "magnify");
+  lua_pushnumber(L, e->rotate);           lua_setfield(L, -2, "rotate");
   if (lua_pcall(L, 2, 1, 0) != LUA_OK) {
     luabui_report_error(L);
     lua_pop(L, 1); /* class */
@@ -1321,6 +1325,12 @@ static int l_node_custom_set_cursor(lua_State *L) {
   return 0;
 }
 
+static int l_node_custom_set_touch(lua_State *L) {
+  luabui_Node *ud = CHECK_NODE(L, 1);
+  if (ud->node) BK_custom_set_touch(ud->node, (int)luaL_checkinteger(L, 2));
+  return 0;
+}
+
 static int l_node_custom_has_focus(lua_State *L) {
   luabui_Node *ud = CHECK_NODE(L, 1);
   lua_pushboolean(L, ud->node ? BK_custom_has_focus(ud->node) : 0);
@@ -1399,6 +1409,7 @@ static const luaL_Reg node_methods[] = {
   {"custom_data",  l_node_custom_data},
   {"custom_request_frame", l_node_custom_request_frame},
   {"custom_set_cursor",    l_node_custom_set_cursor},
+  {"custom_set_touch",     l_node_custom_set_touch},
   {"custom_has_focus",     l_node_custom_has_focus},
   {"ramp_active",  l_node_ramp_active},
   {"geom_manager", l_node_geom_manager},

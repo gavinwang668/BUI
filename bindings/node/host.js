@@ -98,6 +98,7 @@ const EVENTS = {
   onClick: 'click', onMouseDown: 'mousedown', onMouseUp: 'mouseup', onMouseMove: 'mousemove',
   onMouseEnter: 'mouseenter', onMouseLeave: 'mouseleave', onWheel: 'wheel',
   onKeyDown: 'keydown', onKeyUp: 'keyup', onInput: 'input', onChange: 'change',
+  onPinch: 'pinch', onRotate: 'rotate', onPan: 'pan',
 }
 const TEXT_INPUTS = new Set(['textarea'])
 const ATTR_ALIASES = { className: 'class', htmlFor: 'for', tabIndex: 'tabindex' }

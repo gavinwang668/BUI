@@ -7,8 +7,9 @@
  *  - Damage driven: the loop sleeps in ALooper until a touch, key, timer, wake or frame request.
  *    Only the damaged rectangles are converted (B,G,R,A raster words to the surface's R,G,B,X
  *    bytes) and locked; while the kit animates, the buffer queue paces the loop to the display.
- *  - Touch: one finger is the pointer (a tap is a click), a drag that starts on a widget that does
- *    not drag scrolls, two fingers scroll, and the pointer leaves with the last finger.
+ *  - Touch: every pointer of a motion event goes to the kit's touch model (BK_touch, kit_touch.c),
+ *    the batched moves first: taps, scrolls and flings, long presses and two-finger gestures are
+ *    the same as in every other window host.
  *  - Keys: key events (KeyEvent.getUnicodeChar through JNI) and the soft keyboard while a field is
  *    being edited (BK_ime_state). No IME composition yet.
  *
@@ -38,14 +39,10 @@
 #  include <time.h>
 
 #  include "GPU_raster.h"
-#  include "kit_fling.h"
 #  include "android_native_app_glue.h"
 
 #  define MAX_TIMERS 16
 #  define IDLE_FRAME_MS 4.0 /* an animating pass that drew nothing waits this long (under any panel's frame) */
-#  define TOUCH_SLOP_DP 8.0f
-/* a touch this close to the right edge of a custom node is the app's: its scrollbar */
-#  define EDGE_DP 20.0f
 #  define WINDOW_FORMAT_RGBX 0x2
 
 typedef struct Timer {
@@ -73,18 +70,6 @@ struct BKWindow {
   Timer timers[MAX_TIMERS];
   char *clipboard;
   int px, py; /* last pointer position */
-  /* touch */
-  int pointer_down, scrolling, draggable;
-  int pending_tap; /* a finger is down on something that does not drag: a click if it lifts in place */
-  int drag_custom; /* custom and canvas nodes take drags (BK_window_wm "touch_drag"); else they scroll */
-  float down_x, down_y, scroll_x, scroll_y;
-  /* momentum: the touches of a one-finger scroll (Android's VelocityTracker) and the fling after it
-   * (Android's OverScroller spline, one per axis) */
-  BKVelocityTracker vt;
-  BKFling fling_x, fling_y;
-  float fling_done_x, fling_done_y; /* the distance of each already scrolled */
-  double fling_ms;
-  int fling;
 };
 
 static BKWindow *g_win;
@@ -645,228 +630,51 @@ static int32_t on_key(BKWindow *win, AInputEvent *e)
   return 0;
 }
 
-/* Widgets that use a drag themselves; a drag that starts anywhere else scrolls the page. A custom
- * or canvas node (a Rust page is one) scrolls unless the app asks for its drags. */
-static int drags(const BKWindow *win, const BKNode *n)
+/* One pointer of a motion event at its sample `h` (the batched ones, then the current one: -1). */
+static void touch_pointer(BKWindow *win, const AInputEvent *e, size_t i, int h, int phase)
 {
-  static const char *const types[] = {"slider", "number", "scrollbar", "text", "textarea", "panel",
-                                      "nodeeditor", "curve", "ramp", "picker", "normal", "swatch",
-                                      "histogram", "eyedropper"};
-  const char *t = n ? BK_node_type(n) : "";
-  if (win->drag_custom && (strcmp(t, "custom") == 0 || strcmp(t, "canvas") == 0)) {
-    return 1;
-  }
-  for (size_t i = 0; i < sizeof(types) / sizeof(types[0]); i++) {
-    if (strcmp(t, types[i]) == 0) {
-      return 1;
-    }
-  }
-  return 0;
-}
-
-/* A touch in the strip at the right edge of a custom or canvas node: the app draws its scrollbar
- * there (a list's thumb), so the touch is its press and drag, not a scroll. */
-static int on_edge(const BKWindow *win, const BKNode *n, float x)
-{
-  const char *t = n ? BK_node_type(n) : "";
-  if (strcmp(t, "custom") != 0 && strcmp(t, "canvas") != 0) {
-    return 0;
-  }
-  int r[4];
-  BK_node_rect(n, r);
-  return x >= (float)(r[0] + r[2]) - EDGE_DP * win->density;
-}
-
-static void pointer_up(BKWindow *win, float x, float y)
-{
-  if (win->pointer_down) {
-    BK_motion(win->ctx, (int)x, (int)y, 0);
-    BK_release(win->ctx, (int)x, (int)y, 0);
-    win->pointer_down = 0;
-  }
-  BK_motion(win->ctx, -1, -1, 0); /* no hover once the finger is gone */
-}
-
-/* A press that turned into a scroll, or a touch the system cancelled, ends with nothing applied
- * (BK_cancel: no motion, no click, a drag's value back), and no hover once the finger is gone. */
-static void cancel_press(BKWindow *win)
-{
-  if (win->pointer_down) {
-    BK_cancel(win->ctx, 0);
-    win->pointer_down = 0;
-  }
-  BK_motion(win->ctx, -1, -1, 0);
-}
-
-/* Scrolls the content under (x, y) by (dx, dy) pixels; `phase` (BK_SCROLL_*) tells a list whether a
- * finger is on it (it stretches past an end until the finger lifts) or it coasts. */
-static void scroll_px(BKWindow *win, float x, float y, float dx, float dy, int phase)
-{
-  BK_motion(win->ctx, (int)x, (int)y, 0); /* a page that scrolls under the pointer needs to know it */
-  BK_scroll_phase(win->ctx, phase);
-  BK_scroll_px(win->ctx, (int)x, (int)y, dx, dy, 0); /* the content follows the finger exactly */
-  BK_scroll_phase(win->ctx, BK_SCROLL_WHEEL);
-  BK_motion(win->ctx, -1, -1, 0); /* a scrolling touch is no hover: nothing under it lights up */
-}
-
-static void scroll_by(BKWindow *win, float x, float y, float *last_x, float *last_y)
-{
-  scroll_px(win, x, y, *last_x - x, y - *last_y, BK_SCROLL_DRAG);
-  *last_x = x;
-  *last_y = y;
-}
-
-/* The finger lifted: a list lets go of a stretch (nothing to scroll). */
-static void scroll_end(BKWindow *win, float x, float y)
-{
-  scroll_px(win, x, y, 0.0f, 0.0f, BK_SCROLL_END);
-}
-
-/* The finger lifted while scrolling: carry on at its velocity (Android's: a least squares fit of the
- * last 100 ms of touches, none when the finger rested before lifting), along OverScroller's spline. */
-static void fling_start(BKWindow *win, double now)
-{
-  float vx, vy;
-  if (!bk_vt_velocity(&win->vt, now, &vx, &vy)) {
-    return;
-  }
-  const int fx = bk_fling_start(&win->fling_x, vx, win->density);
-  const int fy = bk_fling_start(&win->fling_y, vy, win->density);
-  if (!fx) {
-    win->fling_x.distance_px = 0.0f;
-    win->fling_x.duration_ms = 1.0f;
-  }
-  if (!fy) {
-    win->fling_y.distance_px = 0.0f;
-    win->fling_y.duration_ms = 1.0f;
-  }
-  if (fx || fy) {
-    win->fling = 1;
-    win->fling_ms = now;
-    win->fling_done_x = win->fling_done_y = 0.0f;
-  }
-}
-
-static void fling_step(BKWindow *win)
-{
-  const double elapsed = now_ms() - win->fling_ms;
-  bool done_x, done_y;
-  const float x = bk_fling_at(&win->fling_x, elapsed, &done_x);
-  const float y = bk_fling_at(&win->fling_y, elapsed, &done_y);
-  scroll_px(win, (float)win->px, (float)win->py, -(x - win->fling_done_x), y - win->fling_done_y, BK_SCROLL_FLING);
-  win->fling_done_x = x;
-  win->fling_done_y = y;
-  win->fling = !(done_x && done_y);
-  win->dirty = 1;
-}
-
-/* The touches of pointer 0 in `e`, the batched ones first, to the velocity tracker. */
-static void track(BKWindow *win, const AInputEvent *e)
-{
-  const size_t n = AMotionEvent_getHistorySize(e);
-  for (size_t i = 0; i < n; i++) {
-    bk_vt_add(&win->vt, (double)AMotionEvent_getHistoricalEventTime(e, i) * 1.0e-6,
-              AMotionEvent_getHistoricalX(e, 0, i) - (float)win->ox, AMotionEvent_getHistoricalY(e, 0, i) - (float)win->oy);
-  }
-  bk_vt_add(&win->vt, (double)AMotionEvent_getEventTime(e) * 1.0e-6, AMotionEvent_getX(e, 0) - (float)win->ox,
-            AMotionEvent_getY(e, 0) - (float)win->oy);
+  const float x = h < 0 ? AMotionEvent_getX(e, i) : AMotionEvent_getHistoricalX(e, i, (size_t)h);
+  const float y = h < 0 ? AMotionEvent_getY(e, i) : AMotionEvent_getHistoricalY(e, i, (size_t)h);
+  const int64_t ns = h < 0 ? AMotionEvent_getEventTime(e) : AMotionEvent_getHistoricalEventTime(e, (size_t)h);
+  BK_touch(win->ctx, AMotionEvent_getPointerId(e, i), phase, x - (float)win->ox, y - (float)win->oy,
+           (double)ns * 1.0e-6, 0);
 }
 
 static int32_t on_touch(BKWindow *win, AInputEvent *e)
 {
-  const int32_t action = AMotionEvent_getAction(e) & AMOTION_EVENT_ACTION_MASK;
+  const int32_t action = AMotionEvent_getAction(e);
   const size_t count = AMotionEvent_getPointerCount(e);
-  const float x = AMotionEvent_getX(e, 0) - (float)win->ox;
-  const float y = AMotionEvent_getY(e, 0) - (float)win->oy;
-  const float slop = TOUCH_SLOP_DP * win->density;
-  switch (action) {
+  const size_t index = (size_t)((action & AMOTION_EVENT_ACTION_POINTER_INDEX_MASK) >>
+                                AMOTION_EVENT_ACTION_POINTER_INDEX_SHIFT);
+  switch (action & AMOTION_EVENT_ACTION_MASK) {
     case AMOTION_EVENT_ACTION_DOWN:
-      win->down_x = win->scroll_x = x;
-      win->down_y = win->scroll_y = y;
-      win->scrolling = win->fling = 0; /* a touch stops a fling */
-      bk_vt_clear(&win->vt); /* the velocity of a scroll counts from the touch down */
-      track(win, e);
-      BK_motion(win->ctx, (int)x, (int)y, 0);
-      win->draggable = drags(win, BK_hover(win->ctx)) || on_edge(win, BK_hover(win->ctx), x);
-      if (win->draggable) { /* a slider, a text field ...: it gets the press now */
-        BK_press(win->ctx, (int)x, (int)y, 0);
-        win->pointer_down = 1;
-      }
-      else { /* a tap or a scroll: the kit hears of it once we know which */
-        win->pending_tap = 1;
-      }
-      break;
     case AMOTION_EVENT_ACTION_POINTER_DOWN:
-      if (count >= 2) { /* a second finger: scroll instead of drag */
-        if (!win->scrolling) {
-          win->pending_tap = 0;
-          cancel_press(win);
-          win->scrolling = 1;
-        }
-        /* from the two fingers' middle now, even mid scroll: the one finger's point it followed
-         * until now is not where the middle is (no jump) */
-        win->scroll_x = (AMotionEvent_getX(e, 0) + AMotionEvent_getX(e, 1)) * 0.5f - (float)win->ox;
-        win->scroll_y = (AMotionEvent_getY(e, 0) + AMotionEvent_getY(e, 1)) * 0.5f - (float)win->oy;
-      }
-      break;
-    case AMOTION_EVENT_ACTION_MOVE:
-      track(win, e);
-      if (win->scrolling && count >= 2) {
-        scroll_by(win, (AMotionEvent_getX(e, 0) + AMotionEvent_getX(e, 1)) * 0.5f - (float)win->ox,
-                  (AMotionEvent_getY(e, 0) + AMotionEvent_getY(e, 1)) * 0.5f - (float)win->oy,
-                  &win->scroll_x, &win->scroll_y);
-      }
-      else if (win->scrolling) { /* a one-finger scroll */
-        scroll_by(win, x, y, &win->scroll_x, &win->scroll_y);
-      }
-      else if (win->pending_tap) {
-        const float dx = x - win->down_x, dy = y - win->down_y;
-        if (dx * dx + dy * dy > slop * slop) { /* not a click: scroll, from where the finger went down */
-          win->pending_tap = 0;
-          win->scrolling = 1;
-          /* the slop is the finger's, not the content's: the scroll starts from just past it, so the
-           * content does not jump by the slop (what RecyclerView does) */
-          win->scroll_x = x - (fabsf(dx) > slop ? copysignf(slop, dx) : dx);
-          win->scroll_y = y - (fabsf(dy) > slop ? copysignf(slop, dy) : dy);
-          scroll_by(win, x, y, &win->scroll_x, &win->scroll_y);
-        }
-      }
-      else if (win->pointer_down) {
-        BK_motion(win->ctx, (int)x, (int)y, BK_BUTTON1);
-      }
-      break;
-    case AMOTION_EVENT_ACTION_POINTER_UP:
-      if (count <= 2) {
-        win->scrolling = 0;
-      }
+      touch_pointer(win, e, index, -1, BK_TOUCH_DOWN);
       break;
     case AMOTION_EVENT_ACTION_UP:
-      if (win->scrolling) { /* a one-finger scroll (two fingers cleared it when one lifted) */
-        scroll_end(win, x, y);
-        track(win, e);
-        fling_start(win, (double)AMotionEvent_getEventTime(e) * 1.0e-6);
-      }
-      win->scrolling = 0;
-      if (win->pending_tap) { /* lifted in place: the click */
-        win->pending_tap = 0;
-        BK_motion(win->ctx, (int)x, (int)y, 0);
-        BK_press(win->ctx, (int)x, (int)y, 0);
-        win->pointer_down = 1;
-      }
-      pointer_up(win, x, y);
+    case AMOTION_EVENT_ACTION_POINTER_UP:
+      touch_pointer(win, e, index, -1, BK_TOUCH_UP);
       break;
-    case AMOTION_EVENT_ACTION_CANCEL:
-      if (win->scrolling) {
-        scroll_end(win, x, y);
+    case AMOTION_EVENT_ACTION_MOVE: {
+      /* the batched samples first: the fling's velocity fits them, as VelocityTracker does */
+      const int n = (int)AMotionEvent_getHistorySize(e);
+      for (int h = 0; h <= n; h++) {
+        for (size_t i = 0; i < count; i++) {
+          touch_pointer(win, e, i, h < n ? h : -1, BK_TOUCH_MOVE);
+        }
       }
-      win->scrolling = win->pending_tap = win->fling = 0;
-      cancel_press(win);
+      break;
+    }
+    case AMOTION_EVENT_ACTION_CANCEL:
+      for (size_t i = 0; i < count; i++) {
+        touch_pointer(win, e, i, -1, BK_TOUCH_CANCEL);
+      }
       break;
     default:
       return 0;
   }
-  win->px = (int)x;
-  win->py = (int)y;
+  win->px = (int)(AMotionEvent_getX(e, 0) - (float)win->ox);
+  win->py = (int)(AMotionEvent_getY(e, 0) - (float)win->oy);
   win->dirty = 1;
   return 1;
 }
@@ -991,7 +799,7 @@ static int wait_ms(const BKWindow *win)
   /* With no surface nothing can be drawn, so a pending frame must not keep the loop spinning: it
    * waits for the surface (APP_CMD_INIT_WINDOW wakes the looper). */
   if (atomic_load(&g_wake_flag) ||
-      (win && (win->fling || (g_app->window && (win->dirty || win->want_frame))))) {
+      (win && g_app->window && (win->dirty || win->want_frame))) {
     return 0;
   }
   double next = 0.0;
@@ -1069,9 +877,6 @@ static void step(int block)
     return;
   }
   fire_timers(win);
-  if (win->fling) {
-    fling_step(win);
-  }
   if (win->retry_ms != 0.0 && win->retry_ms <= now_ms()) {
     win->dirty = 1; /* the failed present's turn (`draw` clears it) */
   }
@@ -1299,9 +1104,12 @@ void *BK_window_handle(BKWindow *win)
 
 void BK_window_wm(BKWindow *win, const char *key, double a, double b)
 {
-  if (strcmp(key, "touch_drag") == 0) { /* the only request an Android window has */
-    win->drag_custom = a != 0.0;
-  }
+  /* an Android window has no requests: what a finger does to a custom node is the node's
+   * (BK_custom_set_touch) */
+  (void)win;
+  (void)key;
+  (void)a;
+  (void)b;
 }
 
 int BK_window_wm_get(BKWindow *win, const char *key, double *r_a, double *r_b)

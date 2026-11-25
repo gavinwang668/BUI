@@ -31,11 +31,12 @@ struct NodeEvent {
     Node node;
     /// `BK_EV_*`.
     int kind;
-    /// The kit's payload: a callback object, a C string for raw key events, or null.
+    /// The kit's payload: a callback object, a C string for raw events and gestures, or null.
     void* ref_;
     double a;
     double b;
-    /// The key text for `BK_EV_KEY` / `BK_EV_KEYRELEASE`, else empty.
+    /// The text of a raw event (`BK_EV_PRESS` .. `BK_EV_WHEEL`, `BK_EV_KEYRELEASE`) or a gesture
+    /// (`BK_EV_GESTURE`: "mods kind x y"), else empty.
     const(char)[] text;
 }
 
@@ -848,7 +849,8 @@ final class Node {
             return;
         }
         const(char)[] text;
-        if (kind == BK_EV_KEY || kind == BK_EV_KEYRELEASE) {
+        if ((kind >= BK_EV_PRESS && kind <= BK_EV_WHEEL) || kind == BK_EV_KEYRELEASE ||
+            kind == BK_EV_GESTURE) {
             text = cslice(cast(const(char)*) ref_);
         }
         auto event = NodeEvent(this, kind, ref_, a, b, text);

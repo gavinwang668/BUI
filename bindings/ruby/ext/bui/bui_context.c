@@ -19,10 +19,11 @@ static const char *const k_event_names[] = {
     NULL,     "change", "click",  "call",   "rename", "activate", "toggle",
     "browse", "press",  "release", "double", "motion", "enter",   "leave",
     "key",    "wheel",  "submit", "view",   "scroll", "configure", "key_release",
+    "area",   "move",   "resize", "a11y_tree", "a11y_action", "gesture",
 };
 #define EVENT_KINDS ((int)(sizeof(k_event_names) / sizeof(k_event_names[0])))
 /* a new BK_EV_* needs its name here */
-_Static_assert(BK_EV_KEYRELEASE == EVENT_KINDS - 1, "an event kind without a name");
+_Static_assert(BK_EV_GESTURE == EVENT_KINDS - 1, "an event kind without a name");
 static ID g_event_ids[EVENT_KINDS];
 
 /* -------------------------------------------------------------------- */
@@ -105,6 +106,7 @@ static VALUE emit_body(VALUE p)
   switch (e->kind) {
     case BK_EV_KEY:
     case BK_EV_KEYRELEASE:
+    case BK_EV_GESTURE: /* "mods kind x y" */
       text = bui_str((const char *)e->ref); /* "text\tkeysym" */
       break;
     case BK_EV_RENAME:
@@ -320,6 +322,31 @@ static VALUE context_scroll(int argc, VALUE *argv, VALUE self)
   return changed(BK_scroll(
       ctx, bui_int(x), bui_int(y), (float)bui_num(dx), (float)bui_num(dy), mods_of(mods)));
 }
+
+/* touch(id, phase, x, y, time_ms = 0, mods = 0): a touch screen contact (BUI::TOUCH_*); time_ms
+ * is the event's own time on any monotonic clock (<= 0: now). */
+static VALUE context_touch(int argc, VALUE *argv, VALUE self)
+{
+  VALUE id, phase, x, y, time_ms, mods;
+  rb_scan_args(argc, argv, "42", &id, &phase, &x, &y, &time_ms, &mods);
+  BKContext *ctx = bui_context_ptr(self);
+  return changed(BK_touch(ctx, bui_int(id), bui_int(phase), (float)bui_num(x), (float)bui_num(y),
+                          NIL_P(time_ms) ? 0.0 : bui_num(time_ms), mods_of(mods)));
+}
+
+#define GESTURE_INPUT(name, call) \
+  static VALUE context_##name(int argc, VALUE *argv, VALUE self) \
+  { \
+    VALUE x, y, amount, mods; \
+    rb_scan_args(argc, argv, "31", &x, &y, &amount, &mods); \
+    BKContext *ctx = bui_context_ptr(self); \
+    return changed(call(ctx, bui_int(x), bui_int(y), (float)bui_num(amount), mods_of(mods))); \
+  }
+
+/* magnify(x, y, delta, mods = 0): a trackpad pinch (0.1 = 10% larger);
+ * rotate(x, y, degrees, mods = 0): a trackpad turn (> 0 counter-clockwise) */
+GESTURE_INPUT(magnify, BK_magnify)
+GESTURE_INPUT(rotate, BK_rotate)
 
 /* key(text, keysym = nil, mods = 0): a key typing text ("" for none), with
  * its X11 keysym ("Return", "Up", "a"). */
@@ -688,6 +715,14 @@ void bui_init_context(void)
   rb_define_const(bui_mBUI, "SHIFT", INT2NUM(BK_SHIFT));
   rb_define_const(bui_mBUI, "CTRL", INT2NUM(BK_CTRL));
   rb_define_const(bui_mBUI, "ALT", INT2NUM(BK_ALT));
+  /* raw events and gestures made from touch contacts carry it in their mods */
+  rb_define_const(bui_mBUI, "FROM_TOUCH", INT2NUM(BK_FROM_TOUCH));
+  rb_define_const(bui_mBUI, "TOUCH_DOWN", INT2NUM(BK_TOUCH_DOWN));
+  rb_define_const(bui_mBUI, "TOUCH_MOVE", INT2NUM(BK_TOUCH_MOVE));
+  rb_define_const(bui_mBUI, "TOUCH_UP", INT2NUM(BK_TOUCH_UP));
+  rb_define_const(bui_mBUI, "TOUCH_CANCEL", INT2NUM(BK_TOUCH_CANCEL));
+  rb_define_const(bui_mBUI, "GESTURE_MAGNIFY", INT2NUM(BK_GESTURE_MAGNIFY));
+  rb_define_const(bui_mBUI, "GESTURE_ROTATE", INT2NUM(BK_GESTURE_ROTATE));
 
   bui_cContext = rb_define_class_under(bui_mBUI, "Context", rb_cObject);
   rb_define_alloc_func(bui_cContext, context_alloc);
@@ -708,6 +743,9 @@ void bui_init_context(void)
   rb_define_method(bui_cContext, "context_menu", context_context_menu, -1);
   rb_define_method(bui_cContext, "wheel", context_wheel, -1);
   rb_define_method(bui_cContext, "scroll", context_scroll, -1);
+  rb_define_method(bui_cContext, "touch", context_touch, -1);
+  rb_define_method(bui_cContext, "magnify", context_magnify, -1);
+  rb_define_method(bui_cContext, "rotate", context_rotate, -1);
   rb_define_method(bui_cContext, "key", context_key, -1);
   rb_define_method(bui_cContext, "key_release", context_key_release, -1);
   rb_define_method(bui_cContext, "button", context_button, -1);

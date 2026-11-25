@@ -1,0 +1,140 @@
+---
+title: Touch and gestures
+description: Taps, scrolls that fling, long presses, and two-finger pans, pinches and turns on every touch screen and trackpad, from one model in the kit, with the APIs to use the gestures yourself.
+section: Concepts
+order: 52
+languages: ["c", "rust"]
+sources: ["kit/include/BUI_kit.h", "kit/intern/kit_touch.c", "kit/intern/kit_fling.c", "kit/intern/kit_core.c", "kit/intern/kit_nodes.c", "kit/intern/kit_custom.c", "kit/intern/kit_window_win32.c", "kit/intern/kit_window_x11.c", "kit/intern/kit_window_wayland.c", "kit/intern/kit_window_cocoa.m", "kit/intern/kit_window_android.c", "kit/CMakeLists.txt", "bindings/imgui/imgui_impl_bui.cpp", "bindings/rust/blenderui/src/events.rs", "bindings/rust/blenderui/src/element.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/suite/touch.rs", "tests/touch_test.c", "docs/touch.md"]
+---
+
+Put a finger on a BUI window and it works the way a phone does. A tap clicks, a drag scrolls and flings on, a long press opens the context menu, and two fingers pan, pinch and turn. A trackpad's pinch and turn reach the same places. You get this on every platform without writing any code, and you can listen for the gestures when you want them.
+
+The model lives in the **kit**, BUI's runtime written in C (`kit/intern/kit_touch.c`). A window host only forwards the contacts it gets, so a finger behaves the same on Windows, Linux and Android. The numbers and curves are Android's (`ViewConfiguration`, `VelocityTracker`, `OverScroller`). The gestures land where Blender's trackpad events do: GHOST's Scroll, Magnify and Rotate events become `MOUSEPAN`, `MOUSEZOOM` and `MOUSEROTATE`.
+
+## What a finger does
+
+| You do | You get |
+| --- | --- |
+| Put a finger on a slider, number field, text field, scrollbar or the node editor | The finger is the pointer at once: it drags the widget |
+| Tap anywhere else | A click. Two taps are a double click |
+| Hold still for half a second | The context menu (a right press) |
+| Drag more than 8 dp | The content under the finger scrolls exactly as far as the finger went, without jumping by those 8 dp |
+| Lift while moving | The content flings on, slowing down along Android's curve |
+| Touch a fling | It stops, and nothing is clicked |
+| Add a second finger | What the first one did is cancelled (a dragged value goes back). The two fingers are now a gesture |
+| Move two fingers together | The content pans |
+| Spread or turn two fingers | A pinch or a turn about their centre |
+
+A few details make it feel right:
+
+- **No wobble.** Systems report fingers one at a time, so BUI waits until both moved before it updates a gesture. A pure pan never jitters the zoom or the angle.
+- **No hover left behind.** The pointer leaves when the finger lifts.
+- **Nothing stuck.** When the window loses the focus, or the system takes a contact back (an edge swipe), every finger is cancelled and nothing it started is kept.
+- **Wider double taps.** Two taps count as a double click within one widget unit, not the mouse's 4 px.
+- **No pointer jumps.** A finger's drag never warps the system pointer.
+- **Menus and tools first.** While a menu is open or a tool runs (the eyedropper), every finger is the pointer.
+
+In the node editor, two fingers pan the view and a pinch zooms about the fingers. A link drag that gets cancelled puts back the link it took off an input, as Blender's `node_link_cancel` does.
+
+## Use the gestures yourself
+
+<LangTabs>
+<Tab label="Rust">
+
+```rust
+div()
+    .w(px(300.0))
+    .h(px(200.0))
+    .on_pan(|e: &PanEvent, _, cx| {
+        // e.delta: how far the content follows the fingers (x right, y down)
+        // e.phase: ScrollPhase::Drag, then Fling, then End
+        cx.stop_propagation(); // take the drag: nothing scrolls
+    })
+    .on_pinch(|e: &PinchEvent, _, _| println!("zoom x{}", 1.0 + e.delta))
+    .on_rotate(|e: &RotateEvent, _, _| println!("turn {} deg", e.degrees))
+```
+
+In `rsx!` the attributes are `onPan`, `onPinch` and `onRotate`. `e.touch` is `false` when a trackpad made the pinch or turn. See [Rust events](../../rust/events/#touch-screens-and-trackpads).
+
+</Tab>
+<Tab label="C">
+
+```c
+static int paint_event(void *data, BKNode *node, const BKCustomEvent *e)
+{
+  Paint *p = data;
+  switch (e->type) {
+    case BK_CUSTOM_TOUCH: /* every finger, as it is */
+      if (e->touch_phase == BK_TOUCH_DOWN) stroke_begin(p, e->touch_id, e->x, e->y);
+      else if (e->touch_phase == BK_TOUCH_MOVE) stroke_add(p, e->touch_id, e->x, e->y);
+      else stroke_end(p, e->touch_id, e->touch_phase == BK_TOUCH_CANCEL);
+      break;
+    case BK_CUSTOM_MAGNIFY: /* a trackpad pinch */
+      p->zoom *= 1.0f + e->magnify;
+      break;
+    default:
+      return 0;
+  }
+  BK_node_invalidate(node);
+  return 1;
+}
+
+BK_custom_set(node, &cls, paint);           /* cls.event = paint_event */
+BK_custom_set_touch(node, BK_TOUCH_MODE_RAW);
+```
+
+A custom node picks what a finger does on it with `BK_custom_set_touch`: `BK_TOUCH_MODE_SCROLL` (the default: tap and scroll, two fingers pan, pinch and turn), `BK_TOUCH_MODE_POINTER` (the finger is your pointer, as Dear ImGui's node uses) or `BK_TOUCH_MODE_RAW` (every contact as `BK_CUSTOM_TOUCH`). An `"events"` node gets `BK_EV_GESTURE` for a pinch or a turn.
+
+</Tab>
+</LangTabs>
+
+The other language bindings expose the same calls.
+
+### Which way is positive
+
+| Value | Meaning |
+| --- | --- |
+| A pinch's delta | The scale change since the last one: 0.1 is 10% larger, -0.1 smaller. Multiply a zoom by `1 + delta` |
+| A turn's degrees | Since the last one, positive counter-clockwise (as macOS's `NSEvent.rotation`) |
+| A pan | The content follows the fingers: a finger moving up moves the content up |
+
+## Platforms
+
+| Platform | Touch screen | Trackpad pinch and turn |
+| --- | --- | --- |
+| Windows | `WM_POINTER` touch contacts. Pen and mouse stay mouse input, and Windows adds no clicks or press-and-hold right clicks of its own | Not sent |
+| Linux, X11 | XInput 2.2 touch, through libXi loaded at run time. Without it, the first finger is the server's emulated mouse | XInput 2.4 pinches (libXi 1.8) |
+| Linux, Wayland | `wl_touch` | `zwp_pointer_gestures_v1` pinches |
+| macOS | None | `magnifyWithEvent:` and `rotateWithEvent:` |
+| Android | Every pointer of a motion event | None |
+
+## Your own host
+
+If you draw BUI into your own window, send each contact with `BK_touch` and a trackpad's gestures with `BK_magnify` and `BK_rotate`. Don't also send the mouse events a platform makes from a finger.
+
+```c
+int phase = down ? BK_TOUCH_DOWN : up ? BK_TOUCH_UP : cancelled ? BK_TOUCH_CANCEL : BK_TOUCH_MOVE;
+if (BK_touch(ctx, contact_id, phase, x, y, event_time_ms, mods))
+  request_redraw();
+
+BK_magnify(ctx, px, py, scale_change, mods); /* a trackpad pinch about the pointer */
+BK_rotate(ctx, px, py, degrees_ccw, mods);   /* a trackpad turn */
+
+while (BK_animating(ctx))                    /* a fling steps with each render */
+  draw_frame();
+```
+
+`x` and `y` are window pixels, as for `BK_motion`. `event_time_ms` is the event's own time on any steady clock (0 means now); the fling's speed comes from it.
+
+## Test it without a screen
+
+- **C:** call `BK_touch` with ids and phases. `tests/touch_test.c` covers taps, scrolls and flings, two-finger gestures, raw contacts, cancels, the node editor and menus.
+- **Rust:** `cx.simulate_touch(win.id, id, TouchPhase::Down, x, y)` (then `Move`, `Up` or `Cancel`), and `cx.simulate_magnify` / `cx.simulate_rotate` for a trackpad. See `bindings/rust/blenderui/tests/suite/touch.rs`.
+
+## Next steps
+
+<CardGrid>
+  <Card title="Android" href="docs/concepts/android/" icon="device-mobile">Run BUI on a phone, where touch is the only input.</Card>
+  <Card title="Window hosts" href="docs/concepts/window-hosts/" icon="monitor">The native windows that forward the fingers.</Card>
+  <Card title="Rust events" href="docs/rust/events/" icon="arrow-right" kicker="Rust">Every listener, including on_pan, on_pinch and on_rotate.</Card>
+</CardGrid>

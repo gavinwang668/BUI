@@ -116,7 +116,7 @@ To render into a window you opened yourself, use `createRoot(window)`, then `roo
 Host components are HTML elements, as in React DOM:
 
 - **`className`** takes Tailwind classes. **`style`** takes a string, an object or a signal. **`htmlFor`** and boolean attributes work.
-- **Mouse, keyboard and form events** work: `onClick`, `onMouseDown`, `onMouseUp`, `onMouseMove`, `onMouseEnter`, `onMouseLeave`, `onWheel`, `onKeyDown`, `onKeyUp`, `onInput` and `onChange`. They bubble, and `stopPropagation` works.
+- **Mouse, keyboard and form events** work: `onClick`, `onMouseDown`, `onMouseUp`, `onMouseMove`, `onMouseEnter`, `onMouseLeave`, `onWheel`, `onKeyDown`, `onKeyUp`, `onInput` and `onChange`, and the touch screen and trackpad gestures `onPinch`, `onRotate` and `onPan` (the event fields are on the [native API](/docs/javascript/native-api) page). They bubble, and `stopPropagation` works.
 - **`onChange` follows React DOM:** on a text field it fires on every edit. On checkboxes, radios, selects and other controls it fires when the value changes, even if the control's `type` changes later.
 - **Handlers run as discrete updates,** so a click's state change commits immediately.
 

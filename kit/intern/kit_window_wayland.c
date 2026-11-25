@@ -33,6 +33,9 @@
 #  ifdef BUI_WL_CURSOR_SHAPE
 #    include "cursor-shape-v1-client-protocol.h"
 #  endif
+#  ifdef BUI_WL_POINTER_GESTURES
+#    include "pointer-gestures-unstable-v1-client-protocol.h"
+#  endif
 #  include "xdg-decoration-unstable-v1-client-protocol.h"
 #  include "xdg-shell-client-protocol.h"
 
@@ -53,6 +56,7 @@
 #  define MAX_TIMERS 16
 #  define MAX_RECTS 32
 #  define MAX_OUTPUTS 8
+#  define MAX_CONTACTS 10 /* touch screen fingers followed at once (as the kit's BK_MAX_TOUCH) */
 
 /* -- libxkbcommon, loaded on first use -- */
 
@@ -149,6 +153,13 @@ typedef struct {
   int scale, w, h;
 } Output;
 
+/* A wl_touch contact that is down: up and cancel carry no position, so its last one is kept. */
+typedef struct {
+  BKWindow *win; /* the window it went down on; NULL: the slot is free */
+  int32_t id;
+  float x, y; /* raster pixels */
+} Contact;
+
 static struct {
   struct wl_display *display;
   struct wl_registry *registry;
@@ -165,6 +176,13 @@ static struct {
   struct wl_seat *seat;
   struct wl_pointer *pointer;
   struct wl_keyboard *keyboard;
+  struct wl_touch *touch; /* while the seat has a touch screen */
+  Contact contacts[MAX_CONTACTS];
+#  ifdef BUI_WL_POINTER_GESTURES
+  struct zwp_pointer_gestures_v1 *pointer_gestures;
+  struct zwp_pointer_gesture_pinch_v1 *pinch; /* of the pointer */
+  double pinch_scale; /* the pinch's scale at its last event (1 at its begin), 0 none */
+#  endif
   struct wl_data_device_manager *data_manager;
   struct wl_data_device *data_device;
   struct wl_data_offer *offer; /* the clipboard, with a text mime type */
@@ -542,6 +560,12 @@ static void apply_cursor(BKWindow *win)
                         (int)image->hotspot_y / g.cursor_scale);
 }
 
+/* A surface-local coordinate (compositor units) in the window's raster pixels. */
+static double surface_px(const BKWindow *win, wl_fixed_t v)
+{
+  return wl_fixed_to_double(v) * win->bscale;
+}
+
 static void pointer_enter(void *d, struct wl_pointer *p, uint32_t serial, struct wl_surface *s,
                           wl_fixed_t x, wl_fixed_t y)
 {
@@ -549,8 +573,8 @@ static void pointer_enter(void *d, struct wl_pointer *p, uint32_t serial, struct
   g.pointer_win = win;
   g.pointer_serial = serial;
   if (win) {
-    g.px = wl_fixed_to_double(x) * win->bscale;
-    g.py = wl_fixed_to_double(y) * win->bscale;
+    g.px = surface_px(win, x);
+    g.py = surface_px(win, y);
     apply_cursor(win);
     BK_motion(win->ctx, (int)g.px, (int)g.py, mods_now());
   }
@@ -572,8 +596,8 @@ static void pointer_motion(void *d, struct wl_pointer *p, uint32_t time, wl_fixe
 {
   BKWindow *win = g.pointer_win;
   if (win) {
-    g.px = wl_fixed_to_double(x) * win->bscale;
-    g.py = wl_fixed_to_double(y) * win->bscale;
+    g.px = surface_px(win, x);
+    g.py = surface_px(win, y);
     BK_motion(win->ctx, (int)g.px, (int)g.py, mods_now());
   }
 }
@@ -629,6 +653,135 @@ static void pointer_axis(void *d, struct wl_pointer *p, uint32_t time, uint32_t 
 static struct wl_pointer_listener pointer_listener = {
     .enter = pointer_enter, .leave = pointer_leave, .motion = pointer_motion,
     .button = pointer_button, .axis = pointer_axis};
+
+#  ifdef BUI_WL_POINTER_GESTURES
+/* -- seat: touchpad pinches (zwp_pointer_gestures_v1, as GHOST_SystemWayland's gesture_pinch) --
+ * About the pointer, whose motion stops while the fingers pinch. `scale` is the spread over the
+ * begin's, so the change since the last event is scale / last - 1 (NSEvent.magnification's
+ * units); `rotation` is degrees clockwise since the last event, BK_rotate's counter-clockwise. */
+
+static void pinch_begin(void *d, struct zwp_pointer_gesture_pinch_v1 *p, uint32_t serial,
+                        uint32_t time, struct wl_surface *s, uint32_t fingers)
+{
+  g.pinch_scale = 1.0;
+}
+
+static void pinch_update(void *d, struct zwp_pointer_gesture_pinch_v1 *p, uint32_t time,
+                         wl_fixed_t dx, wl_fixed_t dy, wl_fixed_t scale, wl_fixed_t rotation)
+{
+  BKWindow *win = g.pointer_win;
+  if (!win || g.pinch_scale <= 0.0) {
+    return;
+  }
+  const int x = (int)g.px, y = (int)g.py, mods = mods_now() & ~BK_BUTTON1;
+  const double s = wl_fixed_to_double(scale);
+  if (s > 0.0 && s != g.pinch_scale) {
+    BK_magnify(win->ctx, x, y, (float)(s / g.pinch_scale - 1.0), mods);
+    g.pinch_scale = s;
+  }
+  if (rotation != 0) {
+    BK_rotate(win->ctx, x, y, (float)-wl_fixed_to_double(rotation), mods);
+  }
+}
+
+static void pinch_end(void *d, struct zwp_pointer_gesture_pinch_v1 *p, uint32_t serial,
+                      uint32_t time, int32_t cancelled)
+{
+  g.pinch_scale = 0.0;
+}
+
+static struct zwp_pointer_gesture_pinch_v1_listener pinch_listener = {
+    .begin = pinch_begin, .update = pinch_update, .end = pinch_end};
+
+/* The pointer's pinch, once both the pointer and the gestures global are there. */
+static void pinch_attach(void)
+{
+  if (g.pointer_gestures && g.pointer && !g.pinch) {
+    g.pinch = zwp_pointer_gestures_v1_get_pinch_gesture(g.pointer_gestures, g.pointer);
+    zwp_pointer_gesture_pinch_v1_add_listener(g.pinch, &pinch_listener, NULL);
+  }
+}
+#  endif
+
+/* -- seat: touch screen (wl_touch; compositors send no pointer for it) --
+ * Each contact goes to the window it went down on, in raster pixels as the pointer's; `time` is
+ * the event's, in milliseconds. A frame only groups contacts: each is sent as it comes. */
+
+static Contact *contact_find(int32_t id)
+{
+  for (int i = 0; i < MAX_CONTACTS; i++) {
+    if (g.contacts[i].win && g.contacts[i].id == id) {
+      return &g.contacts[i];
+    }
+  }
+  return NULL;
+}
+
+/* The contact lifts (BK_TOUCH_UP) or is taken back (BK_TOUCH_CANCEL); its slot is free. */
+static void contact_end(Contact *c, int phase, uint32_t time)
+{
+  BKWindow *win = c->win;
+  c->win = NULL;
+  BK_touch(win->ctx, c->id, phase, c->x, c->y, (double)time, mods_now());
+}
+
+/* Every contact still down is cancelled: the compositor took them, the touch screen went, or
+ * (`only` non-NULL) that window closes. */
+static void contacts_cancel(const BKWindow *only)
+{
+  for (int i = 0; i < MAX_CONTACTS; i++) {
+    if (g.contacts[i].win && (!only || g.contacts[i].win == only)) {
+      contact_end(&g.contacts[i], BK_TOUCH_CANCEL, 0 /* now */);
+    }
+  }
+}
+
+static void touch_down(void *d, struct wl_touch *t, uint32_t serial, uint32_t time,
+                       struct wl_surface *s, int32_t id, wl_fixed_t x, wl_fixed_t y)
+{
+  g.serial = serial;
+  BKWindow *win = find_window(s);
+  if (!win || !win->open) {
+    return;
+  }
+  Contact *c = contact_find(id); /* its up was lost: the kit replaces it */
+  for (int i = 0; !c && i < MAX_CONTACTS; i++) {
+    c = g.contacts[i].win ? NULL : &g.contacts[i];
+  }
+  if (!c) {
+    return; /* more fingers than the kit follows */
+  }
+  *c = (Contact){win, id, (float)surface_px(win, x), (float)surface_px(win, y)};
+  BK_touch(win->ctx, id, BK_TOUCH_DOWN, c->x, c->y, (double)time, mods_now());
+}
+
+static void touch_up(void *d, struct wl_touch *t, uint32_t serial, uint32_t time, int32_t id)
+{
+  g.serial = serial;
+  Contact *c = contact_find(id);
+  if (c) {
+    contact_end(c, BK_TOUCH_UP, time);
+  }
+}
+
+static void touch_motion(void *d, struct wl_touch *t, uint32_t time, int32_t id, wl_fixed_t x,
+                         wl_fixed_t y)
+{
+  Contact *c = contact_find(id);
+  if (c) {
+    c->x = (float)surface_px(c->win, x);
+    c->y = (float)surface_px(c->win, y);
+    BK_touch(c->win->ctx, id, BK_TOUCH_MOVE, c->x, c->y, (double)time, mods_now());
+  }
+}
+
+static void touch_cancel(void *d, struct wl_touch *t)
+{
+  contacts_cancel(NULL);
+}
+
+static struct wl_touch_listener touch_listener = {
+    .down = touch_down, .up = touch_up, .motion = touch_motion, .cancel = touch_cancel};
 
 /* -- seat: keyboard -- */
 
@@ -736,10 +889,27 @@ static void seat_capabilities(void *d, struct wl_seat *seat, uint32_t caps)
   if ((caps & WL_SEAT_CAPABILITY_POINTER) && !g.pointer) {
     g.pointer = wl_seat_get_pointer(seat);
     wl_pointer_add_listener(g.pointer, &pointer_listener, NULL);
+#  ifdef BUI_WL_POINTER_GESTURES
+    pinch_attach();
+#  endif
   }
   if ((caps & WL_SEAT_CAPABILITY_KEYBOARD) && !g.keyboard) {
     g.keyboard = wl_seat_get_keyboard(seat);
     wl_keyboard_add_listener(g.keyboard, &keyboard_listener, NULL);
+  }
+  if ((caps & WL_SEAT_CAPABILITY_TOUCH) && !g.touch) {
+    g.touch = wl_seat_get_touch(seat);
+    wl_touch_add_listener(g.touch, &touch_listener, NULL);
+  }
+  else if (!(caps & WL_SEAT_CAPABILITY_TOUCH) && g.touch) { /* the touch screen went */
+    contacts_cancel(NULL);
+    if (wl_touch_get_version(g.touch) >= WL_TOUCH_RELEASE_SINCE_VERSION) {
+      wl_touch_release(g.touch);
+    }
+    else {
+      wl_touch_destroy(g.touch);
+    }
+    g.touch = NULL;
   }
 }
 
@@ -936,6 +1106,12 @@ static void registry_global(void *d, struct wl_registry *reg, uint32_t name, con
     g.cursor_shape_manager = wl_registry_bind(reg, name, &wp_cursor_shape_manager_v1_interface, 1);
   }
 #  endif
+#  ifdef BUI_WL_POINTER_GESTURES
+  else if (!strcmp(iface, zwp_pointer_gestures_v1_interface.name)) {
+    g.pointer_gestures = wl_registry_bind(reg, name, &zwp_pointer_gestures_v1_interface, 1);
+    pinch_attach();
+  }
+#  endif
   else if (!strcmp(iface, wl_seat_interface.name) && !g.seat) {
     g.seat = wl_registry_bind(reg, name, &wl_seat_interface, BK_MIN(version, 5u));
     wl_seat_add_listener(g.seat, &seat_listener, NULL);
@@ -978,6 +1154,10 @@ static void fill_listeners(void)
   fill_noop(&frame_listener, sizeof(frame_listener));
   fill_noop(&pointer_listener, sizeof(pointer_listener));
   fill_noop(&keyboard_listener, sizeof(keyboard_listener));
+  fill_noop(&touch_listener, sizeof(touch_listener));
+#  ifdef BUI_WL_POINTER_GESTURES
+  fill_noop(&pinch_listener, sizeof(pinch_listener));
+#  endif
   fill_noop(&seat_listener, sizeof(seat_listener));
   fill_noop(&offer_listener, sizeof(offer_listener));
   fill_noop(&device_listener, sizeof(device_listener));
@@ -1174,6 +1354,7 @@ static void close_window(BKWindow *win)
     g.keyboard_win = NULL;
     g.repeat_key = 0;
   }
+  contacts_cancel(win); /* their ups would find no window */
   role_destroy(win);
   wl_surface_destroy(win->surface);
   buf_destroy(&win->bufs[0]);

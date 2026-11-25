@@ -556,6 +556,32 @@ static CGColorSpaceRef srgb(void)
   }
 }
 
+/* GHOST_SystemCocoa::handleMouseEvent's trackpad gestures: NSEventTypeMagnify
+ * (GHOST_kTrackpadEventMagnify) and NSEventTypeRotate (GHOST_kTrackpadEventRotate). BK_magnify
+ * and BK_rotate take NSEvent's own units: the scale change (0.1 = 10% larger) and degrees,
+ * counter-clockwise positive, so neither is scaled nor negated as GHOST does for its integer
+ * deltas. A render follows from the kit's request, as for scrolling. */
+- (void)magnifyWithEvent:(NSEvent *)ev
+{
+  if (!bk || bk->disabled) {
+    return;
+  }
+  int x, y;
+  event_px(bk, ev, &x, &y);
+  BK_magnify(bk->ctx, x, y, (float)[ev magnification],
+             mods_of([ev modifierFlags]) & ~BK_BUTTON1);
+}
+
+- (void)rotateWithEvent:(NSEvent *)ev
+{
+  if (!bk || bk->disabled) {
+    return;
+  }
+  int x, y;
+  event_px(bk, ev, &x, &y);
+  BK_rotate(bk->ctx, x, y, [ev rotation], mods_of([ev modifierFlags]) & ~BK_BUTTON1);
+}
+
 /* -- keys (GHOST_WindowViewCocoa.hh keyDown: / HANDLE_KEY_EVENT) -- */
 
 /* Handling keyDown: here (not calling super) also keeps AppKit from beeping. */

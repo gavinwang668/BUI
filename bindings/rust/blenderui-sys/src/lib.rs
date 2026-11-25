@@ -76,6 +76,13 @@ pub const BK_EV_RESIZE: c_int = 23;
 pub const BK_EV_A11Y_TREE: c_int = 24;
 /// A screen reader asks for an action on a subtree node: ref = `*const BKA11yRequest`.
 pub const BK_EV_A11Y_ACTION: c_int = 25;
+/// A pinch or a turn over an "events" node (two fingers, or a trackpad): text = "mods kind x y"
+/// (x, y its centre relative to the node), a = the amount (see `BK_GESTURE_*`).
+pub const BK_EV_GESTURE: c_int = 26;
+/// `BK_EV_GESTURE` kinds: a = the scale change (0.1 = 10% larger) ...
+pub const BK_GESTURE_MAGNIFY: c_int = 1;
+/// ... or degrees, positive counter-clockwise.
+pub const BK_GESTURE_ROTATE: c_int = 2;
 /// `BK_EV_AREA`'s b: a new area (on the screen), one leaving or opened in a window (on the area).
 pub const BK_AREA_NEW: c_int = 1;
 pub const BK_AREA_CLOSE: c_int = 2;
@@ -86,6 +93,14 @@ pub const BK_SHIFT: c_int = 1;
 pub const BK_CTRL: c_int = 2;
 pub const BK_ALT: c_int = 4;
 pub const BK_BUTTON1: c_int = 8;
+/// The kit made the event from a touch screen contact (`BK_touch`); hosts never pass it.
+pub const BK_FROM_TOUCH: c_int = 64;
+
+// Touch contact phases (`BK_touch`).
+pub const BK_TOUCH_DOWN: c_int = 0;
+pub const BK_TOUCH_MOVE: c_int = 1;
+pub const BK_TOUCH_UP: c_int = 2;
+pub const BK_TOUCH_CANCEL: c_int = 3;
 
 // Geometry managers and anchors.
 pub const BK_GEOM_NONE: c_int = 0;
@@ -498,6 +513,10 @@ unsafe extern "C" {
     pub fn BK_wheel(ctx: *mut BKContext, x: c_int, y: c_int, delta: c_int, mods: c_int) -> c_int;
     pub fn BK_scroll_px(ctx: *mut BKContext, x: c_int, y: c_int, dx: f32, dy: f32, mods: c_int)
         -> c_int;
+    pub fn BK_touch(ctx: *mut BKContext, id: c_int, phase: c_int, x: f32, y: f32, time_ms: f64, mods: c_int)
+        -> c_int;
+    pub fn BK_magnify(ctx: *mut BKContext, x: c_int, y: c_int, delta: f32, mods: c_int) -> c_int;
+    pub fn BK_rotate(ctx: *mut BKContext, x: c_int, y: c_int, degrees: f32, mods: c_int) -> c_int;
     pub fn BK_key(ctx: *mut BKContext, text: *const c_char, keysym: *const c_char, mods: c_int)
         -> c_int;
     pub fn BK_key_taken(ctx: *mut BKContext);

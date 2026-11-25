@@ -1,10 +1,10 @@
 ---
 title: Events
-description: Respond to clicks, keys, the wheel and form changes, update your view with cx.listener, and paint your own content on a canvas.
+description: Respond to clicks, keys, the wheel, touch gestures and form changes, update your view with cx.listener, and paint your own content on a canvas.
 section: Rust
 order: 70
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/events.rs", "bindings/rust/blenderui/src/element.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/src/paint.rs", "bindings/rust/blenderui-macros/src/rsx.rs", "bindings/rust/blenderui/tests/suite/headless.rs", "bindings/rust/blenderui/examples/showcase.rs"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/events.rs", "bindings/rust/blenderui/src/element.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/src/paint.rs", "bindings/rust/blenderui-macros/src/rsx.rs", "bindings/rust/blenderui/tests/suite/headless.rs", "bindings/rust/blenderui/tests/suite/touch.rs", "bindings/rust/blenderui/examples/showcase.rs"]
 ---
 
 A UI that doesn't answer back is just a picture. **Events are how your code hears the user**: a click, a key, a dragged slider. Attach a listener to any element, change your state, and BUI redraws what changed.
@@ -49,6 +49,9 @@ If you use [hooks](../hooks/) instead, you don't need either: writing a signal r
 | `on_mouse_move` | `MouseMoveEvent { position, pressed_button, modifiers }` | Yes |
 | `on_hover` | `bool`: `true` when the pointer enters, `false` when it leaves | No |
 | `on_scroll_wheel` | `ScrollWheelEvent { position, delta, pixels, phase, modifiers }` | Yes |
+| `on_pan` | `PanEvent { position, delta, phase, modifiers }`: fingers dragging the content, before it scrolls | Yes |
+| `on_pinch` | `PinchEvent { position, delta, modifiers, touch }`: two fingers or a trackpad pinch | Yes |
+| `on_rotate` | `RotateEvent { position, degrees, modifiers, touch }`: two fingers or a trackpad turn | Yes |
 | `on_key_down`, `on_key_up` | `KeyDownEvent` / `KeyUpEvent { keystroke }` | Yes, from the focused element |
 | `on_change`, `on_input` | `ChangeEvent { value, checked, number }` | Yes |
 
@@ -59,7 +62,7 @@ The details:
 - **`Modifiers`** has `shift`, `control` and `alt`.
 - **`ClickEvent::click_count()`** tells a double-click from a single one.
 - **`ScrollWheelEvent::phase`** is how the scroll came: `Wheel` (a notch or touchpad), `Drag` (a finger moves the content), `Fling` (it coasts on) or `End` (the finger lifted, `delta` 0). A list uses it to stretch past an end while the finger is down and spring back when it lifts.
-- **`ScrollWheelEvent::delta`** is in lines; positive scrolls the content up (the wheel turned away from you).
+- **`ScrollWheelEvent::delta`** is in lines; positive scrolls the content up (the wheel turned away from you). Its `position` is where the scroll is, even for a finger, which moves no pointer.
 - **`Keystroke`** has `key` (the key's name: `"a"`, `"Return"`, `"Left"` …), `key_char` (the typed text, if any) and `modifiers`.
 - **`ChangeEvent`** carries `value` (the text), `checked` (checkboxes and radios) and `number` (numbers, ranges, and a select's index). `on_input` and `on_change` both fire when the value changes. [The three looks](../styled-and-blender-components/#form-controls) lists what each control sends.
 
@@ -74,6 +77,42 @@ rsx! {
     <div onClick={cx.listener(|this, _: &ClickEvent, _, cx| { this.open = !this.open; cx.notify(); })} />
 }
 ```
+
+## Touch screens and trackpads
+
+On a touch screen a tap is a click, a drag scrolls and flings, a long press opens the context menu, and two fingers pan, pinch and turn. You get that without writing anything. To use the gestures yourself, listen for them:
+
+- **`on_pan`** runs before the content scrolls. `delta` is how far the content follows the fingers, in logical pixels (x right, y down); `phase` is `Drag`, then `Fling` as it coasts, then `End` with a zero delta. Call `cx.stop_propagation()` to take the drag, and nothing scrolls.
+- **`on_pinch`**: `delta` is the scale change since the last event. 0.1 is 10% larger, so multiply your zoom by `1.0 + delta`.
+- **`on_rotate`**: `degrees` since the last event, positive counter-clockwise.
+- **`touch`** is `true` for two fingers on a screen and `false` for a trackpad.
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+rsx! {
+    <div w={px(300.0)} h={px(200.0)}
+        onPan={|e: &PanEvent, _, cx| { println!("pan {:?}", e.delta); cx.stop_propagation(); }}
+        onPinch={|e: &PinchEvent| println!("zoom x{}", 1.0 + e.delta)}
+        onRotate={|e: &RotateEvent| println!("turn {} deg", e.degrees)} />
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+div().w(px(300.0)).h(px(200.0))
+    .on_pan(|e: &PanEvent, _, cx| { println!("pan {:?}", e.delta); cx.stop_propagation(); })
+    .on_pinch(|e: &PinchEvent, _, _| println!("zoom x{}", 1.0 + e.delta))
+    .on_rotate(|e: &RotateEvent, _, _| println!("turn {} deg", e.degrees))
+```
+
+</Tab>
+</Tabs>
+
+In a test, `cx.simulate_touch(win.id, id, TouchPhase::Down, x, y)` (then `Move`, `Up` or `Cancel`) plays one finger, and `cx.simulate_magnify` / `cx.simulate_rotate` play a trackpad. [Touch and gestures](../../concepts/touch/) explains the whole model.
 
 ## Focus and bubbling
 

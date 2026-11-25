@@ -1708,6 +1708,7 @@ BKContext *BK_context_new(BKNode *root)
   ctx->cursor = BK_CURSOR_DEFAULT;
   ctx->layout_dirty = true;
   ctx->full_dirty = true;
+  bk_touch_init(&ctx->touch);
   if (root) {
     root->ctx_root = ctx;
   }
@@ -1978,7 +1979,7 @@ void bk_ctx_dirty_rect(BKContext *ctx, BKRect r)
   ctx->dirty[ctx->ndirty++] = r;
 }
 
-static bool is_within(const BKNode *n, const BKNode *subtree)
+bool bk_is_within(const BKNode *n, const BKNode *subtree)
 {
   for (; n; n = n->parent) {
     if (n == subtree) {
@@ -1995,7 +1996,7 @@ void bk_forget(BKContext *ctx, BKNode *subtree)
   undo_forget(ctx, subtree);
   bk_a11y_forget(ctx, subtree);
   for (int i = ctx->nanim - 1; i >= 0; i--) {
-    if (is_within(ctx->anim[i], subtree)) {
+    if (bk_is_within(ctx->anim[i], subtree)) {
       const int last = --ctx->nanim;
       ctx->anim[i] = ctx->anim[last];
       ctx->anim_start[i] = ctx->anim_start[last];
@@ -2003,36 +2004,37 @@ void bk_forget(BKContext *ctx, BKNode *subtree)
     }
   }
   for (int i = 0; i < ctx->nmulti; i++) {
-    if (is_within(ctx->multi[i], subtree)) {
+    if (bk_is_within(ctx->multi[i], subtree)) {
       ctx->nmulti = 0;
       break;
     }
   }
-  if (ctx->hover && is_within(ctx->hover, subtree)) {
+  if (ctx->hover && bk_is_within(ctx->hover, subtree)) {
     ctx->hover = NULL;
   }
-  if (ctx->grab && is_within(ctx->grab, subtree)) {
+  if (ctx->grab && bk_is_within(ctx->grab, subtree)) {
     ctx->grab = NULL;
   }
-  if (ctx->focus && is_within(ctx->focus, subtree)) {
+  if (ctx->focus && bk_is_within(ctx->focus, subtree)) {
     BKNode *f = ctx->focus;
     ctx->focus = NULL;
     bk_te_free(f->edit);
     f->edit = NULL;
   }
-  if (ctx->modal && is_within(ctx->modal, subtree)) {
+  if (ctx->modal && bk_is_within(ctx->modal, subtree)) {
     ctx->modal = NULL;
   }
-  if (ctx->tip_node && is_within(ctx->tip_node, subtree)) {
+  if (ctx->tip_node && bk_is_within(ctx->tip_node, subtree)) {
     ctx->tip_node = NULL;
     ctx->tip_shown = 0;
   }
-  if (ctx->last_click_node && is_within(ctx->last_click_node, subtree)) {
+  if (ctx->last_click_node && bk_is_within(ctx->last_click_node, subtree)) {
     ctx->last_click_node = NULL;
   }
+  bk_touch_forget(&ctx->touch, subtree);
   /* popups owned by the subtree */
   for (int i = 0; i < ctx->npopups; i++) {
-    if (ctx->popups[i]->parent && is_within(ctx->popups[i]->parent, subtree)) {
+    if (ctx->popups[i]->parent && bk_is_within(ctx->popups[i]->parent, subtree)) {
       bk_close_popups_after(ctx, i > 0 ? ctx->popups[i - 1] : NULL);
       break;
     }
@@ -2618,6 +2620,7 @@ static int render_frame(BKContext *ctx, BuiRaster *r, int w, int h, int full)
     BK_anim_tick(bk_time()); /* motions write their values (nodes damage themselves) */
   }
   anim_step(ctx);
+  bk_touch_frame(ctx); /* a fling's step (it scrolls: before the layout) */
   BK_configure(ctx, w, h);
   if (BUI_raster_width(r) != w || BUI_raster_height(r) != h) {
     ctx->layout_dirty = true;
@@ -2811,10 +2814,13 @@ void bk_update_cursor(BKContext *ctx)
   update_cursor(ctx);
 }
 
-static bool continuous(BKContext *ctx)
+/* A drag with the hidden pointer that wraps at the window edge and comes back where it began
+ * (USE_CONT_MOUSE_CORRECT). Not a finger's: a warp moves the mouse, not the finger, so the next
+ * touch would count the wrap again (and the system pointer would jump). */
+static bool continuous(BKContext *ctx, int mods)
 {
-  return ctx->host.warp && ctx->grab && ctx->dragging && !BK_HTML(ctx->grab) &&
-         ctx->grab->cls->drag_cursor == BK_CURSOR_NONE;
+  return ctx->host.warp && !(mods & BK_FROM_TOUCH) && ctx->grab && ctx->dragging &&
+         !BK_HTML(ctx->grab) && ctx->grab->cls->drag_cursor == BK_CURSOR_NONE;
 }
 
 static void wrap_pointer(BKContext *ctx, int x, int y)
@@ -2906,7 +2912,7 @@ static int in_BK_motion(BKContext *ctx, int x, int y, int mods)
       set_hover(ctx, under);
       changed = 1;
     }
-    if (continuous(ctx)) {
+    if (continuous(ctx, mods)) {
       wrap_pointer(ctx, x, y);
     }
     return changed;
@@ -2996,8 +3002,9 @@ static int in_BK_press(BKContext *ctx, int x, int y, int mods)
   bk_invalidate(target);
   BKEvent e = make_event(ctx, target, x, y, mods);
   const double now = bk_time();
+  const int dbl_px = (mods & BK_FROM_TOUCH) ? bk_unit() : DOUBLE_CLICK_PX; /* a finger lands wider */
   if (ctx->last_click_node == target && now - ctx->last_click_t < DOUBLE_CLICK_S &&
-      abs(x - ctx->last_click_x) <= DOUBLE_CLICK_PX && abs(y - ctx->last_click_y) <= DOUBLE_CLICK_PX)
+      abs(x - ctx->last_click_x) <= dbl_px && abs(y - ctx->last_click_y) <= dbl_px)
   {
     ctx->last_click_node = NULL;
     bk_event(target, BK_EV_DOUBLE, mods, &e);
@@ -3027,7 +3034,7 @@ static int in_BK_press(BKContext *ctx, int x, int y, int mods)
  * is sent and no menu item is picked. */
 static int end_press(BKContext *ctx, int x, int y, int mods, bool cancelled)
 {
-  const bool was_continuous = continuous(ctx);
+  const bool was_continuous = continuous(ctx, mods);
   const int vx = x + ctx->off_x, vy = y + ctx->off_y;
   BKNode *grab = ctx->grab;
   ctx->dt_active = 0;
@@ -3124,7 +3131,12 @@ void bk_cancel_press(BKContext *ctx, int mods)
     bk_end_modal(ctx);
   }
   else if (ctx->grab) {
-    cancel_drag(ctx);
+    /* unlike Escape, also a press that has not moved yet: its release would still act (an
+     * unmoved press on the node editor's empty space deselects everything) */
+    if (ctx->grab->cls->cancel) {
+      ctx->grab->cls->cancel(ctx->grab);
+      ctx->has_ungrab = false;
+    }
     end_press(ctx, ctx->pointer_x, ctx->pointer_y, mods, true);
   }
 }
@@ -3316,6 +3328,22 @@ static BKNode *deepest(BKNode *n, int x, int y)
   return n;
 }
 
+BKNode *bk_wheel_target(BKContext *ctx, int x, int y)
+{
+  BKNode *target = hit_all(ctx, x, y);
+  if (!target && ctx->root && y >= ctx->header_h) {
+    target = deepest(ctx->root, x, y); /* non-interactive area: let containers scroll */
+  }
+  return target;
+}
+
+/* What precise scrolls and gestures at x, y go to first: the custom node that holds the pointer
+ * (an ImGui drag), else the one under it; nothing while a modal tool runs. */
+static BKNode *pointer_target(BKContext *ctx, int x, int y)
+{
+  return BK_IS_CUSTOM(ctx->grab) ? ctx->grab : (ctx->modal ? NULL : hit_all(ctx, x, y));
+}
+
 /* `px`: the exact distance in pixels (BK_scroll_px; same sign as `delta`), 0 for a plain wheel step.
  * Scroll containers and raw events use it, other widgets keep the step. `horizontal`: a sideways
  * wheel or swipe, sent on as Shift + wheel to the widgets; the region only scrolls vertically, so
@@ -3323,10 +3351,7 @@ static BKNode *deepest(BKNode *n, int x, int y)
 static int in_BK_wheel(BKContext *ctx, int x, int y, int delta, float px, int mods, bool horizontal)
 {
   hide_tooltip(ctx);
-  BKNode *target = hit_all(ctx, x, y);
-  if (!target && ctx->root && y >= ctx->header_h) {
-    target = deepest(ctx->root, x, y); /* non-interactive area: let containers scroll */
-  }
+  BKNode *target = bk_wheel_target(ctx, x, y);
   for (BKNode *n = target; n; n = n->parent) {
     if (!NODE_ENABLED(n)) {
       continue;
@@ -3820,15 +3845,6 @@ int BK_eval_number(const char *expr, double *r_value)
 
 /** \} */
 
-/* Public input entry points: mark the input scope (undo grouping) and report
- * the view changes the event caused (scrollbars follow). */
-#define INPUT_ENTRY(call) \
-  ctx->in_input++; \
-  const int r = call; \
-  ctx->in_input--; \
-  bk_views_check(ctx); \
-  return r
-
 int BK_press(BKContext *ctx, int x, int y, int mods)
 {
   INPUT_ENTRY(in_BK_press(ctx, x, y, mods));
@@ -3844,9 +3860,16 @@ int BK_motion(BKContext *ctx, int x, int y, int mods)
   INPUT_ENTRY(in_BK_motion(ctx, x, y, mods));
 }
 
-int BK_cancel(BKContext *ctx, int mods)
+int bk_cancel_pointer(BKContext *ctx, int mods)
 {
   INPUT_ENTRY(in_BK_cancel(ctx, mods));
+}
+
+int BK_cancel(BKContext *ctx, int mods)
+{
+  const bool touched = ctx->touch.state != BK_TOUCH_IDLE;
+  bk_touch_cancel_all(ctx); /* a finger's press is cancelled there */
+  return bk_cancel_pointer(ctx, mods) | touched;
 }
 
 int BK_wheel(BKContext *ctx, int x, int y, int delta, int mods)
@@ -3873,7 +3896,7 @@ void BK_key_taken(BKContext *ctx)
 
 int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods)
 {
-  BKNode *t = BK_IS_CUSTOM(ctx->grab) ? ctx->grab : (ctx->modal ? NULL : hit_all(ctx, x, y));
+  BKNode *t = pointer_target(ctx, x, y);
   if (BK_IS_CUSTOM(t) && NODE_ENABLED(t)) {
     if (dx == 0.0f && dy == 0.0f) {
       return 0;
@@ -3903,14 +3926,62 @@ void BK_scroll_phase(BKContext *ctx, int phase)
   ctx->scroll_phase = phase;
 }
 
+BKNode *bk_gesture_target(BKContext *ctx, int x, int y)
+{
+  BKNode *t = pointer_target(ctx, x, y);
+  return t ? t : (ctx->modal ? NULL : bk_wheel_target(ctx, x, y));
+}
+
+/* Blender's MOUSEZOOM / MOUSEROTATE reach the view under them (view2d_ops.cc): the first of
+ * `target` and its parents with a gesture hook takes it (the node editor zooms, a custom node
+ * gets BK_CUSTOM_MAGNIFY / ROTATE). An "events" target hears of it first, as of a wheel. */
+static int in_gesture(BKContext *ctx, BKNode *target, int x, int y, int kind, float amount, int mods)
+{
+  if (ctx->modal || amount == 0.0f) {
+    return 0;
+  }
+  hide_tooltip(ctx);
+  int r = 0;
+  for (BKNode *n = target; n; n = n->parent) {
+    if (!NODE_ENABLED(n)) {
+      continue;
+    }
+    if (n == target && (n->flags & NF_EVENTS)) {
+      char buf[64];
+      snprintf(buf, sizeof(buf), "%d %d %d %d", mods, kind, x - n->x, y - n->y);
+      bk_emit(n, BK_EV_GESTURE, buf, amount, 0.0);
+      r = 1;
+    }
+    BKEvent e = make_event(ctx, n, x, y, mods);
+    if (n->cls->gesture && n->cls->gesture(n, &e, kind, amount)) {
+      return 1;
+    }
+  }
+  return r;
+}
+
+int bk_gesture(BKContext *ctx, BKNode *target, int x, int y, int kind, float amount, int mods)
+{
+  INPUT_ENTRY(in_gesture(ctx, target, x, y, kind, amount, mods));
+}
+
+int BK_magnify(BKContext *ctx, int x, int y, float delta, int mods)
+{
+  mods &= BK_SHIFT | BK_CTRL | BK_ALT;
+  return bk_gesture(ctx, bk_gesture_target(ctx, x, y), x, y, BK_GESTURE_MAGNIFY, delta, mods);
+}
+
+int BK_rotate(BKContext *ctx, int x, int y, float degrees, int mods)
+{
+  mods &= BK_SHIFT | BK_CTRL | BK_ALT;
+  return bk_gesture(ctx, bk_gesture_target(ctx, x, y), x, y, BK_GESTURE_ROTATE, degrees, mods);
+}
+
 int BK_scroll_px(BKContext *ctx, int x, int y, float dx, float dy, int mods)
 {
   const float notch = 2.0f * (float)bk_unit();
   if (dx == 0.0f && dy == 0.0f && ctx->scroll_phase == BK_SCROLL_END) {
-    BKNode *t = hit_all(ctx, x, y);
-    if (!t && ctx->root && y >= ctx->header_h) {
-      t = deepest(ctx->root, x, y);
-    }
+    BKNode *t = bk_wheel_target(ctx, x, y);
     if (!t) {
       return 0;
     }
@@ -3918,7 +3989,7 @@ int BK_scroll_px(BKContext *ctx, int x, int y, float dx, float dy, int mods)
     bk_event(t, BK_EV_WHEEL, mods, &e);
     return 1;
   }
-  BKNode *t = BK_IS_CUSTOM(ctx->grab) ? ctx->grab : (ctx->modal ? NULL : hit_all(ctx, x, y));
+  BKNode *t = pointer_target(ctx, x, y);
   if (BK_IS_CUSTOM(t) && NODE_ENABLED(t)) {
     return BK_scroll(ctx, x, y, dx / notch, dy / notch, mods); /* custom nodes take notches */
   }
@@ -4022,7 +4093,9 @@ static void raw_event(BKNode *n, int kind, int mods, const BKEvent *e, int butto
   }
   snprintf(buf, sizeof(buf), "%d %d", mods, button);
   if (kind == BK_EV_WHEEL && e) {
-    snprintf(buf, sizeof(buf), "%d %d %d", mods, button, e->phase); /* the third: BK_scroll_phase */
+    /* the third: BK_scroll_phase; then where it is, relative to the node (a touch scroll moves
+     * no pointer there) */
+    snprintf(buf, sizeof(buf), "%d %d %d %d %d", mods, button, e->phase, e->lx, e->ly);
     bk_emit(n, kind, buf, e->delta, e->wheel_y); /* b: the exact pixels of BK_scroll_px, else 0 */
     return;
   }
@@ -4168,7 +4241,7 @@ static void undo_forget(BKContext *ctx, BKNode *subtree)
   const int pos = ctx->undo_pos;
   int new_pos = pos;
   for (int i = 0; i < ctx->nundo; i++) {
-    if (is_within(ctx->undo[i].node, subtree)) {
+    if (bk_is_within(ctx->undo[i].node, subtree)) {
       undo_entry_free(&ctx->undo[i]);
       if (i < pos) {
         new_pos--;
@@ -4204,7 +4277,8 @@ bool bk_animations_enabled(void)
 int BK_animating(BKContext *ctx)
 {
   /* motions need frames from the kit only when it runs their clock (else the host draws them) */
-  return ctx->nanim > 0 || bk_custom_animating(ctx) || (!BK_anim_host_clock() && BK_anim_active());
+  return ctx->nanim > 0 || bk_custom_animating(ctx) || bk_touch_animating(ctx) ||
+         (!BK_anim_host_clock() && BK_anim_active());
 }
 
 static float anim_target(const BKNode *n)
@@ -4317,6 +4391,7 @@ BKNode *bk_next_editable(BKNode *from, int dir)
 void bk_window_focus(BKContext *ctx, BKWindow *win, const BKWindowCallbacks *cb, int active)
 {
   if (!active) {
+    bk_touch_cancel_all(ctx); /* the fingers' lifts may go to another window now */
     /* pie_handler WINDEACTIVATE: the pie key may be released outside, so cancel the pie */
     ctx->key_held[0] = '\0';
     if (ctx->npopups && ctx->popups[ctx->npopups - 1]->cls == &bk_cls_pie) {

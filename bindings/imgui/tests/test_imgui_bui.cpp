@@ -279,6 +279,32 @@ int main()
         CHECK(T.clicks == 1, "button clicked once (%d)", T.clicks);
     }
 
+    // -- touch: a tap clicks as a touch screen, a finger drags a slider at once (BK_TOUCH_MODE_POINTER) --
+    {
+        ImGuiIO& io = ImGui::GetIO();
+        const ImVec2 c = Center(T.button);
+        BK_touch(g_ctx, 1, BK_TOUCH_DOWN, c.x, c.y, 0, 0);
+        Render(2);
+        CHECK(io.MouseSource == ImGuiMouseSource_TouchScreen, "a finger is ImGui's touch screen (%d)", (int)io.MouseSource);
+        BK_touch(g_ctx, 1, BK_TOUCH_UP, c.x, c.y, 0, 0);
+        Render(3);
+        CHECK(T.clicks == 2, "a tap clicked the button (%d)", T.clicks);
+        const float x0 = T.slider_rc.Min.x + 2, x1 = T.slider_rc.Min.x + T.slider_w - 2, y = Center(T.slider_rc).y;
+        T.slider = 0.0f;
+        BK_touch(g_ctx, 2, BK_TOUCH_DOWN, x0, y, 0, 0);
+        Render(2);
+        for (int i = 1; i <= 10; i++)
+        {
+            BK_touch(g_ctx, 2, BK_TOUCH_MOVE, x0 + (x1 - x0) * i / 10, y, 0, 0);
+            Render(1);
+        }
+        BK_touch(g_ctx, 2, BK_TOUCH_UP, x1, y, 0, 0);
+        Render(3);
+        CHECK(T.slider > 0.95f, "a finger dragged the slider to %.3f", T.slider);
+        Move(c.x, c.y);
+        CHECK(io.MouseSource == ImGuiMouseSource_Mouse, "the mouse again (%d)", (int)io.MouseSource);
+    }
+
     // -- text input: typing, editing, cursor shape, select all + copy --
     {
         const ImVec2 c = Center(T.input);

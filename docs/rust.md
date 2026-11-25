@@ -445,11 +445,32 @@ gets `on_click`.
 | `on_mouse_move`                            | `MouseMoveEvent { position, pressed_button, modifiers }` | yes    |
 | `on_hover`                                 | `bool`: entered / left                                  | no      |
 | `on_scroll_wheel`                          | `ScrollWheelEvent { position, delta, pixels, phase, modifiers }` | yes     |
+| `on_pan`                                   | `PanEvent { position, delta, phase, modifiers }`: a finger (or two) dragging the content, before it scrolls | yes |
+| `on_pinch`                                 | `PinchEvent { position, delta, modifiers, touch }`: two fingers or a trackpad pinch | yes |
+| `on_rotate`                                | `RotateEvent { position, degrees, modifiers, touch }`: two fingers or a trackpad turn | yes |
 | `on_key_down`, `on_key_up`                 | `KeyDownEvent { keystroke: Keystroke { key, key_char, modifiers } }` | yes (from the focused element) |
 | `on_change`, `on_input`                    | `ChangeEvent { value, checked, number }`                | yes     |
 
 Positions are logical pixels. Clicking an element focuses it; key events go
 to the focused element and bubble up. `cx.stop_propagation()` stops bubbling.
+
+### Touch screens and trackpads
+
+A finger works as on a phone: a tap is a click, a drag scrolls (sliders and text fields drag
+instead), a long press is a right press (the context menu), and two fingers pan, pinch and turn. The kit does this
+for every platform ([touch.md](touch.md)); the element only listens:
+
+- `on_pan(|e: &PanEvent, window, cx| ..)` runs before the scroll. `e.delta` is the logical
+  pixels the content follows the fingers (x right, y down; each axis may come as its own event),
+  `e.phase` is `ScrollPhase::Drag`, then `Fling` as it coasts on, then `End` (zero delta). Call
+  `cx.stop_propagation()` to take the drag: nothing scrolls (a map that pans itself).
+- `on_pinch(|e: &PinchEvent, ..| ..)`: `e.delta` is the scale change since the last one (0.1 is
+  10% larger: multiply a zoom by `1.0 + e.delta`) about `e.position`.
+- `on_rotate(|e: &RotateEvent, ..| ..)`: `e.degrees` since the last one, positive counter-clockwise.
+
+`e.touch` is `true` for a touch screen's two fingers and `false` for a trackpad. In `rsx!` they
+are `onPan`, `onPinch` and `onRotate`. A `ScrollWheelEvent`'s `position` is where the scroll is
+(a finger's scroll moves no pointer), and a diagonal finger drag scrolls both axes.
 
 ### Selecting text
 
@@ -630,6 +651,10 @@ Application::headless().run(|cx| {
 ```
 
 Also `simulate_mouse_move`, `simulate_scroll`, `simulate_key(text, keysym)`, `simulate_key_with` (Ctrl, Shift), `simulate_click_with`, and `simulate_press`, `simulate_release`, `simulate_cancel` (the host lost the pointer: no release, no click, a drag goes back) and `simulate_drag(from, to)` for a held button.
+Touch: `simulate_touch(win.id, id, TouchPhase::Down | Move | Up | Cancel, x, y)` feeds one contact
+to the kit's touch model as a window host does (taps, scrolls, flings, two-finger gestures), and
+`simulate_magnify(win.id, x, y, delta)` / `simulate_rotate(win.id, x, y, degrees)` are a
+trackpad's pinch and turn (`tests/suite/touch.rs`).
 The kit has global state, so one `Application` runs at a time per process
 (`run` takes a lock; parallel tests queue up).
 

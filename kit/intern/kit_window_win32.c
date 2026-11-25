@@ -824,6 +824,65 @@ static const char *vk_keysym(WPARAM vk, char *buf)
   return NULL;
 }
 
+/* -- touch --
+ * Touch contacts come as pointer messages (Windows 8 and later). Handled here, Windows makes no
+ * mouse messages of them (no promoted clicks, no press-and-hold right click), so the kit's touch
+ * model (BK_touch: taps, scrolls, flings, two-finger gestures) is the only one. Pen and mouse
+ * pointers go on to DefWindowProc, which sends them as mouse messages: a pen is the mouse, as in
+ * Blender without its tablet API. Positions are physical pixels (per-monitor DPI aware), mapped
+ * to the client as the mouse's are. */
+#  ifdef WM_POINTERDOWN
+typedef BOOL(WINAPI *GetPointerTypeFn)(UINT32, POINTER_INPUT_TYPE *);
+typedef BOOL(WINAPI *GetPointerInfoFn)(UINT32, POINTER_INFO *);
+
+/* The touch pointer's info, or false for a pen, the mouse, or a system without the API. */
+static bool touch_info(UINT32 id, POINTER_INFO *r)
+{
+  static GetPointerTypeFn get_type;
+  static GetPointerInfoFn get_info;
+  static int looked_up;
+  if (!looked_up) {
+    looked_up = 1;
+    HMODULE user32 = GetModuleHandleW(L"user32.dll");
+    get_type = user32 ? (GetPointerTypeFn)(void *)GetProcAddress(user32, "GetPointerType") : NULL;
+    get_info = user32 ? (GetPointerInfoFn)(void *)GetProcAddress(user32, "GetPointerInfo") : NULL;
+  }
+  POINTER_INPUT_TYPE type;
+  return get_type && get_info && get_type(id, &type) && type == PT_TOUCH && get_info(id, r);
+}
+
+/* WM_POINTERDOWN / UPDATE / UP: 1 when it was a touch (handled), 0 for DefWindowProc. */
+static int touch_message(BKWindow *win, UINT msg, WPARAM wp)
+{
+  const UINT32 id = GET_POINTERID_WPARAM(wp);
+  POINTER_INFO pi;
+  if (!touch_info(id, &pi)) {
+    return 0;
+  }
+  int phase = msg == WM_POINTERDOWN ? BK_TOUCH_DOWN : msg == WM_POINTERUP ? BK_TOUCH_UP : BK_TOUCH_MOVE;
+  if (pi.pointerFlags & POINTER_FLAG_CANCELED) {
+    phase = BK_TOUCH_CANCEL; /* the system took it (an edge swipe) */
+  }
+  else if (phase == BK_TOUCH_MOVE && !(pi.pointerFlags & POINTER_FLAG_INCONTACT)) {
+    return 1; /* not touching (a lifted contact's last update) */
+  }
+  if (phase == BK_TOUCH_DOWN) {
+    SetFocus(win->hwnd);
+  }
+  POINT p = pi.ptPixelLocation;
+  ScreenToClient(win->hwnd, &p);
+  /* the event's own time for the fling's velocity: the performance counter, when it was kept */
+  double ms = 0.0;
+  if (pi.PerformanceCount) {
+    LARGE_INTEGER freq;
+    QueryPerformanceFrequency(&freq);
+    ms = (double)pi.PerformanceCount * 1000.0 / (double)freq.QuadPart;
+  }
+  BK_touch(win->ctx, (int)id, phase, (float)p.x, (float)p.y, ms, mods_now(0, 0));
+  return 1;
+}
+#  endif
+
 static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
 {
   BKWindow *win = (BKWindow *)GetWindowLongPtrW(hwnd, GWLP_USERDATA);
@@ -1001,6 +1060,18 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_RBUTTONDOWN:
       BK_context_menu(ctx, GET_X_LPARAM(lp), GET_Y_LPARAM(lp), mods_now(wp, 1));
       return 0;
+#  ifdef WM_POINTERDOWN
+    case WM_POINTERDOWN:
+    case WM_POINTERUPDATE:
+    case WM_POINTERUP:
+      if (touch_message(win, msg, wp)) {
+        return 0;
+      }
+      break;
+    case WM_POINTERCAPTURECHANGED: /* another window took the contact: it ends with nothing kept */
+      BK_touch(ctx, (int)GET_POINTERID_WPARAM(wp), BK_TOUCH_CANCEL, 0.0f, 0.0f, 0.0, 0);
+      break;
+#  endif
     case WM_RBUTTONUP:
     case WM_MBUTTONDOWN:
     case WM_MBUTTONUP:

@@ -56,6 +56,7 @@ mod text_overflow;
 mod text_translate;
 mod textarea_grow;
 mod titlebar;
+mod touch;
 mod vector_transforms;
 mod vlist;
 mod vlist_custom;

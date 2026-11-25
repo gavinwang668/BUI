@@ -23,7 +23,7 @@ const MOTION_PROPS = {
 }
 const EVENT_BITS = {
   click: 1, mousedown: 2, mouseup: 4, mousemove: 8, mouseenter: 16, mouseleave: 16,
-  wheel: 32, keydown: 64, keyup: 128, change: 256, input: 512,
+  wheel: 32, keydown: 64, keyup: 128, change: 256, input: 512, pinch: 1024, rotate: 2048, pan: 4096,
 }
 const BUTTONS = ['left', 'middle', 'right']
 // DOM: these don't bubble
@@ -57,7 +57,14 @@ class BuiEvent {
     this.clientY = this.y = raw.y
     this.button = raw.button
     this.detail = raw.clickCount
-    this.deltaY = -raw.delta * 100 // DOM: positive scrolls down
+    // wheel: the DOM's, positive scrolls down; pan: pixels the content follows the fingers (x right,
+    // y down)
+    this.deltaX = raw.deltaX
+    this.deltaY = raw.kind === 'wheel' ? -raw.delta * 100 : raw.deltaY
+    // pinch: the scale change (0.1 = 10% larger); rotate: degrees, positive counter-clockwise
+    this.delta = raw.delta
+    // pan: 'drag', 'fling' or 'end'
+    this.phase = raw.phase ?? undefined
     this.key = raw.key ?? undefined
     this.char = raw.keyChar ?? undefined
     this.shiftKey = raw.shift

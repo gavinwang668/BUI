@@ -1150,6 +1150,50 @@ def test_node_editor_height():
     Driver(short, default, size=(500, 900))
     assert short.h == 8 * u and default.h == 14 * u
 
+
+def test_touch_and_gestures():
+    from bui.components.core import (EV_GESTURE, FROM_TOUCH, GESTURE_MAGNIFY, TOUCH_DOWN,
+                                     TOUCH_MOVE, TOUCH_UP)
+
+    class Pad(Column):  # an "events" node: raw events reach _on_event, gestures as text
+        def __init__(self):
+            super().__init__(Label("pad"), Label("pad"), Label("pad"))
+            self.set("events", True)
+            self.log = []
+
+        def _on_event(self, kind, ref, a, b):
+            self.log.append((kind, ref, a))
+
+    clicks = []
+    button = Button("Go", on_click=lambda: clicks.append(1))
+    pad = Pad()
+    d = Driver(button, pad)
+    # a tap is a click once the finger lifts
+    x, y = d.center(button)
+    d.ctx.touch(1, TOUCH_DOWN, x, y)
+    assert not clicks
+    d.ctx.touch(1, TOUCH_UP, x + 2, y)
+    assert clicks == [1], clicks
+    # two fingers spreading over the pad: magnify gestures about their centre
+    px, py = d.center(pad)
+    d.ctx.touch(2, TOUCH_DOWN, px - 20, py, 0.0)
+    d.ctx.touch(3, TOUCH_DOWN, px + 20, py, 0.0)
+    for i in range(1, 4):
+        d.ctx.touch(2, TOUCH_MOVE, px - 20 - 10 * i, py)
+        d.ctx.touch(3, TOUCH_MOVE, px + 20 + 10 * i, py)
+    d.ctx.touch(2, TOUCH_UP, px - 50, py)
+    d.ctx.touch(3, TOUCH_UP, px + 50, py)
+    gestures = [(ref, a) for kind, ref, a in pad.log if kind == EV_GESTURE]
+    assert len(gestures) == 3, pad.log
+    mods, kind, gx, gy = (int(v) for v in gestures[0][0].split())
+    assert mods & FROM_TOUCH and kind == GESTURE_MAGNIFY and gestures[0][1] > 0, gestures
+    assert (gx, gy) == (px - pad.x, py - pad.y), (gx, gy)
+    # a trackpad pinch
+    pad.log.clear()
+    assert d.ctx.magnify(px, py, 0.25)
+    assert pad.log == [(EV_GESTURE, "0 1 %d %d" % (px - pad.x, py - pad.y), 0.25)], pad.log
+
+
 def main() -> int:
     tests = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for t in tests:

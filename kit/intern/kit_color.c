@@ -241,7 +241,7 @@ static void picker_free(BKNode *n)
 }
 
 const BKClass bk_cls_picker = {.name = "picker", .a11y_role = BK_ROLE_DIALOG,
-                               .flags = CLS_INTERACTIVE | CLS_POPUP,
+                               .flags = CLS_INTERACTIVE | CLS_POPUP | CLS_DRAGS,
                                .free_ext = picker_free,
                                .measure = picker_measure,
                                .arrange = picker_arrange,
@@ -854,7 +854,7 @@ static int ramp_color_set(BKNode *n, const float c[4])
 }
 
 const BKClass bk_cls_ramp = {.name = "ramp", .a11y_role = BK_ROLE_GROUP,
-                             .flags = CLS_INTERACTIVE,
+                             .flags = CLS_INTERACTIVE | CLS_DRAGS,
                              /* half the width of a stop marker: it goes out at the ends. Below the
                               * band (1.1u + 1) a marker is 1.6 times that tall, so it ends at
                               * 1.548u + 1, within a pixel of the node's 1.6u: the margin covers it. */
@@ -1223,7 +1223,7 @@ static int curve_get_num(BKNode *n, const char *key, double *r)
 }
 
 const BKClass bk_cls_curve = {.name = "curve", .a11y_role = BK_ROLE_GROUP,
-                              .flags = CLS_INTERACTIVE,
+                              .flags = CLS_INTERACTIVE | CLS_DRAGS,
                               .init = curve_init,
                               .free_ext = curve_free,
                               .measure = curve_measure,
@@ -1323,7 +1323,7 @@ static void normal_draw(BKNode *n)
 }
 
 const BKClass bk_cls_normal = {.name = "normal", .a11y_role = BK_ROLE_GROUP,
-                               .flags = CLS_INTERACTIVE,
+                               .flags = CLS_INTERACTIVE | CLS_DRAGS,
                                .cursor = BK_CURSOR_CROSSHAIR,
                                .init = normal_init,
                                .measure = normal_measure,

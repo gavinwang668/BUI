@@ -35,7 +35,7 @@ Needs the Android SDK (`ANDROID_HOME`; build-tools, platform 34), an NDK (the ne
 | **Rust** | an ordinary `blenderui` app in a `staticlib` crate with `blenderui::android_main!(run);`, where `run` is the `fn()` a desktop `main` would call (`platform/android/rust`) | `--rust CRATE` |
 | **Lua** | an ordinary BUI Lua script, `assets/main.lua`, ending in `bui.open{root=...}` or `bui.Window(...)` + `bui.run()`; `require` finds your other `.lua` files and `bui.lua` in the APK | `--lua DIR` |
 | **JavaScript** | an ordinary `@blender-ui/native`, React, Vue or Svelte app (`.js`, `.jsx`, `.vue`, `.svelte`); it is bundled into one script (`bui bundle`, needs Bun) and runs on QuickJS (`bindings/rust/blenderui-qjs`, the engine `bui build` embeds), as `assets/main.js`; `console.log` goes to logcat (tag `bui-js`) | `--js ENTRY` |
-| **Dear ImGui** | an ordinary ImGui frame function in a C++ file with `bui_app_main` (`ImGui_ImplBUI_CreateApp` / `RunApp`; `platform/android/imgui_app.cpp`), plus `BK_window_wm(win, "touch_drag", 1, 0)` so a drag is ImGui's (sliders, window moves) | `--imgui [FILE]` |
+| **Dear ImGui** | an ordinary ImGui frame function in a C++ file with `bui_app_main` (`ImGui_ImplBUI_CreateApp` / `RunApp`; `platform/android/imgui_app.cpp`); a drag is ImGui's (sliders, window moves), since the adapter puts its node in `BK_TOUCH_MODE_POINTER` | `--imgui [FILE]` |
 | **C** | `void bui_app_main(void)`: build nodes, `BK_context_new`, `BK_window_new`, `BK_window_run` (`platform/android/demo.c`) | the default |
 
 Python, Qt, tkinter and D are not available on Android: each needs its
@@ -70,14 +70,16 @@ A real app is SpotiTube-sized: a library crate shared with the desktop `main`, p
   and locked. Idle cost: 0 CPU ticks in 10 s on the emulator, for the C and the Rust app.
 - **Scale.** A CSS pixel is a dp, as in Chrome on Android: the kit's scale is the screen density
   (`dpi / 160`), so Rust layout and Blender's 20-unit widgets come out at a phone's size.
-- **Touch.** One finger is the pointer. A tap is a click (sent when the finger lifts in place). A drag
-  that starts on a widget that drags (sliders, number fields, text, scrollbars, panels) drags it;
-  anywhere else it scrolls. The content follows the finger exactly (`BK_scroll_px`: the distance in
-  pixels, not a wheel notch per touch event) and keeps going after the finger lifts at the velocity of
-  the last 100 ms, slowing down the way UIScrollView does (0.998 per millisecond); a touch stops it. A
-  touch in the 20 dp strip at the right edge of a custom or canvas node is the app's press and drag
-  (a list's scrollbar thumb), so a huge list can be dragged to any place. Two fingers always scroll. `BK_window_wm(win, "touch_drag", 1, 0)` gives
-  the drags of custom and canvas nodes to the app instead (a paint app); by default they scroll.
+- **Touch.** The host forwards every pointer of a motion event (batched history first) to the kit's
+  touch model (`BK_touch`), the same one every window host uses: see [touch.md](touch.md). A tap
+  is a click, a drag that starts on a widget that drags (sliders, number fields, text, scrollbars)
+  drags it, and anywhere else it scrolls, following the finger exactly and flinging on along
+  Android's `OverScroller` curve when it lifts; a touch stops the fling. A long press opens the
+  context menu, and two fingers pan, pinch and turn. A touch in the 20 dp strip at the right edge
+  of a custom or canvas node is the app's press and drag (a list's scrollbar thumb), so a huge list
+  can be dragged to any place. The old `BK_window_wm(win, "touch_drag", 1, 0)` key is gone: a custom
+  node that wants a finger's drag (a paint app) calls `BK_custom_set_touch(node,
+  BK_TOUCH_MODE_POINTER)`, or `BK_TOUCH_MODE_RAW` for every contact.
 - **Back.** The Back key is the key `Escape`. It closes a popup or leaves a text field first; a Rust
   key listener that acts on it calls `app.prevent_default()` (C bindings: `BK_key_taken`), and only a
   Back nothing took finishes the activity. An app with screens of its own walks back through them
@@ -124,6 +126,6 @@ Run on an x86_64 emulator (API 33): the C demo, the Lua app (a button callback u
 Rust app (a button, a text input, scrolling with the scrollbar). The arm64-v8a builds of all three
 compile and link but were not run on a device.
 
-Not done: a GPU renderer (OpenGL ES would reuse `gpu_gl.c`, untested), long-press as right-click, pinch,
+Not done: a GPU renderer (OpenGL ES would reuse `gpu_gl.c`, untested),
 IME composition, a clipboard beyond the app's own, cutout insets beyond the content rectangle, and
 touch text selection in Rust pages (a drag scrolls).

@@ -877,6 +877,9 @@ BUI_LUA_ENTRY int luaopen_bui(lua_State *L) {
   /* screens: areas made / closed / dragged out, panels moved, regions resized */
   lua_pushinteger(L, BK_EV_AREA); lua_setfield(L, -2, "EV_AREA");       lua_pushinteger(L, BK_EV_MOVE); lua_setfield(L, -2, "EV_MOVE");
   lua_pushinteger(L, BK_EV_RESIZE); lua_setfield(L, -2, "EV_RESIZE");
+  /* pinches and turns over "events" nodes: the handler's 4th argument is "mods kind x y" */
+  lua_pushinteger(L, BK_EV_GESTURE); lua_setfield(L, -2, "EV_GESTURE");
+  lua_pushinteger(L, BK_GESTURE_MAGNIFY); lua_setfield(L, -2, "GESTURE_MAGNIFY"); lua_pushinteger(L, BK_GESTURE_ROTATE); lua_setfield(L, -2, "GESTURE_ROTATE");
   lua_pushinteger(L, BK_AREA_NEW); lua_setfield(L, -2, "AREA_NEW");     lua_pushinteger(L, BK_AREA_CLOSE); lua_setfield(L, -2, "AREA_CLOSE");
   lua_pushinteger(L, BK_AREA_WINDOW); lua_setfield(L, -2, "AREA_WINDOW");
 
@@ -894,6 +897,11 @@ BUI_LUA_ENTRY int luaopen_bui(lua_State *L) {
   lua_pushinteger(L, BK_SHIFT); lua_setfield(L, -2, "MOD_SHIFT");  lua_pushinteger(L, BK_CTRL); lua_setfield(L, -2, "MOD_CTRL");
   lua_pushinteger(L, BK_ALT); lua_setfield(L, -2, "MOD_ALT");     lua_pushinteger(L, BK_BUTTON1); lua_setfield(L, -2, "MOD_BUTTON1");
   lua_pushinteger(L, BK_BUTTON2); lua_setfield(L, -2, "MOD_BUTTON2"); lua_pushinteger(L, BK_BUTTON3); lua_setfield(L, -2, "MOD_BUTTON3");
+  lua_pushinteger(L, BK_FROM_TOUCH); lua_setfield(L, -2, "MOD_FROM_TOUCH");
+
+  /* Touch contact phases (ctx:touch) */
+  lua_pushinteger(L, BK_TOUCH_DOWN); lua_setfield(L, -2, "TOUCH_DOWN");     lua_pushinteger(L, BK_TOUCH_MOVE); lua_setfield(L, -2, "TOUCH_MOVE");
+  lua_pushinteger(L, BK_TOUCH_UP); lua_setfield(L, -2, "TOUCH_UP");         lua_pushinteger(L, BK_TOUCH_CANCEL); lua_setfield(L, -2, "TOUCH_CANCEL");
 
   /* Image formats */
   lua_pushinteger(L, BK_IMAGE_NONE); lua_setfield(L, -2, "IMAGE_NONE");  lua_pushinteger(L, BK_IMAGE_PNG); lua_setfield(L, -2, "IMAGE_PNG");
@@ -944,6 +952,13 @@ BUI_LUA_ENTRY int luaopen_bui(lua_State *L) {
   lua_pushinteger(L, BK_CUSTOM_KEYUP); lua_setfield(L, -2, "CUSTOM_KEYUP");
   lua_pushinteger(L, BK_CUSTOM_FOCUS); lua_setfield(L, -2, "CUSTOM_FOCUS");
   lua_pushinteger(L, BK_CUSTOM_BLUR); lua_setfield(L, -2, "CUSTOM_BLUR");
+  lua_pushinteger(L, BK_CUSTOM_TOUCH); lua_setfield(L, -2, "CUSTOM_TOUCH");
+  lua_pushinteger(L, BK_CUSTOM_MAGNIFY); lua_setfield(L, -2, "CUSTOM_MAGNIFY");
+  lua_pushinteger(L, BK_CUSTOM_ROTATE); lua_setfield(L, -2, "CUSTOM_ROTATE");
+  /* What a finger does on a custom node (node:custom_set_touch) */
+  lua_pushinteger(L, BK_TOUCH_MODE_SCROLL); lua_setfield(L, -2, "TOUCH_MODE_SCROLL");
+  lua_pushinteger(L, BK_TOUCH_MODE_POINTER); lua_setfield(L, -2, "TOUCH_MODE_POINTER");
+  lua_pushinteger(L, BK_TOUCH_MODE_RAW); lua_setfield(L, -2, "TOUCH_MODE_RAW");
 
   /* IME composition event kinds (ctx:ime_event) */
   lua_pushinteger(L, BK_IME_COMPOSITION_START); lua_setfield(L, -2, "IME_COMPOSITION_START");

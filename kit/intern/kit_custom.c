@@ -24,6 +24,7 @@ typedef struct BKCustom {
   double wake_at; /* frame due at this bk_time() (0 = none) */
   int framed;     /* frame ran at least once */
   int last_w, last_h;
+  int touch_mode;        /* BK_TOUCH_MODE_* (BK_custom_set_touch) */
   struct BKCustom *next; /* every custom node (any context) */
 } BKCustom;
 
@@ -198,6 +199,22 @@ static int custom_wheel(BKNode *n, BKEvent *e)
   return 1; /* never scroll the region under an embedded UI */
 }
 
+static int custom_gesture(BKNode *n, BKEvent *e, int kind, float amount)
+{
+  BKCustomEvent ce;
+  memset(&ce, 0, sizeof(ce));
+  ce.type = kind == BK_GESTURE_MAGNIFY ? BK_CUSTOM_MAGNIFY : BK_CUSTOM_ROTATE;
+  ce.mods = e->mods;
+  if (kind == BK_GESTURE_MAGNIFY) {
+    ce.magnify = amount;
+  }
+  else {
+    ce.rotate = amount;
+  }
+  bk_custom_event(n, &ce, e->x, e->y);
+  return 1; /* as the wheel: nothing under an embedded UI zooms */
+}
+
 static void custom_finish_edit(BKNode *n, bool confirm)
 {
   (void)confirm;
@@ -227,6 +244,7 @@ const BKClass bk_cls_custom = {.name = "custom",
                                .leave = custom_leave,
                                .key = custom_key,
                                .wheel = custom_wheel,
+                               .gesture = custom_gesture,
                                .cursor_at = custom_cursor_at,
                                .finish_edit = custom_finish_edit};
 
@@ -262,6 +280,10 @@ void bk_ctx_arm_timer(BKContext *ctx)
       due = c->wake_at;
     }
   }
+  const double press = bk_touch_due(ctx); /* a finger held still: its long press */
+  if (press > 0.0 && (due == 0.0 || press < due)) {
+    due = press;
+  }
   if (due == 0.0 || !ctx->host.schedule) {
     ctx->custom_timer_due = due;
     return;
@@ -279,6 +301,7 @@ void bk_ctx_arm_timer(BKContext *ctx)
 void bk_custom_timer(BKContext *ctx)
 {
   ctx->custom_timer_due = 0.0;
+  bk_touch_tick(ctx); /* a long press that is due */
   bk_image_tick(); /* animated images whose frame is due (they damage themselves) */
   const double now = bk_time() + 0.002; /* timers fire a little early */
   bool any = false;
@@ -396,6 +419,40 @@ void BK_custom_set_cursor(BKNode *node, int cursor)
   if (ctx && (ctx->hover == node || ctx->grab == node)) {
     bk_update_cursor(ctx);
   }
+}
+
+void BK_custom_set_touch(BKNode *node, int mode)
+{
+  BKCustom *c = cust(node);
+  if (c && mode >= BK_TOUCH_MODE_SCROLL && mode <= BK_TOUCH_MODE_RAW) {
+    c->touch_mode = mode;
+  }
+}
+
+int bk_custom_touch_mode(const BKNode *n)
+{
+  const BKCustom *c = cust(n);
+  /* raw contacts need someone to take them */
+  return c && (c->touch_mode != BK_TOUCH_MODE_RAW || c->cls.event) ? c->touch_mode :
+                                                                     BK_TOUCH_MODE_SCROLL;
+}
+
+int bk_custom_touch(BKNode *n, int id, int phase, int x, int y, int mods)
+{
+  if (phase == BK_TOUCH_DOWN) {
+    BKContext *ctx = bk_ctx(n);
+    if (ctx && ctx->focus != n) { /* as a click does (custom_press) */
+      bk_end_edit(ctx, true);
+      take_focus(n);
+    }
+  }
+  BKCustomEvent ce;
+  memset(&ce, 0, sizeof(ce));
+  ce.type = BK_CUSTOM_TOUCH;
+  ce.mods = mods;
+  ce.touch_id = id;
+  ce.touch_phase = phase;
+  return bk_custom_event(n, &ce, x, y);
 }
 
 int BK_custom_has_focus(BKNode *node)

@@ -9,7 +9,8 @@ module BUI
   #       new value for :change, a row index for :rename and :activate, the size
   #       for :configure, the modifiers (BUI::SHIFT | BUI::CTRL | BUI::ALT) for keys
   # text  the typed text and the X11 keysym of :key ("a\ta", "\tReturn"), a new
-  #       name for :rename
+  #       name for :rename, "mods kind x y" for :gesture (kind BUI::GESTURE_*, x, y
+  #       its centre relative to the node; a = the scale change or degrees)
   # item  the BUI::TreeItem of a :toggle
   Event = Struct.new(:node, :kind, :a, :b, :text, :item) do
     alias_method :x, :a

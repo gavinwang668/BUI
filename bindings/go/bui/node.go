@@ -40,7 +40,10 @@ const (
 	EventArea       EventKind = C.BK_EV_AREA       // a screen's area: A = its child index, B = BK_AREA_*
 	EventMove       EventKind = C.BK_EV_MOVE       // a panel was dragged to a new place: A = old index, B = new index
 	EventResize     EventKind = C.BK_EV_RESIZE     // an area's region was resized, hidden or shown: A = size, B = hidden
-	eventKindCount            = int(EventResize) + 1
+	// a pinch or a turn over a node with "events": Text = "mods kind x y" (kind GestureMagnify or
+	// GestureRotate, x, y its centre relative to the node), A = the scale change or degrees
+	EventGesture   EventKind = C.BK_EV_GESTURE
+	eventKindCount           = int(EventGesture) + 1
 )
 
 // valid reports a kind a node can have a handler for.
@@ -62,6 +65,22 @@ const (
 	Button1 = C.BK_BUTTON1
 	Button2 = C.BK_BUTTON2
 	Button3 = C.BK_BUTTON3
+	// FromTouch marks the raw events and gestures the kit made from touch screen contacts.
+	FromTouch = C.BK_FROM_TOUCH
+)
+
+// The kinds of an EventGesture.
+const (
+	GestureMagnify = C.BK_GESTURE_MAGNIFY
+	GestureRotate  = C.BK_GESTURE_ROTATE
+)
+
+// Touch contact phases (Context.Touch).
+const (
+	TouchDown   = C.BK_TOUCH_DOWN
+	TouchMove   = C.BK_TOUCH_MOVE
+	TouchUp     = C.BK_TOUCH_UP
+	TouchCancel = C.BK_TOUCH_CANCEL
 )
 
 // Rect is a node's box in window pixels.

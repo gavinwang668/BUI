@@ -45,6 +45,7 @@ const { Motions } = require('./anim')
 const LAYERS = ['background', 'bottom', 'top', 'overlay']
 const EDGES = ['top', 'bottom', 'left', 'right']
 const KEYBOARD = ['none', 'exclusive', 'on-demand']
+const TOUCH_PHASES = ['down', 'move', 'up', 'cancel']
 
 function oneOf (what, value, names) {
   if (value != null && !names.includes(value)) {
@@ -206,6 +207,26 @@ class Window {
   mouseUp (x, y) {
     this.flush()
     this.app.native.simulatePointer(this.id, 2, x, y)
+  }
+
+  /** A touch screen contact at (x, y) (tests): `id` tells the fingers apart; taps, scrolls, pans,
+   *  pinches and turns follow. */
+  touch (id, phase, x, y) {
+    oneOf('touch phase', String(phase), TOUCH_PHASES)
+    this.flush()
+    this.app.native.simulateTouch(this.id, id, TOUCH_PHASES.indexOf(phase), x, y)
+  }
+
+  /** A trackpad pinch at (x, y) (tests): `delta` is the scale change (0.1 = 10% larger). */
+  pinch (x, y, delta) {
+    this.flush()
+    this.app.native.simulateGesture(this.id, 0, x, y, delta)
+  }
+
+  /** A trackpad turn at (x, y) (tests): degrees, positive counter-clockwise. */
+  rotate (x, y, degrees) {
+    this.flush()
+    this.app.native.simulateGesture(this.id, 1, x, y, degrees)
   }
 
   close () {

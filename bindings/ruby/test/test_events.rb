@@ -101,6 +101,45 @@ class TestEvents < Minitest::Test
     root.free
   end
 
+  def test_touch_and_gestures
+    root = BUI::Node.new("column")
+    button = BUI::Node.new("button").set(text: "Go")
+    pad = BUI::Node.new("canvas").set(height: 120)
+    root << button << pad
+    clicks = 0
+    button.on_click { clicks += 1 }
+    gestures = []
+    pad.on(:gesture) { |e| gestures << [e.text, e.a] }
+    show(root, 320, 240) do |ctx, _raster|
+      # a tap is a click once the finger lifts
+      x, y = button.rect.center
+      ctx.touch(1, BUI::TOUCH_DOWN, x, y)
+      assert_equal 0, clicks
+      ctx.touch(1, BUI::TOUCH_UP, x + 2, y)
+      assert_equal 1, clicks
+      # two fingers spreading over the pad: magnify gestures about their centre
+      cx, cy = pad.rect.center
+      ctx.touch(2, BUI::TOUCH_DOWN, cx - 20, cy)
+      ctx.touch(3, BUI::TOUCH_DOWN, cx + 20, cy)
+      (1..3).each do |i|
+        ctx.touch(2, BUI::TOUCH_MOVE, cx - 20 - (10 * i), cy)
+        ctx.touch(3, BUI::TOUCH_MOVE, cx + 20 + (10 * i), cy)
+      end
+      ctx.touch(2, BUI::TOUCH_UP, cx - 50, cy)
+      ctx.touch(3, BUI::TOUCH_UP, cx + 50, cy)
+      assert_equal 3, gestures.size
+      mods, kind, gx, gy = gestures.first[0].split.map(&:to_i)
+      assert_equal BUI::FROM_TOUCH, mods & BUI::FROM_TOUCH
+      assert_equal BUI::GESTURE_MAGNIFY, kind
+      assert_operator gestures.first[1], :>, 0
+      assert_equal [cx - pad.rect.x, cy - pad.rect.y], [gx, gy]
+      # a trackpad pinch
+      gestures.clear
+      assert ctx.magnify(cx, cy, 0.25)
+      assert_equal [["0 #{BUI::GESTURE_MAGNIFY} #{cx - pad.rect.x} #{cy - pad.rect.y}", 0.25]], gestures
+    end
+  end
+
   def test_other_threads_queue_work
     ran = []
     Thread.new { BUI.on_main { ran << Thread.current } }.join
