@@ -46,7 +46,7 @@ headers (`libx11-dev` / `libX11-devel`). More detail:
 - Keep each PR focused on one change, and add a test for it:
   - C: `ctest`.
   - Python: `bindings/python/tests/`. For tkinter behavior, add to the side-by-side compat suite.
-  - Rust: `bindings/rust/blenderui/tests/`.
+  - Rust: `bindings/rust/blenderui/tests/suite/` (one test binary: add a module to its `main.rs`).
   - JavaScript: `bindings/node/test/` and `bindings/react/test/`.
 - Don't let performance regress. The test suite enforces frame budgets. For
   rendering or layout changes, run the benchmark in `bindings/rust/bench/`

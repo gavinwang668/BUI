@@ -64,7 +64,7 @@ When something changes, the kit marks just that widget's rectangle as needing a 
 The kit draws through one small drawing API (`GPU_raster.h`). Behind it sit two renderers that produce the same pixels:
 
 - **The software raster** (the default) draws anti-aliased shapes into a frame buffer in memory, on the CPU.
-- **The GPU renderer** (opt-in) draws the same shapes with Direct3D 11 on Windows or OpenGL 3.3 on Linux.
+- **The GPU renderer** (opt-in) draws the same shapes with Direct3D 11 on Windows (Direct3D 12 opt-in) or OpenGL 3.3 on Linux.
 
 After each frame, the renderer works out which parts of the picture actually changed, so the window only has to update those. [Rendering](../rendering/) explains both renderers and how to switch.
 

@@ -20,12 +20,13 @@ struct CanvasItem {
     int type;
     /// x/y pairs or x/y/w/h quadruples, depending on `type`.
     const(float)[] coords;
-    float[4] fill;
-    float[4] outline;
+    // D's floats start as NaN: 0 as in C (no fill, no outline, square corners, the UI text size)
+    float[4] fill = 0;
+    float[4] outline = 0;
     float width = 1;
-    float radius;
-    float size;
-    float start;
+    float radius = 0;
+    float size = 0;
+    float start = 0;
     float extent = 90;
     string text;
     int anchor;
@@ -36,7 +37,7 @@ struct CanvasItem {
     bool hidden;
     int textFlags;
     bool clipOn;
-    float[4] clip;
+    float[4] clip = 0;
     /// The font family; the canvas keeps a copy alive.
     string family;
     /// A decoded image; borrowed, so keep the wrapper alive.

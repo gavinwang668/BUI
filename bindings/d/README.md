@@ -247,7 +247,11 @@ size.onChange((NodeEvent e) {
 `on` adds a handler for every event, `on(kind, handler)` for one `BK_EV_*`
 kind, and `onClick`, `onChange`, `onSubmit`, `onActivate`, `onToggle`,
 `onBrowse` are shorthands. The event carries the node, the kind, the payload
-`ref_`, the two doubles and, for raw key events, the key text.
+`ref_`, the two doubles and, for raw events (`BK_EV_PRESS` .. `BK_EV_WHEEL`,
+`BK_EV_KEYRELEASE`) and gestures (`BK_EV_GESTURE`: `"mods kind x y"`), their
+text. `Context.touch`, `magnify` and `rotate` send touch screen contacts and
+trackpad pinches and turns; `Custom` nodes get them as `BK_CUSTOM_TOUCH` /
+`MAGNIFY` / `ROTATE` (`bui.custom.setTouch(node, BK_TOUCH_MODE_*)` says what a finger does on one).
 
 Callbacks must not throw through C frames. The wrappers catch exceptions where
 the kit calls in:

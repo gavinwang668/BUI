@@ -140,5 +140,5 @@ Python, Qt, tkinter and D need their runtime on the device and are not available
 - **Size.** About 1.1 MB per ABI for the C demo, 1.4 MB with Lua and 2.0 MB with Rust (arm64-v8a).
 
 <Callout type="note" title="What is tested">
-The C, Lua, Rust and JavaScript (React, Vue, Svelte) apps run on an x86_64 emulator (API 33). The arm64 builds compile and link but were not run on a device. There is no GPU renderer or IME composition yet.
+The C, Lua, Rust and JavaScript (React, Vue, Svelte) apps run on an x86_64 emulator (API 33). The arm64 builds compile and link; on a phone, the refresh rate was checked on a 90 Hz panel, and SpotiTube's Android build is a Rust app on `android_main!`. There is no GPU renderer or IME composition yet.
 </Callout>

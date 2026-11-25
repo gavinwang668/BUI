@@ -12,7 +12,7 @@
 
 | Path | Who uses it | What it draws into |
 |---|---|---|
-| **The kit's raster path** | Everything in `kit/` and every binding | A `BuiRaster`: the software raster (`gpu/intern/gpu_raster.c`) or, on a GPU window, Direct3D 11 / OpenGL instances. A native window presents it; headless code reads its pixels. |
+| **The kit's raster path** | Everything in `kit/` and every binding | A `BuiRaster`: the software raster (`gpu/intern/gpu_raster.c`) or, on a GPU window, Direct3D 11 (or 12) / OpenGL instances. A native window presents it; headless code reads its pixels. |
 | **Render sinks** (this page) | `api/bui_c_api.h`, the Qt backend, `bui.svg`, `buipy.demo_scene` | Triangles, lines, points and text runs from the immediate-mode GPU seam (`gpu/intern/gpu_null.c`), handed to a `BuiGpuSink` you install |
 
 The sink layer never opens a window, creates a GL context or picks a UI
@@ -137,8 +137,7 @@ software raster the kit uses) and shows it with a single
 Two facades speak the syntax of established toolkits on top of the C kit
 (`kit/`, exposed to Python as `buipy.KitNode` / `buipy.KitContext`): widgets
 are kit nodes, layouts are the kit's C geometry managers, and windows come
-from `bui.host` (native Win32 / X11 / Cocoa windows, the Cocoa one still
-experimental, or Tk with `BUI_HOST=tk`). They use the kit's raster path, not
+from `bui.host` (native Win32 / X11 / Wayland / Cocoa windows, or Tk with `BUI_HOST=tk`). They use the kit's raster path, not
 render sinks:
 
 ### Qt syntax — `bui.qtsyntax`

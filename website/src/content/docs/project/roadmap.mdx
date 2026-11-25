@@ -22,7 +22,7 @@ Each row has a status: **Works** when it works and is tested, **Partial** when c
     ["Blender components", "done", "45 components, including the color ramp, curve and node editors"],
     ["Rust", "done", "All 113 HTML elements, flexbox, grid, CSS 2.1, modern CSS, animations, Tailwind v4, <code>rsx!</code> and gpui-style builders, <code>#[component]</code>, hooks, Blender components, headless testing"],
     ["Dear ImGui", "done", "The real Dear ImGui 1.93 on BUI (CPU, Direct3D 11, OpenGL); C++, C (399 of 399 functions), Python and Rust; the Blender-widgets build"],
-    ["Rendering", "done", "Parallel, damage-tracked software raster; GPU renderer on Direct3D 11 (Windows) and OpenGL 3.3 (Linux)"],
+    ["Rendering", "done", "Parallel, damage-tracked software raster; GPU renderer on Direct3D 11 (Windows; Direct3D 12 opt-in) and OpenGL 3.3 (Linux)"],
     ["JavaScript and React", "done", "<code>@blender-ui/native</code> and <code>@blender-ui/react</code> on Node.js and Bun; <code>bui build</code> standalone executables"],
     ["Lua", "done", "<code>bui-lua</code> and the <code>bui</code> module for Lua 5.4, on LuaRocks (<code>luarocks install blenderui</code>)"],
     ["D", "done", "A DUB package in <code>bindings/d</code>: raw C declarations, D wrappers and an HTML, CSS and RSX layer (on <code>main</code>, in the next release)"],
@@ -36,7 +36,7 @@ Each row has a status: **Works** when it works and is tested, **Partial** when c
   rows={[
     ["Qt syntax", "partial", "57% of Qt's methods on the core widget classes, with docks, toolbars, splitters, actions, Qt's layouts, dates and a calendar, model/view and real dialogs. Missing: QThread, drag and drop, Qt stylesheets"],
     ["CSS (Rust, JavaScript)", "partial", "261 of 745 W3C properties render and 129 more parse. Missing: 3D transforms, OpenType font features, multi-column layout"],
-    ["Text", "partial", "No text wrapping around floats; right-to-left text is reordered but not shaped; IME on Windows only"],
+    ["Text", "partial", "Right-to-left text is reordered but not shaped; IME on Windows only"],
     ["Rust components", "partial", "No async resources (<code>use_resource</code>) and no generic components yet"],
     ["Dear ImGui", "partial", "Python and safe Rust skip the <code>va_list</code>, <code>void*</code> and C-callback functions; in the Blender-widgets build, title bars, tooltips, plain popups, tables and the color picker keep ImGui's drawing"],
     ["npm packages", "partial", "Prebuilt for Windows x64, Linux x64 and macOS, one optional package per platform; no musl or arm64 Linux"],
@@ -48,7 +48,7 @@ Each row has a status: **Works** when it works and is tested, **Partial** when c
 
 <StatusTable
   rows={[
-    ["WebAssembly", "planned", "The kit in the browser: the raster blits to a <code>&lt;canvas&gt;</code>, DOM events feed the kit, and the React and DOM-like APIs run on top, unchanged"],
+    ["WebAssembly", "partial", "A Rust app runs in a browser <code>&lt;canvas&gt;</code> (<code>blenderui-web</code>: the software raster, one thread, the primary pointer button, the wheel and keys); the React and DOM-like APIs on top are not built yet"],
     ["egui", "planned", "BUI panels inside egui, plus a Blender-styled theme"],
     ["More from Blender's source", "planned", "IME on X11 and macOS, search-as-you-type popups, units in number fields, widget drag and drop"],
     ["macOS GPU and JavaScript windows", "planned", "The GPU renderer on Metal (or the OpenGL backend), and Node windows on the main thread"],
@@ -62,9 +62,9 @@ Each row has a status: **Works** when it works and is tested, **Partial** when c
   ]}
 />
 
-<ComingSoon feature="WebAssembly">
+<ComingSoon feature="React on WebAssembly">
 
-This is the one people ask about most. The plan: BUI's software raster draws into a browser `<canvas>`, the browser's events feed the kit, and `@blender-ui/react` works unchanged. Nothing to try yet.
+This is the one people ask about most. A Rust app already runs in a browser `<canvas>` ([WebAssembly](../../rust/webassembly/)); the plan is for `@blender-ui/react` to work there unchanged.
 
 </ComingSoon>
 

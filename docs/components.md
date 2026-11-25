@@ -135,7 +135,7 @@ of Blender's SVG icons (`buipy.kit_icon_names()` lists them).
 | `Popover` | `Popover(text, *children, icon=None)`: a button that opens a panel |
 | `MenuButton` | `MenuButton(text, items, *, icon=None)` |
 | `Label` | `Label(text, *, icon=None, align="left", color=None, bold=False)` |
-| `Image` | `Image(src, *, fit="contain", frame=None)`: an image file (PNG, JPEG, WebP, GIF, BMP, TGA, QOI, HDR, PNM, SVG), natural size from its header, pixels decoded off the UI thread; `fit` as CSS `object-fit`; animations play, or hold `frame` |
+| `Image` | `Image(src, *, fit="contain", frame=None)`: an image file (PNG, JPEG, WebP, GIF, BMP, TGA, QOI, HDR, PNM, SVG, TIFF, HEIC), natural size from its header, pixels decoded off the UI thread; `fit` as CSS `object-fit`; animations play, or hold `frame` |
 | `Video` | `Video(src, *, autoplay=True, loop=False, controls=False, poster=None, fit="contain", on_ended=None)`: a video file decoded by the OS at the size drawn; `controls` draws Blender's play/pause button and scrubber; `play()`, `pause()`, `seek(s)`, `player` (rate, time, duration, state, on_state) |
 | `ProgressBar` | `ProgressBar(value=0.0, text=None)` |
 | `Separator`, `Spacer` | `Separator(factor=0.5, line=False)` / `Spacer()` |

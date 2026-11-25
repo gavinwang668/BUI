@@ -129,7 +129,6 @@ On Windows, you can build BUI with Windows' own GDI text engine and system fonts
 - **IME works on Windows only.** Input methods for Chinese, Japanese and Korean work in text fields and text areas on Windows, ported from Blender's GHOST (the candidate window follows the caret, the composition is drawn underlined at the caret). X11 and macOS aren't supported yet, and number fields and password fields take no IME, as in Blender.
 - **Right-to-left text** is reordered (bidi) but not shaped, so Arabic letters don't join.
 - **No OpenType features** (`font-feature-settings` and friends): the text engine doesn't shape, and Blender's doesn't either.
-- **Rust only:** text doesn't wrap around floats, and `text-align: justify` aligns left.
 
 <ComingSoon feature="IME on X11 and macOS">
 Next on the list of things to port from Blender's source: input methods for the X11 and Cocoa windows (they use the same kit API as Windows).

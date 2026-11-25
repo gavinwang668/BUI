@@ -521,15 +521,16 @@ Screen().editors(editors).layout(AreaSplit::v(0.75, "3D Viewport", "Outliner"))
 ## Images
 
 `<img src>` and CSS background images read every format the kit reads (PNG,
-JPEG, WebP, GIF, BMP, TGA, QOI, Radiance HDR, PNM, SVG). Layout takes the size
+JPEG, WebP, GIF, BMP, TGA, QOI, Radiance HDR, PNM, SVG, TIFF, HEIC through the OS,
+and with the `exr`, `avif` and `jxl` features OpenEXR, AVIF and JPEG XL). Layout takes the size
 from the file's header; the pixels decode on the kit's worker threads at the
 size drawn and the image appears when ready (`App::draw` waits for them, so
 headless pixels are deterministic). `Image::open` / `Image::decode` decode
 synchronously, `Painter::image_file` / `image_file_cover` draw a file in a
 canvas, `CellRender::Image` is a data-table image column and
 `Record::media` a chat message's picture. `blenderui::image_stats()` and
-`set_image_budget` see and size the shared cache. Animated GIF and WebP
-play (paused while off screen); `<img frame="2">` holds a frame,
+`set_image_budget` see and size the shared cache. Animated GIF, WebP, AVIF and
+JPEG XL play (paused while off screen); `<img frame="2">` holds a frame,
 `set_reduced_motion(true)` holds them all, and `Animation` steps one
 yourself (`Image::update_texture` for Dear ImGui). See
 [Images](https://bui.preetham.top/docs/concepts/images/).
@@ -792,7 +793,7 @@ Not done yet:
 - **3D transforms:** `perspective`, `rotateX` / `rotateY`, `matrix3d` have no effect; 2D transforms don't change hit testing (clicks use the untransformed box).
 - **Animations:** no `animationend` / `transitionend` events, no animations on `::before` / `::after`, and an element starts transitions only when it already had a `transition` in the previous frame (e.g. not when `transition` appears only under `:hover` on the first hover). Lengths mixing units that resolve differently (`50%` to `100px`, `auto`) flip at 50% instead of going through `calc()`.
 - **`@container` timing:** queries use the container's size from the previous layout; when it changes, the window renders once more.
-- **Anchor positioning:** an anchored box reads its anchor's place from the previous layout (when it moved, the window lays out once more), so the first frame uses the `anchor()` fallbacks. Not supported: `@position-try` rules, `flip-start`, `position-visibility`, `position-try-order` and implicit anchors (a popover's invoker).
+- **Anchor positioning:** an anchored box reads its anchor's place from the previous layout (when it moved, the window lays out once more), so the first frame uses the `anchor()` fallbacks. Not supported: `@position-try` rules, `flip-start`, `position-try-order` and a popover's invoker as its implicit anchor.
 - **Subgrid:** line names after `subgrid` aren't used, nor the `gap` of a subgrid in both axes.
 - **Grid lanes:** items aren't baseline-aligned across lanes, the static position of an absolutely positioned item doesn't follow `fill-reverse` / `track-reverse`, and a grid-lanes container that is itself a subgrid lays out as a grid.
 - **Text:** vertical writing modes (`writing-mode: vertical-rl` ...) aren't laid out; text is shaped word by word (no ligatures or kerning across a break opportunity); `hyphens: auto` doesn't hyphenate (no dictionaries; soft hyphens do), and `hanging-punctuation`, `text-justify` and `white-space-collapse: discard` aren't used.
@@ -832,7 +833,8 @@ cx.open_window(WindowOptions { gpu: Some(true), ..Default::default() }, build);
 // window.is_gpu() turns true a few frames in, once the device is ready
 ```
 
-`BUI_GPU=1` / `0` overrides both. It is Direct3D 11 on Windows and OpenGL 3.3 on Linux. Elsewhere,
+`BUI_GPU=1` / `0` overrides both. It is Direct3D 11 on Windows (Direct3D 12 with
+`.gpu_api(GpuApi::D3d12)` or `BUI_GPU_API=d3d12`) and OpenGL 3.3 on Linux. Elsewhere,
 or without a device, windows stay on the software raster. Every primitive
 becomes one instance of a single shader, following Blender's instanced
 widget-base batches. Text runs and images are cached in atlases. Frames

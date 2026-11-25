@@ -18,7 +18,7 @@ People spent decades building and optimizing Blender's GUI. It's battery and mem
 [![crates.io](https://img.shields.io/crates/v/blenderui?label=crates.io%20blenderui)](https://crates.io/crates/blenderui)
 [![@blender-ui/react](https://img.shields.io/npm/v/@blender-ui/react?label=%40blender-ui%2Freact)](https://www.npmjs.com/package/@blender-ui/react)
 [![Wheels](https://github.com/ppmpreetham/BUI/actions/workflows/wheels.yml/badge.svg)](https://github.com/ppmpreetham/BUI/actions/workflows/wheels.yml)
-[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](#44-license-and-credits)
+[![License: GPL-3.0-or-later](https://img.shields.io/badge/license-GPL--3.0--or--later-blue)](#45-license-and-credits)
 ![Platforms](https://img.shields.io/badge/platforms-Windows%20%7C%20Linux%20%7C%20macOS-lightgrey)
 [![Discord](https://img.shields.io/badge/chat-Discord-5865F2?logo=discord&logoColor=white)](https://discord.gg/MWXZfdyM3D)
 
@@ -178,8 +178,8 @@ in any language, can have both: Blender's feel, and Blender's efficiency.
   [concepts](#part-iii-concepts) are explained in plain words.
 
 Before you ship something with BUI, read the
-[known limitations](#41-status-and-roadmap): no accessibility support yet, no
-input methods, and it looks like Blender, not like your operating system.
+[known limitations](#42-status-and-roadmap): screen readers and input methods
+work on Windows only, and it looks like Blender, not like your operating system.
 
 ## 4. Pick your language
 
@@ -248,9 +248,9 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 ### Fast by design
 
 - **Damage rendering**: an idle UI costs 0% CPU, and a hover redraws only the widget it touches.
-- **Opt-in GPU renderer** (Direct3D 11 on Windows, OpenGL 3.3 on Linux), modeled on Blender's instanced widget drawing. It draws the same pixels as the CPU raster.
-- **GPU effects**: your own GLSL pixel shader in a canvas (`BK_ITEM_EFFECT`, Rust `Painter::effect`), run on Direct3D 11 and OpenGL in paint order with an image as the fallback; the compile log comes back as a string.
-- **Android** (`platform/android`, [docs/android.md](docs/android.md)): the kit's window host on a `NativeActivity`, so C, Lua and Rust apps run as on a desktop (`Application::run`, `bui.open`); damage-driven rendering, [touch](docs/touch.md) (taps, flings, long presses, pinches) and the soft keyboard; `python platform/android/build.py [--lua DIR | --rust CRATE]` makes a signed APK of 1 to 2 MB. Run on an emulator; the arm64 builds were not run.
+- **Opt-in GPU renderer** (Direct3D 11 on Windows, or Direct3D 12 when asked; OpenGL 3.3 on Linux), modeled on Blender's instanced widget drawing. It draws the same pixels as the CPU raster.
+- **GPU effects**: your own GLSL pixel shader in a canvas (`BK_ITEM_EFFECT`, Rust `Painter::effect`), run on Direct3D and OpenGL in paint order with an image as the fallback; the compile log comes back as a string.
+- **Android** (`platform/android`, [docs/android.md](docs/android.md)): the kit's window host on a `NativeActivity`, so C, Lua and Rust apps run as on a desktop (`Application::run`, `bui.open`); damage-driven rendering, [touch](docs/touch.md) (taps, flings, long presses, pinches) and the soft keyboard; `python platform/android/build.py [--lua DIR | --rust CRATE]` makes a signed APK of 1 to 2 MB. Run on an x86_64 emulator, and on an arm64 phone (the refresh rate, a Rust app on `blenderui::android_main!`).
 - **GPU render targets**: an effect can draw into a texture (`RenderTarget`, `BUI_target_create`, `Painter::effect_to`, `Rgba8` / `Rgba16F` / `Rgba32F`) and sample it in a later pass, so simulations can feed back on themselves. Tested on Direct3D 11; the OpenGL backend has the same code and has not been run.
 - In the benchmark, **2–4× less CPU per frame than gpui-fast**, with **less RAM** and a **~5 ms first frame**.
 - **Blender's text**: Inter (Blender's UI font) is embedded and rendered with FreeType the way Blender renders it, so text looks the same on every platform. On the GPU, glyphs are drawn from their outlines with [Slug](https://github.com/EricLengyel/Slug), falling back to a per-glyph atlas like Blender's.
@@ -260,7 +260,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 - **One decoder set for every language**, in C: PNG, GIF, BMP, TGA, QOI ([Wuffs](https://github.com/google/wuffs), memory-safe), JPEG (libjpeg-turbo), WebP including animated (libwebp), Radiance HDR, PNM, SVG, TIFF (libtiff) and HEIC (the OS decoder, loaded at run time), and opt-in OpenEXR (OpenEXRCore), AVIF (libavif + dav1d) and JPEG XL (libjxl), animated AVIF and JPEG XL included. The design is Blender's imbuf: one image type and a format table.
 - **Decoded at the size it is drawn, off the UI thread**: JPEG thumbnails use DCT scaling (a 4K photo becomes a 256 px thumbnail in ~12 ms), visible images first, scrolled-away requests cancelled, and only the image's rectangle redraws when it arrives. The page never jumps: sizes come from the file header.
 - **One memory-budgeted cache** (256 MiB by default). Scrolling 1,000 photo thumbnails: **2.9 ms p99 frames and 100 MB**, against 96 ms and 2.5 GB when decoding on the UI thread; **0 allocations** in a settled frame, every block freed at exit. [Images](https://bui.preetham.top/docs/concepts/images/).
-- **Animated GIF and WebP play** everywhere an image shows, decoded one frame at a time at the size drawn (two frames held per animation), each frame for its own delay, only the image's rectangle repainting. Off screen, scrolled away or in a hidden window they pause: 200 animations at once take **0.76 ms p50 / 1.5 ms p99** render frames, and **nothing at all** once off screen. `frame` holds one frame; reduced motion holds them all.
+- **Animated GIF, WebP, AVIF and JPEG XL play** everywhere an image shows, decoded one frame at a time at the size drawn (two frames held per animation), each frame for its own delay, only the image's rectangle repainting. Off screen, scrolled away or in a hidden window they pause: 200 animations at once take **0.76 ms p50 / 1.5 ms p99** render frames, and **nothing at all** once off screen. `frame` holds one frame; reduced motion holds them all.
 - **Large images on the GPU**: images over 2047 px get a texture of their own on Direct3D 11 and OpenGL (tiled only past the device limit), freed with the image.
 - **Video**: `<video>` in every language, decoded by the OS (Media Foundation with DXVA, GStreamer, AVFoundation; loaded at run time) at the size drawn, frames in one GPU texture per player updated in place, YCbCr converted in the shader, and **nothing decoded off screen**. 1080p plays at **0.99 ms** render frames and **9 %** of a core on the GPU renderer, five at once at 28 %, with **0 allocations per frame**. Play, pause, seek, rate, loop, poster, state events, and Blender-style controls. [Video](https://bui.preetham.top/docs/concepts/video/).
 - `<img>`, CSS `background-image`, `object-fit`, Blender `Image` components, tkinter `PhotoImage` (now also JPEG, WebP, BMP, TGA, QOI, HDR, SVG), canvas items, data-table image columns, chat-list media and Dear ImGui textures (animated ones too).
@@ -294,6 +294,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 - **Native windows** on Windows (Win32) and Linux (X11, and an experimental native Wayland host), and a Cocoa host for macOS, ported from Blender's GHOST.
 - **HiDPI**: per-monitor DPI on Windows, `Xft.dpi` on Linux, Retina on macOS.
 - **The desktop shell**: tray icons with menus, notifications, a progress on the taskbar button (or the Dock icon) and the system's recent documents, from every language ([Desktop shell](https://bui.preetham.top/docs/concepts/desktop-shell/)).
+- **Screen readers** on Windows: the widgets and the HTML page reach UI Automation through [AccessKit](https://accesskit.dev) (the `bui-a11y` crate in `a11y/`), built only once a reader asks. macOS and Linux are next.
 - **Headless mode** for tests and screenshots, with a virtual clock that steps animations exactly.
 - On Linux, libX11 and libGL are loaded at run time, so BUI imports on servers without them.
 
@@ -447,7 +448,7 @@ The npm packages are prebuilt for **Windows x64**, **Linux x64** (glibc 2.35
 or later; native X11 windows) and **macOS**. Elsewhere, build the addon from a
 clone (`npm install` then `npm run build` in `bindings/`, with Rust, CMake and
 a C compiler). On **macOS**, JavaScript runs headless for now (see
-[Platforms](#35-platforms)).
+[Platforms](#36-platforms)).
 
 **C and C++.** Build from source with CMake 3.20+ and a C11 / C++20 compiler
 (MSVC, GCC or MinGW-w64, or Clang); on Linux, also the X11 headers:
@@ -1234,9 +1235,10 @@ BUI has two renderers, and they draw **the same pixels**.
   parallel bands on Windows (`BUI_RASTER_THREADS`). It needs nothing from your
   graphics card and uses the least memory.
 - **The GPU renderer** is opt-in: **Direct3D 11 on Windows**
-  (`gpu/intern/gpu_d3d11.c`) and **OpenGL 3.3 core on Linux**
-  (`gpu/intern/gpu_gl.c`). It's modeled on Blender's instanced widget drawing:
-  each primitive is one 128-byte instance of a single uber-shader, so a frame
+  (`gpu/intern/gpu_d3d11.c`; Direct3D 12, `gpu_d3d12.c`, when an app asks with
+  `Application::gpu_api`, `BUI_gpu_set_api` or `BUI_GPU_API=d3d12`) and
+  **OpenGL 3.3 core on Linux** (`gpu/intern/gpu_gl.c`). It's modeled on
+  Blender's instanced widget drawing: each primitive is one 128-byte instance of a single uber-shader, so a frame
   is a few instanced draw calls. Text and images are cached in atlases.
   Frames render into a persistent target, so only damaged regions redraw; on
   Windows, a flip-model swap chain presents dirty rectangles. On Linux,
@@ -1472,7 +1474,7 @@ What's in the box:
   `rsx!` and `tw!`.
 - **Components and hooks** in zopra, React or Leptos style, with optional
   props and keys.
-- **Blender components**, `styled`, and the [theme](#22-themes-dark-and-light).
+- **Blender components**, `styled`, and the [theme](#23-themes-dark-and-light).
 - **Headless testing**: `Application::headless()`, screenshots, simulated
   input.
 
@@ -1647,6 +1649,8 @@ All 26 run headless (`bui-lua --headless app.lua`) for CI and documentation scre
 | [Components](docs/components.md)                   | The `bui.components` reference                                                                                                       |
 | [Rust](docs/rust.md)                               | `rsx!`, hooks, HTML, CSS and Tailwind coverage, effects, animations, events, headless tests                                          |
 | [WebAssembly](docs/wasm.md)                        | A blenderui app in a browser canvas: `blenderui-web`, the build script, limits                                                       |
+| [Touch](docs/touch.md)                             | Touch screens and trackpad gestures: the kit's model, the platforms, the APIs                                                        |
+| [Android](docs/android.md)                         | Building APKs from C, Lua, Rust, JavaScript or Dear ImGui; what is tested                                                            |
 | [Effects performance](docs/effects-performance.md) | Blur, CSS animations and scale: what they cost, the algorithms, the benchmark                                                         |
 | [JavaScript, React, Svelte and Vue](docs/javascript.md) | `@blender-ui/native`, `@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue`, adding a framework, how changes cross to the UI thread, performance |
 | [Dear ImGui](docs/imgui.md)                        | Dear ImGui on BUI from C++, C, Python and Rust; the Blender-widgets build; coverage                                                  |
@@ -1659,7 +1663,7 @@ All 26 run headless (`bui-lua --headless app.lua`) for CI and documentation scre
 | [Integration](INTEGRATION.md)                      | Embedding BUI drawing in C, C++, Qt or PySide hosts                                                                                  |
 | [Architecture](ARCHITECTURE.md)                    | Modules and what was taken from Blender                                                                                              |
 | [Syntax coverage](SYNTAX_COVERAGE.md)              | The Qt and tkinter surface, exactly                                                                                                  |
-| [macOS testing](docs/macos-testing.md)             | How to try the experimental Cocoa host on a Mac                                                                                      |
+| [macOS testing](docs/macos-testing.md)             | How to try the Cocoa host on a Mac                                                                                                   |
 | [Publishing](docs/publishing.md)                   | Releasing to PyPI and crates.io                                                                                                      |
 | [Changelog](CHANGELOG.md)                          | What changed                                                                                                                         |
 
@@ -1673,7 +1677,7 @@ These numbers were measured on a Ryzen 7 5800U laptop (Windows 11, on AC
 power) **before the latest features landed**: Dear ImGui, the Linux GPU
 renderer, the light theme, and the Blender search and expression code. They
 show the shape of things, not a promise for your machine. Rerun them with the
-tools in [Run the benchmarks yourself](#34-run-the-benchmarks-yourself).
+tools in [Run the benchmarks yourself](#35-run-the-benchmarks-yourself).
 
 ## 32. Start time and battery
 
@@ -1987,7 +1991,7 @@ py bindings/python/bench/tk_canvas_bench.py 3000 one    # move one
 | Rust (`cargo add blenderui`) | Works                            | Works                                                    | Works                  |
 | JavaScript / React           | Works: prebuilt on npm           | Works: prebuilt on npm (glibc 2.35+); native X11 windows | Headless (see below)   |
 | C, C++, Dear ImGui           | Works                            | Works                                                    | Works                  |
-| Renderer                     | CPU raster, or GPU (Direct3D 11) | CPU raster, or GPU (OpenGL 3.3)                          | CPU raster             |
+| Renderer                     | CPU raster, or GPU (Direct3D 11; 12 opt-in) | CPU raster, or GPU (OpenGL 3.3)                          | CPU raster             |
 | HiDPI                        | Per-monitor DPI                  | `Xft.dpi`                                                | Retina (backing scale) |
 
 **Works** means it works and is tested. **Experimental** means it's written
@@ -2015,7 +2019,7 @@ and on an NVIDIA GPU.
 | ----------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | --------------------------------------------------------------------------------------- |
 | `blenderui` on PyPI                                                                       | Windows x86_64, Linux x86_64 (manylinux), macOS arm64 and x86_64 | CPython 3.11 to 3.14. No musllinux or 32-bit wheels.                                    |
 | `blenderui` on crates.io                                                                  | Any platform with CMake and a C compiler                         | Rust 1.88+. `blenderui-imgui` (Dear ImGui) is on crates.io too.                         |
-| `@blender-ui/native`, `@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue` on npm | Windows x64                                                      | Node.js 18+ (22.15+ for Svelte and Vue) or Bun. Elsewhere, build the addon from source. |
+| `@blender-ui/native`, `@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue` on npm | Windows x64, Linux x64 (glibc 2.35+), macOS arm64 and x64        | Node.js 18+ (22.15+ for Svelte and Vue) or Bun. Elsewhere, build the addon from source. |
 | C and C++ (CMake)                                                                         | Windows, Linux, macOS                                            | CMake 3.20+, a C11 and C++20 compiler.                                                  |
 
 ## 37. Environment variables
@@ -2029,15 +2033,18 @@ wins.
 | -------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `BUI_GPU`                        | `1` draws native windows on the GPU (Direct3D 11 / OpenGL 3.3). Overrides `bui.set_gpu()`, `Application::gpu()`, `BUI_gpu_set_default()`. `0` turns those defaults off; a window that asks for the GPU itself still gets it. |
 | `BUI_SLUG`                       | GPU text: `1` from glyph outlines (Slug, the default), `0` from a per-glyph atlas.                                                                                                                                           |
-| `BUI_GPU_DEBUG`                  | `1` prints why the GPU renderer couldn't start.                                                                                                                                                                              |
+| `BUI_GPU_DEBUG`                  | `1` prints why the GPU renderer couldn't start; `2` also turns on the Direct3D 12 debug layer.                                                                                                                              |
+| `BUI_GPU_API`                    | `d3d11` or `d3d12` (Windows): the Direct3D the GPU renderer uses. Overrides `Application::gpu_api`, `BUI_gpu_set_api()` and `bui build --gpu`.                                                                              |
+| `BUI_GPU_ADAPTER`                | `high-performance` (Windows): render on the GPU DXGI picks for performance (a hybrid laptop's discrete one). `default` (the default) keeps the display's.                                                                     |
 | `BUI_CHECK_DAMAGE`               | Testing: `1` draws each partial frame again in full and prints how many pixels the damage missed. Software renderer only. Slow.                                                                                               |
-| `BUI_GPU_WARP`                   | `1` (Windows) creates the Direct3D 11 device on WARP, the software rasterizer. Handy in VMs and CI.                                                                                                                          |
+| `BUI_GPU_WARP`                   | `1` (Windows) creates the Direct3D device (11 or 12) on WARP, the software rasterizer. Handy in VMs and CI.                                                                                                                          |
 | `BUI_GPU_MAX_TEXTURE`            | Testing: the largest texture side the GPU renderers give one image (at least 64), so images over it are tiled as on devices with a small limit.                                                                              |
 | `BUI_GPU_EGL`                    | `default` or `surfaceless` (Linux): the EGL platform for offscreen GPU rendering.                                                                                                                                            |
 | `BUI_RASTER_THREADS`             | 1 to 8 (Windows): the most threads the software raster uses for big canvases.                                                                                                                                                |
 | `BUI_PROFILE`                    | Prints frame times every 60 frames. **Any** value turns it on, even `0`.                                                                                                                                                     |
 | `BUI_THEME`                      | `dark` (default) or `light`: Blender's theme, when the app doesn't set one.                                                                                                                                                  |
 | `BUI_UI_SCALE`                   | A fixed UI scale (`1.25`, `1.5` ...) instead of the display's. Clamped to 0.5–4.                                                                                                                                             |
+| `BUI_WINDOW_BACKEND`             | `x11` or `wayland` (Linux): the window host. A Wayland session gets Wayland, or X11 (XWayland) when the GPU renderer is on.                                                                                                  |
 | `BUI_HOST`                       | `tk` (Python): use the stdlib Tk window even where a native host exists.                                                                                                                                                     |
 | `BUI_MAC_TK`                     | `0` (Python on macOS): skip starting a hidden Tk root before the first native window.                                                                                                                                        |
 | `BUI_FONT`, `BUI_FONT_DIR`       | A font file to replace Inter, and an extra font folder to search first.                                                                                                                                                      |
@@ -2096,7 +2103,7 @@ website's dark and light shots with `--site`). More:
 | API                               | Coverage                                                                                                                      | Status   |
 | --------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- | -------- |
 | tkinter and ttk                   | **7,846 of 7,846** public names; nine real programs behave identically                                                        | Complete |
-| Qt syntax                         | **About 220 of 920** public method names on 25 core widget classes (~24%)                                                     | Partial  |
+| Qt syntax                         | **885 of 1,555** public methods, signals, slots and event handlers on 36 core widget classes (57%)                            | Partial  |
 | Blender components (Python)       | **45** components (10 of them also in Rust and JavaScript)                                                                    | Complete |
 | HTML elements (Rust, JavaScript)  | **113 of 113**                                                                                                                | Complete |
 | CSS properties (Rust, JavaScript) | **261 of 745** W3C properties render, **129** more parse, **355** not recognized (mostly drafts, speech, paged media and SVG) | Partial  |
@@ -2175,19 +2182,20 @@ How each was counted: [Coverage](https://bui.preetham.top/docs/reference/coverag
 **Known limitations.** Read these before you pick BUI for something you will
 ship. The tables below have the details.
 
-- **No accessibility support.** BUI draws its own widgets and does not talk to
-  the platform's accessibility APIs (UI Automation on Windows, AT-SPI on Linux,
-  NSAccessibility on macOS), so screen readers can't see them. Don't use it for
-  software that has to be accessible. Accessibility is planned.
+- **Accessibility on Windows only.** Screen readers see BUI apps through UI
+  Automation ([AccessKit](https://accesskit.dev)); AT-SPI (Linux) and
+  NSAccessibility (macOS) aren't there yet. On Windows there is no text-range
+  navigation inside fields, and the items of grid views, menu bars and pie
+  menus aren't exposed yet.
 - **Text.** Input methods (IME) on Windows only, right-to-left text is
   reordered but not shaped, and no OpenType features.
 - **It doesn't look native.** BUI looks like Blender: its Dark and Light themes
   (other Blender theme files can't be loaded yet). It doesn't follow your
   operating system's theme, accent color or fonts.
 - **Rendering.** The CPU rasterizer is the default and works everywhere. The
-  optional GPU renderer is Direct3D 11 on Windows and OpenGL 3.3 on Linux.
-  There is none on macOS (no Metal): macOS always draws on the CPU. Direct3D
-  12, Vulkan, Metal and WebGPU backends don't exist yet.
+  optional GPU renderer is Direct3D 11 on Windows (Direct3D 12 opt-in) and
+  OpenGL 3.3 on Linux. There is none on macOS (no Metal): macOS always draws on
+  the CPU. Vulkan, Metal and WebGPU backends don't exist yet.
 - **Platforms.** Windows and Linux (X11; Wayland is experimental) are the
   supported ones. macOS works too: checked by CI and tried by hand on three
   Macs (two Apple Silicon, one Intel), though JavaScript windows are headless there. The npm
@@ -2199,7 +2207,8 @@ ship. The tables below have the details.
   5800U). Linux and macOS haven't been measured yet.
 - **The home page demos are browser sketches,** not the native engine (the page
   says so). Run the Python, Rust or JavaScript examples to feel the real widgets.
-  A WebAssembly build is planned.
+  A Rust app can run in a page as WebAssembly ([docs/wasm.md](docs/wasm.md)),
+  but the home page doesn't use it.
 - **It's a port, not Blender unchanged.** Widget drawing and interaction are
   ported from Blender's UI sources, with edits (each marked `BUI:`), and the rest
   of Blender (its data system, window manager and operators) isn't included.
@@ -2209,7 +2218,7 @@ ship. The tables below have the details.
   and HEIC decodes through the OS (tested on Windows only; it needs the HEIF and HEVC
   extensions there), while EXR, AVIF and JPEG XL are off by default (cargo / CMake features).
 - **License.** GPL: a program that includes BUI is distributed under the GPL too
-  ([why](#42-faq)).
+  ([why](#43-faq)).
 
 **Done**
 
@@ -2223,7 +2232,7 @@ ship. The tables below have the details.
 | Dear ImGui         | The real Dear ImGui 1.93 on BUI (CPU, Direct3D 11, OpenGL), Blender theme and Inter; C++ / C (399/399 functions) / Python and Rust (366–385/399); the Blender-widgets build                                                                                                                                                                                                                                                                                                                                                     |
 | Go                 | `bindings/go`: the kit over cgo (nodes, contexts, windows, menus, canvas, trees, themes) and MyGo-style views (`ui.Column(c).Children(...)`, controls bound to pointers, `Clicked` / `Changed`, keys, rows and columns, a headless `Tester`) |
 | Ruby               | `bindings/ruby`: the `blenderui` gem, a C extension over the kit (nodes, properties, events, menus, trees, canvas, images, themes, native windows and the loop, with other threads running while it waits), `BUI::Builder` blocks, headless tests, checked with AddressSanitizer |
-| Rendering          | Software raster (parallel, damage-tracked), GPU renderer (Direct3D 11 on Windows, OpenGL 3.3 on Linux), textured meshes, portable text engine (FreeType, as in Blender)                                                                                                                                                                                                                                                                                                                                                         |
+| Rendering          | Software raster (parallel, damage-tracked), GPU renderer (Direct3D 11 or 12 on Windows, OpenGL 3.3 on Linux), textured meshes, portable text engine (FreeType, as in Blender)                                                                                                                                                                                                                                                                                                                                                         |
 | JavaScript / React | `@blender-ui/native`: a DOM-like API over napi-rs, with its own UI thread, only changes crossing the boundary, vsync-paced `requestAnimationFrame` and signals. `@blender-ui/react`: a React 19.3 renderer whose hooks (`useState`, `useMemo`, `useEffect` ...) hold signals that update nodes without re-renders. Both on Node.js and Bun, with headless testing. `bui build` makes standalone executables: about 7 MB with the embedded QuickJS runtime, or Bun's with `--bun` ([guide](docs/javascript.md))                  |
 | Packaging          | [`blenderui` on PyPI](https://pypi.org/project/blenderui/), with a CI workflow for wheels on all platforms (Linux wheels with the native X11 host); [`blenderui` on crates.io](https://crates.io/crates/blenderui); [`@blender-ui/react`](https://www.npmjs.com/package/@blender-ui/react) and [`@blender-ui/native`](https://www.npmjs.com/package/@blender-ui/native) on npm                                                                                                                                                  |
 | Docs               | The website, [bui.preetham.top](https://bui.preetham.top)                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
@@ -2232,9 +2241,9 @@ ship. The tables below have the details.
 
 | Area                                                   | What's missing                                                                                                                                                                                                                                            |
 | ------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Qt syntax (~24%)                                       | Model/view classes, docks, toolbars, splitters, Qt stylesheets ([details](docs/qt.md#coverage))                                                                                                                                                           |
+| Qt syntax (57%)                                        | `QThread`, drag and drop, delegates and editing inside views, Qt stylesheets ([details](docs/qt.md#coverage))                                                                                                                                                           |
 | CSS (261 of 745 W3C properties render, 129 more parse) | 3D transforms, OpenType font features, multi-column layout; hit testing ignores 2D transforms. Most of the remaining W3C list is drafts, speech, print and SVG ([breakdown](docs/rust.md#coverage))                                                       |
-| Text                                                   | No text wrapping around floats; right-to-left text is reordered (bidi) but not shaped (Arabic joining); no OpenType features; IME on Windows only                                                                                                                       |
+| Text                                                   | Right-to-left text is reordered (bidi) but not shaped (Arabic joining); no OpenType features; IME on Windows only                                                                                                                       |
 | Rust components                                        | No async resources (`use_resource`); no generic components                                                                                                                                                                                                |
 | Dear ImGui                                             | Python and safe Rust skip the `va_list`, `void*` and C-callback functions (reachable from C and the Rust FFI); with Blender widgets, window title bars, tooltips, plain popups, tables and the color picker keep ImGui's drawing                          |
 | JavaScript / React packages                            | npm packages are prebuilt for Windows x64, Linux x64 (glibc 2.35+) and macOS (elsewhere, build the addon from source); events reach JavaScript after BUI handled them (no native `preventDefault`), and `event.target` is the deepest _listening_ element |
@@ -2245,15 +2254,15 @@ ship. The tables below have the details.
 
 | Target                               | Plan                                                                                                                                                        |
 | ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **WebAssembly**                      | The kit in the browser: the raster blits to `<canvas>`, DOM events feed the kit; `@blender-ui/react` and the DOM-like API on top, unchanged                 |
+| **WebAssembly**                      | Rust apps already run in a `<canvas>` (`blenderui-web`, [docs/wasm.md](docs/wasm.md)); next, `@blender-ui/react` and the DOM-like API on top, unchanged    |
 | **egui**                             | BUI panels inside egui, plus a Blender-styled theme                                                                                                         |
 | **More from Blender's source**       | IME on X11 and macOS, search-as-you-type popups, units in number fields, widget drag and drop                                |
 | **macOS GPU and JavaScript windows** | The GPU renderer on Metal (or the OpenGL backend), and Node windows on the main thread                                                                      |
 | **More GPU backends**                | Vulkan / WebGPU drawing the same instance stream as Direct3D 11 and OpenGL                                                                                  |
-| **Accessibility**                    | Screen-reader support through UI Automation (Windows), AT-SPI (Linux) and NSAccessibility (macOS)                                                           |
+| **Accessibility**                    | Windows works (UI Automation, through AccessKit); next, AT-SPI (Linux) and NSAccessibility (macOS)                                                          |
 | **Qt parity**                        | Measure against PySide6, run the same programs on Qt and BUI, fill in the missing classes, then `install()` so `import PySide6` programs run unchanged      |
-| **More JavaScript frameworks**       | Vue and Angular, as thin adapters over `@blender-ui/native` (the layer React and Svelte share)                                                              |
-| **More languages**                   | Lua (27 examples, every widget), C#, Zig, Swift and Kotlin over the same C header; Godot, Unity and Bevy; Flutter |
+| **More JavaScript frameworks**       | Angular, Solid and Lit, as thin adapters over `@blender-ui/native` (the layer React, Svelte and Vue share)                                                  |
+| **More languages**                   | C#, Zig, Swift and Kotlin over the same C header; Godot, Unity and Bevy; Flutter |
 
 Our roadmap has no dates on it. Like a good render, it's done when the noise
 goes away.
@@ -2301,7 +2310,7 @@ small to download, but the UI is still a browser page.</li>
 <li><b>GPUIX</b>, like BUI, renders React natively: React drives Zed's GPUI.</li>
 </ul>
 BUI also renders natively, with Blender's widgets, a much larger part of CSS,
-Tailwind, and hooks backed by signals. <code>bui build</code> makes a 5 MB
+Tailwind, and hooks backed by signals. <code>bui build</code> makes a 6.3 MB
 executable that reaches its first frame in about 70 ms.
 </details>
 
@@ -2316,7 +2325,7 @@ nanoseconds per read or write.
 <details>
 <summary><b>Can I change the colors?</b></summary>
 Yes. Switch between Blender's Dark and Light themes at run time
-(<a href="#22-themes-dark-and-light">Themes</a>), color individual widgets in
+(<a href="#23-themes-dark-and-light">Themes</a>), color individual widgets in
 every API, and use full CSS on plain HTML elements in Rust and JavaScript.
 Loading any other Blender theme file is coming soon.
 </details>
@@ -2338,10 +2347,11 @@ is a C extension over the kit (<a href="bindings/ruby/README.md">its README</a>)
 Lua is too: <code>cmake -DBUI_BUILD_LUA_BINDINGS=ON</code> builds
 <code>bui-lua</code> (a standalone host) and <code>bui.so</code> / <code>bui.dll</code>
 (a loadable module) for Lua 5.4, LuaJIT or LuaRocks. There are 27 examples and
-every BUI widget type works. Vue and Angular would be thin adapters over
-<code>@blender-ui/native</code>, the layer React and Svelte already share
-(<a href="docs/javascript.md">how to add a framework</a>). Go
-(through cgo) would call the C kit, <code>BUI_kit.h</code>, as Ruby does. If you want one
+every BUI widget type works. Vue is supported too: <code>@blender-ui/vue</code>.
+Go is supported: <code>bindings/go</code> calls the C kit through cgo
+(<a href="bindings/go/README.md">its README</a>). Angular would be a thin adapter over
+<code>@blender-ui/native</code>, the layer React, Svelte and Vue already share
+(<a href="docs/javascript.md">how to add a framework</a>). If you want it
 sooner, open an issue or a pull request:
 <a href="CONTRIBUTING.md">CONTRIBUTING.md</a> says how.
 </details>
@@ -2350,7 +2360,7 @@ sooner, open an issue or a pull request:
 <summary><b>Is it ready for production?</b></summary>
 Much of it is complete and tested (the C kit, tkinter, the components, Rust,
 Dear ImGui, JavaScript), and some parts are partial or experimental (Qt syntax,
-parts of CSS and text, macOS). <a href="#40-status-and-roadmap">Status and
+parts of CSS and text, macOS). <a href="#42-status-and-roadmap">Status and
 roadmap</a> shows which is which. Pin your version, and test on the platforms
 you ship.
 </details>
@@ -2383,7 +2393,11 @@ changelog. Pin a release number, not a commit. From 1.0 it follows semantic vers
 
 <details>
 <summary><b>Is BUI accessible to screen readers?</b></summary>
-Not yet. See the <a href="#40-status-and-roadmap">known limitations</a>.
+On Windows, yes: widgets and HTML elements reach screen readers through UI
+Automation, with <a href="https://accesskit.dev">AccessKit</a>. Narrator and
+other readers see roles, names, values and states, and can press buttons, set
+values and move focus. macOS and Linux are next. See the
+<a href="#42-status-and-roadmap">known limitations</a>.
 </details>
 
 <details>
@@ -2445,7 +2459,8 @@ keep their own licenses:
 | [Tailwind CSS](https://tailwindcss.com)                                                | The v4 default theme values behind the Tailwind support                                                         | MIT                                       |
 
 The Rust and JavaScript bindings also depend on crates and packages such as
-taffy, napi-rs, React and QuickJS, each under its own license.
+taffy, AccessKit (screen readers, through `bui-a11y`), napi-rs, React and
+QuickJS, each under its own license.
 
 The full license texts of everything above, and of every Rust crate BUI's packages are
 built from, are in [`THIRD_PARTY_NOTICES.md`](THIRD_PARTY_NOTICES.md). It ships inside the

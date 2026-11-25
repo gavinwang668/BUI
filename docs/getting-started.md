@@ -39,6 +39,10 @@ cmake --build build
 | `BUI_WARNINGS_AS_ERRORS` | `OFF` | Only affects GCC and Clang today: when `OFF` the build adds `-Wno-error`; when `ON` it doesn't. It never adds `-Werror` or `/WX` by itself. |
 | `BUI_SLUG` | `ON` | GPU text from glyph outlines (Slug) by default; `OFF` makes the glyph atlas the default (switchable at run time either way) |
 | `BUI_IMAGE_SVG` | `ON` | SVG images through the kit's nanosvg (no extra code: Blender's icons use it already) |
+| `BUI_IMAGE_TIFF`, `BUI_IMAGE_HEIC` | `ON` | TIFF (libtiff) and HEIC (the OS's decoder, loaded at run time) images. The other formats have a `BUI_IMAGE_*` option too (`features.json`) |
+| `BUI_IMAGE_EXR`, `BUI_IMAGE_AVIF`, `BUI_IMAGE_JXL` | `OFF` | OpenEXR (OpenEXRCore), AVIF (libavif and dav1d) and JPEG XL (libjxl) images |
+| `BUI_SHELL` | `ON` | The desktop shell: tray icons, notifications, taskbar progress, recent files (`kit/intern/shell`) |
+| `BUI_A11Y` | `OFF` | Screen readers (UI Automation on Windows) through the `bui-a11y` crate in `a11y/`; needs cargo |
 | `BUI_TEXT_FREETYPE` | `ON` | Rasterize glyphs with the vendored FreeType 2.13.3, the way Blender's BLF does (light hinting, gamma 1.43, Inter's optical size). `OFF` uses stb_truetype. Ignored when `BUI_TEXT_GDI` is on. |
 | `BUI_TEXT_GDI` | `OFF` | Use Windows' GDI text engine and system fonts instead of the portable engine (embedded Inter, Slug on the GPU) |
 
@@ -89,8 +93,10 @@ shared (`bui.host`).
 | `BUIPY_BUILD_DIR` | Directory containing the built `buipy` extension |
 | `BUI_HOST=tk` | Force the stdlib-Tk window host even where the native host exists |
 | `BUI_UI_SCALE` | Fix the UI scale (for example `1.5`) instead of following the monitor's DPI |
-| `BUI_GPU=1` | Draw native windows on the GPU (Direct3D 11 on Windows, OpenGL 3.3 on Linux). Overrides the app-wide defaults `bui.set_gpu()`, `Application::gpu()` and `BUI_gpu_set_default()`. `BUI_GPU=0` turns those defaults off, but a window that asks for the GPU itself (`Tk(gpu=True)`, `WindowOptions { gpu: Some(true) }`, `BK_window_set_gpu`) still gets it. |
-| `BUI_GPU_DEBUG=1` | Print why the GPU renderer could not start |
+| `BUI_GPU=1` | Draw native windows on the GPU (Direct3D 11 on Windows, or 12 with `BUI_GPU_API`; OpenGL 3.3 on Linux). Overrides the app-wide defaults `bui.set_gpu()`, `Application::gpu()` and `BUI_gpu_set_default()`. `BUI_GPU=0` turns those defaults off, but a window that asks for the GPU itself (`Tk(gpu=True)`, `WindowOptions { gpu: Some(true) }`, `BK_window_set_gpu`) still gets it. |
+| `BUI_GPU_DEBUG=1` | Print why the GPU renderer could not start; `2` also turns on the Direct3D 12 debug layer |
+| `BUI_GPU_API` | `d3d11` (default) or `d3d12` (Windows): the Direct3D the GPU renderer uses. Overrides `Application::gpu_api()`, `BUI_gpu_set_api()` and `bui build --gpu` |
+| `BUI_GPU_ADAPTER=high-performance` | Windows: render on the GPU DXGI picks for high performance (the discrete one of a hybrid laptop) instead of the display's |
 | `BUI_FONT`, `BUI_FONT_DIR` | A font file to replace the embedded Inter UI font, and an extra font folder |
 | `BUI_SLUG` | `0` draws GPU text from a per-glyph bitmap atlas instead of glyph outlines (Slug); `1` forces Slug. Overrides `bui.set_slug()` / `.slug()` / `BUI_gpu_set_slug()` |
 | `BUI_PROFILE` | Print frame times every 60 frames (per phase in Rust and JavaScript; raster and present in the Windows host). **Any** value turns it on, even `0`. |
@@ -117,7 +123,7 @@ shared (`bui.host`).
 ### GPU rendering
 
 Native windows draw on the CPU by default. To draw them on the GPU
-(Direct3D 11 on Windows, OpenGL 3.3 on Linux) instead, use one of these:
+(Direct3D 11 on Windows, or Direct3D 12 when asked for; OpenGL 3.3 on Linux) instead, use one of these:
 
 | Where | Flag |
 |---|---|
@@ -142,8 +148,8 @@ Both renderers draw the same pixels. The GPU uses far less CPU per frame
 [benchmark](../bindings/rust/bench/README.md)), but the process needs about
 10 MB more RAM plus GPU memory. The device starts in the background, so the
 first frames are drawn on the CPU and the switch happens a few frames in.
-The GPU renderer is Direct3D 11 on Windows and OpenGL 3.3 on Linux (libGL
-is loaded at run time). Without a GPU or OpenGL, and on macOS, windows stay
+The GPU renderer is Direct3D 11 on Windows (Direct3D 12 opt-in: `BUI_GPU_API=d3d12`)
+and OpenGL 3.3 on Linux (libGL is loaded at run time). Without a GPU or OpenGL, and on macOS, windows stay
 on the software raster.
 
 `bui.host.run()` runs one loop for all windows, `bui.host.update()` processes

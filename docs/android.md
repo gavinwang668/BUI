@@ -68,6 +68,10 @@ A real app is SpotiTube-sized: a library crate shared with the desktop `main`, p
 - **Damage driven.** Nothing is drawn and the thread sleeps in `ALooper` until a touch, key, timer, wake
   or frame request. Only the damaged rectangles are converted (B,G,R words to the surface's R,G,B bytes)
   and locked. Idle cost: 0 CPU ticks in 10 s on the emulator, for the C and the Rust app.
+- **Frame rate.** The app runs at the display's fastest refresh rate: the host names the fastest mode
+  at the current size on the window (`preferredDisplayModeId` / `preferredRefreshRate`, from the
+  activity's `onWindowFocusChanged`) and votes with `ANativeWindow_setFrameRate`, so a 90 Hz panel is
+  not held to 60 Hz. `-DBUI_ANDROID_FRAME_LOG` logs frames and CPU time per second to logcat (tag `BUI`).
 - **Scale.** A CSS pixel is a dp, as in Chrome on Android: the kit's scale is the screen density
   (`dpi / 160`), so Rust layout and Blender's 20-unit widgets come out at a phone's size.
 - **Touch.** The host forwards every pointer of a motion event (batched history first) to the kit's
@@ -124,7 +128,8 @@ set.
 
 Run on an x86_64 emulator (API 33): the C demo, the Lua app (a button callback updates its label), the React, Vue and Svelte counters (QuickJS: clicks, the keyboard in an input, a slider) and the
 Rust app (a button, a text input, scrolling with the scrollbar). The arm64-v8a builds of all three
-compile and link but were not run on a device.
+compile and link. On a phone, the refresh rate was checked on a 90 Hz panel (60 Hz before the fix,
+90 Hz after), and SpotiTube's Android build is a Rust app on `android_main!`.
 
 Not done: a GPU renderer (OpenGL ES would reuse `gpu_gl.c`, untested),
 IME composition, a clipboard beyond the app's own, cutout insets beyond the content rectangle, and

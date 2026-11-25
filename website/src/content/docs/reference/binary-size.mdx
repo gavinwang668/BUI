@@ -26,9 +26,12 @@ Off, a part's sources aren't compiled at all. Its API stays, so code compiles ei
 | `exr`, `avif`, `jxl` | OpenEXRCore, libavif + dav1d, libjxl (off: about 0.9, 0.9 and 1.3 MB) |
 | `heic` | HEIC through the OS decoder (on; a few KB) |
 | `video` | [Video](/docs/concepts/video) through the OS, loaded at run time |
-| `gpu` | Direct3D 11 / OpenGL renderers |
+| `gpu` | Direct3D 11 / 12 and OpenGL renderers |
 | `freetype` | FreeType text (else stb_truetype) |
 | `filebrowser` | Blender's File Browser and `BK_file_dialog` |
+| `anim` | The animation engine: GSAP- and Motion-style tweens, timelines, springs, easings |
+| `shell` | The [desktop shell](/docs/concepts/desktop-shell): tray icons, notifications, taskbar progress, recent files |
+| `a11y` | Screen readers through AccessKit (the `bui-a11y` crate in `a11y/`; CMake: off, and it needs cargo) |
 | `imgui` | Dear ImGui on BUI (cargo: off unless `blenderui-imgui` asks) |
 
 ## Rust
@@ -47,7 +50,7 @@ Rebuilding the runtime per app would need a Rust and C toolchain on every machin
 | --- | --- |
 | `base` | UI, text, SVG images |
 | `media` | base + every image format + video |
-| `full` | media + the GPU renderer + the file browser |
+| `full` | media + the GPU renderer + the file browser + the desktop shell |
 
 How `bui build` decides, explicit first:
 

@@ -5,7 +5,7 @@ description: Turn a JavaScript or React app into one executable of about 7 MB wi
 section: JavaScript & React
 order: 40
 languages: ["javascript"]
-badges: ["Windows x64 prebuilt"]
+badges: ["Windows, Linux and macOS prebuilt"]
 sources: ["docs/javascript.md", "bindings/node/cli.js", "bindings/node/README.md", "bindings/react/README.md", "bindings/node/bench/startup.js", "bindings/node/bench/cells.js"]
 ---
 
@@ -14,7 +14,7 @@ Your users shouldn't need Node.js to run your tool. **`bui build app.jsx` makes 
 Under the hood it's BUI with a small JavaScript engine, [QuickJS](https://github.com/quickjs-ng/quickjs), built in. Your app's code is appended to it. Nothing is compiled per app, so a build takes well under a second.
 
 <Callout type="note" title="What you need">
-`bui` comes with `@blender-ui/native` (and so with `@blender-ui/react`). Bundling uses [Bun](https://bun.sh), so install Bun too, even if you develop on Node. The prebuilt runtime is for Windows x64; on other platforms, `npm run build` in `bindings/node` builds it from source.
+`bui` comes with `@blender-ui/native` (and so with `@blender-ui/react`). Bundling uses [Bun](https://bun.sh), so install Bun too, even if you develop on Node. The prebuilt runtime is for Windows x64, Linux x64 (glibc 2.35 or later) and macOS; on other platforms, `npm run build` in `bindings/node` builds it from source.
 </Callout>
 
 ## Build your app
@@ -155,7 +155,7 @@ What they show:
 
 ## Platforms
 
-The prebuilt `bui-runtime` and addon are for **Windows x64**. On Linux, build both from a clone of the repository (`npm run build` in `bindings/node`; you need Rust, CMake and a C compiler). Prebuilt runtimes for more platforms are <ComingSoon inline />.
+The prebuilt `bui-runtime` and addon ship for **Windows x64**, **Linux x64** (glibc 2.35 or later) and **macOS** (arm64 and x64), one package per platform (`@blender-ui/native-<platform>`). Elsewhere (musl or arm64 Linux), build both from a clone of the repository (`npm run build` in `bindings/node`; you need Rust, CMake and a C compiler).
 
 ## Next steps
 
@@ -167,6 +167,6 @@ The prebuilt `bui-runtime` and addon are for **Windows x64**. On Linux, build bo
     Write the app you're about to ship.
   </Card>
   <Card title="Roadmap" href="docs/project/roadmap/" icon="flag" kicker="Project">
-    Prebuilt packages for more platforms, and WebAssembly.
+    What's partial, and what's planned next.
   </Card>
 </CardGrid>

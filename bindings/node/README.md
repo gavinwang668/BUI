@@ -93,6 +93,10 @@ win.body.appendChild(button)
     `transition`, `variants`), and `style = { x: motionValue }`.
   - `el.animate(keyframes, options)` (Web Animations) runs for real (`cancel()` leaves the first keyframe applied until the engine can revert a style).
   - Numbers are checked at the call: NaN or infinite times throw a `RangeError`, a negative duration is 0, `repeat: -1` is forever, a position outside GSAP's grammar throws (`docs/animation-api.md`, "Numbers and positions"). Svelte's transitions run on the engine through `el.animate()`.
+- **Desktop shell:** `app.createTray({ icon, tooltip, menu })`,
+  `app.notify({ title, body })`, `app.addRecentDocument(path)` and
+  `win.setProgressBar(progress)`, with Electron's names; `createTray` and
+  `notify` resolve to `null` where the system has no tray or notifications.
 - **Tests:** `new App({ headless: true })` renders off-screen, and
   `win.click(x, y)` simulates input. Its clock stands still:
   `await app.advanceClock(ms)` steps animations frame-exactly.
@@ -116,6 +120,12 @@ Options:
 - `-o <file>`: the output file.
 - `--console`: keep a console window for logs (Windows builds open none).
 - `--dev`: development builds (React's, Svelte's dev mode).
+- `--features a,b`: the kit features the app uses (default: package.json's
+  `"bui": {"features": [...]}`, else detected in the bundle).
+- `--gpu d3d11|d3d12`: Windows: the Direct3D the GPU renderer starts with
+  (`BUI_GPU_API` overrides it when the app runs).
+- `--msix`: Windows: an MSIX package instead of a bare `.exe` (`bui package
+  app.exe --msix` releases any BUI executable the same way).
 
 Bundling uses [Bun](https://bun.sh), so it must be installed.
 

@@ -9,6 +9,7 @@
 module bui.kit;
 
 import bui.gpu : BuiRaster;
+import core.stdc.stdint : uint64_t;
 
 /* ---- version ------------------------------------------------------------- */
 enum BUI_KIT_VERSION_MAJOR = 0;
@@ -25,7 +26,9 @@ struct BKTreeItem;
 struct BKImBuf;
 struct BKAnim;
 struct BKVideo;
+struct BKSound;
 struct BKWindow;
+struct BKTray;
 
 /* ---- modifiers / buttons ------------------------------------------------- */
 enum BK_SHIFT = 1;
@@ -75,6 +78,8 @@ enum BK_EV_KEYRELEASE = 20;
 enum BK_EV_AREA = 21;   /* a screen's areas: a = child index, b = BK_AREA_* */
 enum BK_EV_MOVE = 22;   /* a panel moved: a = old index, b = new index */
 enum BK_EV_RESIZE = 23; /* a region resized, hidden or shown: a = size, b = hidden */
+enum BK_EV_A11Y_TREE = 24;   /* a screen reader reads this window now (on the root) */
+enum BK_EV_A11Y_ACTION = 25; /* a screen reader's request on a subtree node: ref = BKA11yRequest* */
 /* a pinch or turn over an "events" node: ref = "mods kind x y" (kind BK_GESTURE_*), a = amount */
 enum BK_EV_GESTURE = 26;
 enum BK_GESTURE_MAGNIFY = 1;
@@ -104,6 +109,17 @@ enum BK_IMAGE_HDR = 8;
 enum BK_IMAGE_PNM = 9;
 enum BK_IMAGE_SVG = 10;
 enum BK_IMAGE_VIDEO = 11;
+enum BK_IMAGE_TIFF = 12;
+enum BK_IMAGE_EXR = 13;
+enum BK_IMAGE_AVIF = 14;
+enum BK_IMAGE_JXL = 15;
+enum BK_IMAGE_HEIC = 16;
+
+/* BKImageInfo.flags */
+enum BK_IMAGE_INFO_VECTOR = 1;
+enum BK_IMAGE_INFO_NO_WIDTH = 2;
+enum BK_IMAGE_INFO_NO_HEIGHT = 4;
+enum BK_IMAGE_INFO_NO_RATIO = 8;
 
 enum BK_FIT_FILL = 0;
 enum BK_FIT_CONTAIN = 1;
@@ -118,6 +134,14 @@ enum BK_VIDEO_PAUSED = 2;
 enum BK_VIDEO_ENDED = 3;
 enum BK_VIDEO_ERROR = 4;
 
+/* ---- sound --------------------------------------------------------------- */
+enum BK_SOUND_LOADING = 0;
+enum BK_SOUND_PLAYING = 1;
+enum BK_SOUND_PAUSED = 2;
+enum BK_SOUND_ENDED = 3;
+enum BK_SOUND_ERROR = 4;
+enum BK_SOUND_NO_OUTPUT = 5;
+
 /* ---- canvas -------------------------------------------------------------- */
 enum BK_ITEM_RECT = 0;
 enum BK_ITEM_OVAL = 1;
@@ -127,6 +151,8 @@ enum BK_ITEM_TEXT = 4;
 enum BK_ITEM_ARC = 5;
 enum BK_ITEM_IMAGE = 6;
 enum BK_ITEM_ROUNDRECT = 7;
+enum BK_ITEM_EFFECT = 8;
+enum BK_ITEM_PASS = 9;
 
 /* ---- custom nodes -------------------------------------------------------- */
 enum BK_CUSTOM_PRESS = 1;
@@ -152,6 +178,12 @@ enum BK_TOUCH_DOWN = 0;
 enum BK_TOUCH_MOVE = 1;
 enum BK_TOUCH_UP = 2;
 enum BK_TOUCH_CANCEL = 3;
+
+/* ---- how scrolls come (BK_scroll_phase) ---------------------------------- */
+enum BK_SCROLL_WHEEL = 1;
+enum BK_SCROLL_DRAG = 2;
+enum BK_SCROLL_FLING = 3;
+enum BK_SCROLL_END = 4;
 
 /* ---- IME ----------------------------------------------------------------- */
 enum BK_IME_COMPOSITION_START = 0;
@@ -254,13 +286,14 @@ struct BKCanvasItem {
     int type;
     const(float)* coords;
     int ncoords;
-    float[4] fill;
-    float[4] outline;
-    float width;
-    float radius;
-    float size;
-    float start;
-    float extent;
+    // D's floats start as NaN: 0, as C's zeroed struct (see `fade`)
+    float[4] fill = 0;
+    float[4] outline = 0;
+    float width = 0;
+    float radius = 0;
+    float size = 0;
+    float start = 0;
+    float extent = 0;
     const(char)* text;
     int anchor;
     const(ubyte)* rgba;
@@ -269,7 +302,7 @@ struct BKCanvasItem {
     int hidden;
     int text_flags;
     int clip_on;
-    float[4] clip;
+    float[4] clip = 0;
     const(char)* family;
     const(BKImBuf)* imbuf;
     const(char)* src;
@@ -370,14 +403,178 @@ struct BKWidgetDraw {
     int state;
     int corners;
     int align_;
-    float[4] rect;
-    float[4] clip;
-    float[4] text_rect;
-    float value;
-    float[4] color;
-    float[4] aux;
+    // D's floats start as NaN: 0 as in C (no clip, the widget's own text placement)
+    float[4] rect = 0;
+    float[4] clip = 0;
+    float[4] text_rect = 0;
+    float value = 0;
+    float[4] color = 0;
+    float[4] aux = 0;
     const(char)* text;
     const(char)* text2;
+}
+
+/* ---- desktop shell ------------------------------------------------------- */
+enum BK_SHELL_TRAY = 1 << 0;
+enum BK_SHELL_NOTIFY = 1 << 1;
+enum BK_SHELL_PROGRESS = 1 << 2;
+enum BK_SHELL_RECENT = 1 << 3;
+
+enum BK_PROGRESS_NONE = 0;
+enum BK_PROGRESS_NORMAL = 1;
+enum BK_PROGRESS_INDETERMINATE = 2;
+enum BK_PROGRESS_PAUSED = 3;
+enum BK_PROGRESS_ERROR = 4;
+
+alias BKShellEmitFn =
+    extern(C) void function(void* data, BKTray* tray, int kind, void* ref_, double a, double b);
+
+struct BKShellCallbacks {
+    void* data;
+    BKShellEmitFn emit;
+}
+
+/* ---- accessibility ------------------------------------------------------- */
+enum BK_ROLE_GENERIC = 0;
+enum BK_ROLE_WINDOW = 1;
+enum BK_ROLE_DOCUMENT = 2;
+enum BK_ROLE_GROUP = 3;
+enum BK_ROLE_PANE = 4;
+enum BK_ROLE_LABEL = 5;
+enum BK_ROLE_PARAGRAPH = 6;
+enum BK_ROLE_HEADING = 7;
+enum BK_ROLE_LINK = 8;
+enum BK_ROLE_BUTTON = 9;
+enum BK_ROLE_CHECKBOX = 10;
+enum BK_ROLE_RADIO = 11;
+enum BK_ROLE_SWITCH = 12;
+enum BK_ROLE_TEXT_INPUT = 13;
+enum BK_ROLE_MULTILINE_TEXT_INPUT = 14;
+enum BK_ROLE_SEARCH_INPUT = 15;
+enum BK_ROLE_PASSWORD_INPUT = 16;
+enum BK_ROLE_SPIN_BUTTON = 17;
+enum BK_ROLE_SLIDER = 18;
+enum BK_ROLE_COMBO_BOX = 19;
+enum BK_ROLE_LIST_BOX = 20;
+enum BK_ROLE_LIST_BOX_OPTION = 21;
+enum BK_ROLE_LIST = 22;
+enum BK_ROLE_LIST_ITEM = 23;
+enum BK_ROLE_TREE = 24;
+enum BK_ROLE_TREE_ITEM = 25;
+enum BK_ROLE_TABLE = 26;
+enum BK_ROLE_ROW = 27;
+enum BK_ROLE_CELL = 28;
+enum BK_ROLE_COLUMN_HEADER = 29;
+enum BK_ROLE_ROW_HEADER = 30;
+enum BK_ROLE_MENU = 31;
+enum BK_ROLE_MENU_BAR = 32;
+enum BK_ROLE_MENU_ITEM = 33;
+enum BK_ROLE_MENU_ITEM_CHECKBOX = 34;
+enum BK_ROLE_MENU_ITEM_RADIO = 35;
+enum BK_ROLE_TAB_LIST = 36;
+enum BK_ROLE_TAB = 37;
+enum BK_ROLE_TAB_PANEL = 38;
+enum BK_ROLE_PROGRESS = 39;
+enum BK_ROLE_METER = 40;
+enum BK_ROLE_IMAGE = 41;
+enum BK_ROLE_COLOR_WELL = 42;
+enum BK_ROLE_SCROLL_BAR = 43;
+enum BK_ROLE_SCROLL_VIEW = 44;
+enum BK_ROLE_TOOLBAR = 45;
+enum BK_ROLE_DIALOG = 46;
+enum BK_ROLE_ALERT_DIALOG = 47;
+enum BK_ROLE_ALERT = 48;
+enum BK_ROLE_STATUS = 49;
+enum BK_ROLE_LOG = 50;
+enum BK_ROLE_NAVIGATION = 51;
+enum BK_ROLE_MAIN = 52;
+enum BK_ROLE_BANNER = 53;
+enum BK_ROLE_CONTENT_INFO = 54;
+enum BK_ROLE_COMPLEMENTARY = 55;
+enum BK_ROLE_REGION = 56;
+enum BK_ROLE_FORM = 57;
+enum BK_ROLE_SEARCH = 58;
+enum BK_ROLE_ARTICLE = 59;
+enum BK_ROLE_FIGURE = 60;
+enum BK_ROLE_DETAILS = 61;
+enum BK_ROLE_SUMMARY = 62;
+enum BK_ROLE_CANVAS = 63;
+enum BK_ROLE_VIDEO = 64;
+enum BK_ROLE_RADIO_GROUP = 65;
+enum BK_ROLE_TOOLTIP = 66;
+enum BK_ROLE_CODE = 67;
+enum BK_ROLE_BLOCKQUOTE = 68;
+enum BK_ROLE_CAPTION = 69;
+enum BK_ROLE_LEGEND = 70;
+enum BK_ROLE_TERM = 71;
+enum BK_ROLE_DEFINITION = 72;
+enum BK_ROLE_DESCRIPTION_LIST = 73;
+enum BK_ROLE_TIME = 74;
+enum BK_ROLE_COUNT = 75;
+
+enum BK_A11Y_FOCUSABLE = 1 << 0;
+enum BK_A11Y_FOCUSED = 1 << 1;
+enum BK_A11Y_DISABLED = 1 << 2;
+enum BK_A11Y_CHECKABLE = 1 << 3;
+enum BK_A11Y_CHECKED = 1 << 4;
+enum BK_A11Y_MIXED = 1 << 5;
+enum BK_A11Y_EXPANDABLE = 1 << 6;
+enum BK_A11Y_EXPANDED = 1 << 7;
+enum BK_A11Y_SELECTABLE = 1 << 8;
+enum BK_A11Y_SELECTED = 1 << 9;
+enum BK_A11Y_CLICKABLE = 1 << 10;
+enum BK_A11Y_EDITABLE = 1 << 11;
+enum BK_A11Y_NUMERIC = 1 << 12;
+enum BK_A11Y_READONLY = 1 << 13;
+enum BK_A11Y_REQUIRED = 1 << 14;
+enum BK_A11Y_MULTISELECTABLE = 1 << 15;
+enum BK_A11Y_LIVE_POLITE = 1 << 16;
+enum BK_A11Y_LIVE_ASSERTIVE = 1 << 17;
+enum BK_A11Y_POPUP = 1 << 18;
+enum BK_A11Y_MODAL = 1 << 19;
+enum BK_A11Y_INVALID = 1 << 20;
+enum BK_A11Y_VISITED = 1 << 21;
+enum BK_A11Y_CONTEXT_MENU = 1 << 22;
+enum BK_A11Y_CLIPS = 1 << 23;
+enum BK_A11Y_DEFAULT = 1 << 24;
+enum BK_A11Y_FLAGS_ALL = (1 << 25) - 1;
+
+enum BK_A11Y_CLICK = 0;
+enum BK_A11Y_FOCUS = 1;
+enum BK_A11Y_SET_VALUE = 2;
+enum BK_A11Y_INCREMENT = 3;
+enum BK_A11Y_DECREMENT = 4;
+enum BK_A11Y_EXPAND = 5;
+enum BK_A11Y_COLLAPSE = 6;
+enum BK_A11Y_SCROLL_INTO_VIEW = 7;
+enum BK_A11Y_CONTEXT_MENU_SHOW = 8;
+enum BK_A11Y_ACTION_COUNT = 9;
+
+struct BKA11yNode {
+    uint64_t id;
+    int parent;
+    ushort role; /* BK_ROLE_* */
+    ushort level;
+    uint flags; /* BK_A11Y_* */
+    const(char)* name;
+    const(char)* description;
+    const(char)* value;
+    float x = 0; // D's float and double default to NaN: 0 as in C
+    float y = 0;
+    float w = 0;
+    float h = 0;
+    double num = 0;
+    double min = 0;
+    double max = 0;
+    double step = 0;
+    BKNode* widget;
+}
+
+struct BKA11yRequest {
+    uint64_t id;
+    int action; /* BK_A11Y_CLICK ... */
+    double num = 0;
+    const(char)* text;
 }
 
 extern(C) {
@@ -386,7 +583,7 @@ alias BKRefHookFn = extern(C) void function(void* ref_);
 alias BKVideoListenerFn = extern(C) void function(BKVideo* v, int state, void* data);
 alias BKImageNotifyFn = extern(C) void function(void* data);
 alias BKStopCheckFn = extern(C) int function();
-alias BKWakeInitFn = extern(C) int function();
+alias BKWakeInitFn = extern(C) void function();
 
 /* -- version and reference hooks ------------------------------------------ */
 int BK_version();
@@ -449,6 +646,7 @@ void BK_node_set_borrowed_ref(BKNode* node, void* ref_);
 void* BK_node_borrowed_ref(const(BKNode)* node);
 int BK_node_add(BKNode* parent, BKNode* child, int index);
 void BK_node_remove(BKNode* parent, BKNode* child);
+int BK_node_move(BKNode* parent, BKNode* child, int index);
 int BK_node_child_count(const(BKNode)* node);
 BKNode* BK_node_child(const(BKNode)* node, int i);
 BKNode* BK_node_parent(const(BKNode)* node);
@@ -559,6 +757,13 @@ void BK_video_set_rate(BKVideo* v, double rate);
 void BK_video_set_loop(BKVideo* v, int loop);
 void BK_video_set_poster(BKVideo* v, const(char)* src);
 void BK_video_set_controls(BKVideo* v, int on);
+void BK_video_set_muted(BKVideo* v, int muted);
+int BK_video_muted(const(BKVideo)* v);
+void BK_video_set_audio_effects(BKVideo* v, int on);
+int BK_video_audio_effects(const(BKVideo)* v);
+void BK_video_set_volume(BKVideo* v, double volume);
+double BK_video_volume(const(BKVideo)* v);
+int BK_video_has_audio(const(BKVideo)* v);
 int BK_video_state(const(BKVideo)* v);
 double BK_video_time(const(BKVideo)* v);
 double BK_video_duration(const(BKVideo)* v);
@@ -567,6 +772,18 @@ void BK_video_set_listener(BKVideo* v, BKVideoListenerFn fn, void* data);
 int BK_video_texture(BKVideo* v, int tex, int max_w, int max_h);
 void BK_node_set_video(BKNode* node, BKVideo* v, int fit);
 const(char)* BK_video_backends();
+
+/* -- sound ----------------------------------------------------------------- */
+BKSound* BK_sound_new(const(char)* src);
+void BK_sound_free(BKSound* s);
+void BK_sound_play(BKSound* s);
+void BK_sound_pause(BKSound* s);
+void BK_sound_seek(BKSound* s, double seconds);
+void BK_sound_set_volume(BKSound* s, double volume);
+double BK_sound_volume(const(BKSound)* s);
+int BK_sound_state(const(BKSound)* s);
+double BK_sound_time(const(BKSound)* s);
+double BK_sound_duration(const(BKSound)* s);
 
 /* -- shared image cache ---------------------------------------------------- */
 void BK_image_set_budget(size_t bytes);
@@ -634,18 +851,23 @@ void BK_context_set_header(BKContext* ctx, BKNode* header);
 BKNode* BK_context_root(BKContext* ctx);
 
 int BK_render(BKContext* ctx, BuiRaster* r, int w, int h, int full);
+int BK_configure(BKContext* ctx, int w, int h);
 int BK_needs_render(BKContext* ctx);
 
 /* -- input ----------------------------------------------------------------- */
 int BK_press(BKContext* ctx, int x, int y, int mods);
 int BK_release(BKContext* ctx, int x, int y, int mods);
 int BK_motion(BKContext* ctx, int x, int y, int mods);
+int BK_cancel(BKContext* ctx, int mods);
 int BK_wheel(BKContext* ctx, int x, int y, int delta, int mods);
 int BK_scroll(BKContext* ctx, int x, int y, float dx, float dy, int mods);
+int BK_scroll_px(BKContext* ctx, int x, int y, float dx, float dy, int mods);
+void BK_scroll_phase(BKContext* ctx, int phase);
 int BK_touch(BKContext* ctx, int id, int phase, float x, float y, double time_ms, int mods);
 int BK_magnify(BKContext* ctx, int x, int y, float delta, int mods);
 int BK_rotate(BKContext* ctx, int x, int y, float degrees, int mods);
 int BK_key(BKContext* ctx, const(char)* text, const(char)* keysym, int mods);
+void BK_key_taken(BKContext* ctx);
 int BK_context_menu(BKContext* ctx, int x, int y, int mods);
 
 /* -- input methods --------------------------------------------------------- */
@@ -676,6 +898,13 @@ const(char)* BK_menu_row_text(BKNode* menu, int i);
 void BK_menu_row_rect(BKNode* menu, int i, int* r_rect);
 BKNode* BK_picker_part(BKNode* picker, const(char)* name);
 
+/* -- accessibility --------------------------------------------------------- */
+int BK_a11y_supported();
+int BK_a11y_wanted(const(BKNode)* node);
+int BK_a11y_set_subtree(BKNode* node, const(BKA11yNode)* nodes, int n);
+int BK_a11y_tree(BKContext* ctx, const(char)* title, const(BKA11yNode)** r_nodes, uint64_t* r_focus);
+int BK_a11y_action(BKContext* ctx, const(BKA11yRequest)* req);
+
 /* -- native windows -------------------------------------------------------- */
 int BK_window_supported();
 BKWindow* BK_window_new(BKContext* ctx, const(char)* title, int width, int height);
@@ -705,6 +934,19 @@ void BK_window_set_stop_check(BKStopCheckFn stop);
 int BK_window_wake_init(BKWakeInitFn cb);
 void BK_window_wake();
 void BK_window_set_keep_alive(int on);
+
+/* -- desktop shell --------------------------------------------------------- */
+int BK_shell_features();
+void BK_shell_set_app_id(const(char)* id);
+void BK_shell_set_callbacks(const(BKShellCallbacks)* cb);
+BKTray* BK_tray_new(const(char)* icon, const(char)* tooltip);
+void BK_tray_free(BKTray* tray);
+int BK_tray_set_icon(BKTray* tray, const(char)* icon);
+int BK_tray_set_tooltip(BKTray* tray, const(char)* tooltip);
+int BK_tray_set_menu(BKTray* tray, const(BKMenuSpec)* items, int n);
+int BK_notify(const(char)* title, const(char)* body_, const(char)* icon);
+int BK_window_set_progress(BKWindow* win, int state, float value);
+int BK_shell_add_recent(const(char)* path);
 
 /* -- Blender widgets, straight into a raster ------------------------------- */
 void BK_draw_widget(BuiRaster* r, const(BKWidgetDraw)* w);

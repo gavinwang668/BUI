@@ -42,24 +42,27 @@ set BUI_GPU=1 && python my_app.py
 
 | Variable | Values | Default | What it does | Read in |
 | --- | --- | --- | --- | --- |
-| `BUI_GPU` | on / off | Off (or what the code asked for) | Draws native windows on the GPU: Direct3D 11 on Windows, OpenGL 3.3 on Linux. `BUI_GPU=0` forces the software raster. Overrides the app-wide defaults: `bui.set_gpu()`, `Application::gpu()` and `BUI_gpu_set_default()`. A window that asks for the GPU itself (`Tk(gpu=True)`, `WindowOptions { gpu: Some(true) }`, `BK_window_set_gpu`) still gets it. | `gpu/intern/gpu_raster.c` |
+| `BUI_GPU` | on / off | Off (or what the code asked for) | Draws native windows on the GPU: Direct3D 11 on Windows (or 12, see `BUI_GPU_API`), OpenGL 3.3 on Linux. `BUI_GPU=0` forces the software raster. Overrides the app-wide defaults: `bui.set_gpu()`, `Application::gpu()` and `BUI_gpu_set_default()`. A window that asks for the GPU itself (`Tk(gpu=True)`, `WindowOptions { gpu: Some(true) }`, `BK_window_set_gpu`) still gets it. | `gpu/intern/gpu_raster.c` |
 | `BUI_SLUG` | on / off | On (the CMake `BUI_SLUG` option) | How the GPU draws text: `1` from glyph outlines (Slug), `0` from a per-glyph bitmap atlas. Overrides `bui.set_slug()`, `.slug()` and `BUI_gpu_set_slug()`. Read once per process. | `gpu/intern/gpu_raster.c` |
 | `BUI_GPU_DEBUG` | `1`, `2` | Unset | `1`: prints to stderr why the GPU renderer couldn't start (and, on Linux, what it runs on). `2`: also turns on the Direct3D 12 debug layer, printing its warnings and errors and, at exit, any leaked objects. | `gpu/intern/gpu_device.c`, `gpu/intern/gpu_d3d12.c`, `gpu/intern/gpu_gl.c` |
 | `BUI_GPU_API` | `d3d11`, `d3d12` | Unset | Windows: which Direct3D the GPU renderer uses. It wins over the app's choice in code (`Application::gpu_api`) and the one `bui build --gpu` stored in the executable; the default is `d3d11`. A device that can't start on Direct3D 12 starts on Direct3D 11. Other values are ignored (`BUI_GPU_DEBUG=1` says so). | `gpu/intern/gpu_raster.c` |
 | `BUI_GPU_WARP` | `1` | Unset | Windows: creates the Direct3D device (11 or 12) on WARP, Windows' software rasterizer, instead of the graphics card. Useful in VMs and CI. Only `1` turns it on. | `gpu/intern/gpu_dx.c` |
 | `BUI_GPU_ADAPTER` | `high-performance` | Unset (`default`) | Windows: creates the Direct3D device on the GPU DXGI picks for high performance, the discrete one of a hybrid laptop. Without it Windows picks the display's, often the integrated GPU (less power). Profilers such as NVIDIA Nsight only see work on their vendor's GPU. Other values are ignored (`BUI_GPU_DEBUG=1` says so). | `gpu/intern/gpu_dx.c` |
-| `BUI_GPU_MAX_TEXTURE` | A number of pixels, 64 or more | The device's limit | Testing: the largest texture side the GPU renderers give one image; images over it are tiled, as on devices with a small limit (the GPU parity test uses 512). | `gpu/intern/gpu_d3d11.c`, `gpu/intern/gpu_gl.c` |
+| `BUI_GPU_MAX_TEXTURE` | A number of pixels, 64 or more | The device's limit | Testing: the largest texture side the GPU renderers give one image; images over it are tiled, as on devices with a small limit (the GPU parity test uses 512). | `gpu/intern/gpu_device.c`, `gpu/intern/gpu_gl.c` |
 | `BUI_GPU_EGL` | `default`, `surfaceless` | Surfaceless first, then default | Linux: which EGL platform offscreen GPU rendering uses (tests, screenshots). | `gpu/intern/gpu_gl.c` |
 | `BUI_RASTER_THREADS` | A number, 1 to 8 | The processor count, capped at 8 | Windows: the most threads the software raster uses for big canvases. `1` forces one thread. Elsewhere, canvases draw on one thread. | `kit/intern/kit_frame.c` |
+| `BUI_CHECK_DAMAGE` | on / off | Unset | Testing: draws each partial frame again in full and prints how many pixels the damage missed. Software raster only, and slow. | `kit/intern/kit_core.c` |
 | `BUI_PROFILE` | Any value | Unset | Prints frame times to stderr every 60 frames: per-phase times in Rust and JavaScript, raster and present times in the Windows native host. **Any** value turns it on, even `0`. | `bindings/rust/blenderui/src/prof.rs`, `kit/intern/kit_window_win32.c` |
 
 ## Windows and display
 
 | Variable | Values | Default | What it does | Read in |
 | --- | --- | --- | --- | --- |
-| `BUI_UI_SCALE` | A number, such as `1.25` or `1.5` | The display's scale | Fixes the UI scale instead of following the monitor's DPI. `1` means Blender's default size (20 px widgets). Clamped to 0.5–4. | `kit/intern/kit_window_win32.c`, `kit_window_x11.c`, `kit_window_cocoa.m`, `bindings/python/bui/theme.py` |
+| `BUI_UI_SCALE` | A number, such as `1.25` or `1.5` | The display's scale | Fixes the UI scale instead of following the monitor's DPI. `1` means Blender's default size (20 px widgets). Clamped to 0.5–4. | `kit/intern/kit_window_win32.c`, `kit_window_x11.c`, `kit_window_wayland.c`, `kit_window_cocoa.m`, `bindings/python/bui/theme.py` |
 | `BUI_THEME` | `dark` or `light` (any case; `Blender Light` works too) | `dark` | Picks Blender's Dark or Light theme for the whole process, when the app doesn't choose one itself (`bui.set_theme()`, `blenderui::set_theme()` / `Application::theme()`, `new App({ theme })`, `BK_set_theme()`). Here **the code wins**: an explicit call replaces it. See [Theming](../../concepts/theming/). | `kit/intern/kit_core.c` |
 | `BUI_HOST` | `tk` | Native where available | Python: forces the stdlib Tk window even where a native host exists. | `bindings/python/bui/host.py` |
+| `BUI_WINDOW_BACKEND` | `x11` or `wayland` | Wayland on a Wayland session (X11 when the GPU renderer is on) | Linux: which window host to use. `x11` keeps XWayland on a Wayland session; `wayland` asks for the Wayland host even with the GPU renderer on. | `kit/intern/kit_window_linux.c` |
+| `BUI_APP_ID` | A name | `bui` | Linux Wayland: the windows' app id (`xdg_toplevel.set_app_id`, and a layer-shell surface's namespace). | `kit/intern/kit_window_wayland.c` |
 | `BUI_MAC_TK` | `0` | `1` | Python on macOS: `0` skips starting a hidden Tk root before the first native window (it's there so Tk and the Cocoa host can share one `NSApplication`). | `bindings/python/bui/host.py` |
 
 ## Text and fonts
@@ -67,7 +70,13 @@ set BUI_GPU=1 && python my_app.py
 | Variable | Values | Default | What it does | Read in |
 | --- | --- | --- | --- | --- |
 | `BUI_FONT` | A path to a `.ttf`, `.otf` or `.ttc` file | Unset (embedded Inter) | Replaces the embedded Inter as the default UI face. | `gpu/intern/gpu_raster.c` |
-| `BUI_FONT_DIR` | A folder | Unset | An extra font folder, searched before the system's. | `gpu/intern/gpu_raster.c` |
+| `BUI_FONT_DIR` | A folder | Unset | An extra font folder, searched before the system's. | `gpu/intern/gpu_fonts.c` |
+
+## Sound
+
+| Variable | Values | Default | What it does | Read in |
+| --- | --- | --- | --- | --- |
+| `BUI_AUDIO_EFFECTS` | `1` | Unset | Windows: every video's sound goes through the system's audio effects, as `audio_effects` does for one video. Without it the stream is opened RAW, which opens faster. Any value but one starting with `0` turns it on. | `kit/intern/audio/device_wasapi.c` |
 
 ## File dialogs
 
@@ -104,6 +113,7 @@ These are read while building, not at run time.
 
 | Variable | Values | What it does | Read in |
 | --- | --- | --- | --- |
+| `BUI_FX_PPM` | A folder | The GPU effect test writes its frame there | `gpu/tests/test_gpu_effect.c` |
 | `BUI_PARITY_PPM` | A folder | The GPU parity test writes the CPU frame, the GPU frame and their difference as images there | `gpu/tests/test_gpu_parity.c` |
 | `BUI_IMGUI_SHOT` | A folder | The Dear ImGui test writes PNG screenshots (CPU and GPU) there | `bindings/imgui/tests/test_imgui_bui.cpp` |
 | `BUI_IMGUI_TRACE` | Any value | The Dear ImGui demo and test print a line per render (frame count, animating) | `examples/imgui_demo.cpp`, `bindings/imgui/tests/test_imgui_bui.cpp` |

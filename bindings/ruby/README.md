@@ -50,7 +50,7 @@ ASAN_OPTIONS=use_sigaltstack=0:detect_leaks=1 RUBY_FREE_AT_EXIT=1 rake test
 | `node.on(:click) { \|e\| }` | Handlers by event kind (`BUI::EVENT_KINDS`); `on_click`, `on_change`, `on_submit`. The block gets a `BUI::Event` |
 | `node.pack(side: :left)` | Tk's `pack`, `grid` and `place` for the children of a `"frame"` |
 | `node.menu = [{text:, action:}]` | A menu button's items; `ctx.open_menu`, `ctx.open_pie` |
-| `BUI::Context.new(root)` | Layout, input and rendering without a window: `render(raster)`, `click(x, y)`, `key(text, keysym)`, `bind("ctrl+s") {}`, `popups`, `hit_at` |
+| `BUI::Context.new(root)` | Layout, input and rendering without a window: `render(raster)`, `click(x, y)`, `key(text, keysym)`, `touch(id, BUI::TOUCH_DOWN, x, y)`, `magnify` / `rotate` (trackpad gestures, `:gesture` events), `bind("ctrl+s") {}`, `popups`, `hit_at` |
 | `BUI::Raster.new(w, h)` | A frame: `rgba`, `pixel(x, y)`, `save_png(path)` |
 | `BUI::Window.new(title, width:, height:) { }` | A native window; `timer(ms) {}`, `on_close {}`, `on_frame {}`, `update {}` from other threads, `free` |
 | `BUI.run`, `BUI.app { window ... }` | The loop; `BUI.on_main {}` from any thread; `BUI.quit` |

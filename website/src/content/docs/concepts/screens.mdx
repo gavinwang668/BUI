@@ -211,7 +211,7 @@ const { window } = render(
 window.body.style = 'margin: 0'
 ```
 
-Run it as in [JavaScript](../../javascript/) (`bui build screen.jsx`, or bundle it for Android).
+Run it as in [JavaScript](../../javascript/standalone-executables/) (`bui build screen.jsx`, or bundle it for Android).
 
 The native DOM API has `createScreen(document, { editors, layout, saved, onChange, onWindow })` and `editorElement(document, { main, header, sidebar: { element, size, hotkey, onResize } })`. An area keeps its editor element (and a text field's draft) while the user drags an edge, and keeps its component state in React, Vue and Svelte while its neighbors are split, joined or closed; areas that close are released. JavaScript has no area operations (split, join, dock) yet: the user does them.
 </Tab>

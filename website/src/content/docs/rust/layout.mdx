@@ -17,7 +17,7 @@ Elements like `div`, `p` and `section` stack top to bottom, as in a browser. Mar
 `box-sizing` defaults to `border-box` here, like Tailwind's preflight. Padding and borders fit *inside* the width you set.
 </Callout>
 
-**Floats** place block boxes to the left or right, and `clear` moves the next box below them. Text doesn't wrap around floats yet <ComingSoon inline />.
+**Floats** place block boxes to the left or right, and `clear` moves the next box below them. The lines of text beside a float go round it.
 
 ## Inline text
 
@@ -31,7 +31,7 @@ These apply to inline content:
 - `text-overflow: ellipsis | clip`: on a block whose `overflow-x` is not `visible` (usually with `white-space: nowrap`, Tailwind's `truncate`), a line wider than the content box is cut to it and ends with `…`; with `overflow: visible` it has no effect, as in CSS
 - `word-break: break-all`, `overflow-wrap: anywhere | break-word`, `tab-size`
 
-`text-align: justify` aligns left for now <ComingSoon inline />.
+`text-align: justify` spreads each line's free space over its spaces; the last line follows `text-align-last`.
 
 ## Flexbox and grid
 
@@ -127,7 +127,7 @@ window.scroll_into_view("current-line", 0.33, Some(0.7));
 .page  { height: 100px; scroll-snap-align: start }
 ```
 
-With that, one wheel notch (or Page Up / Down) moves exactly one page. A touch or trackpad drag follows the finger and doesn't snap: there's no gesture end to snap at yet. `scroll-padding`, `scroll-margin` and `scroll-snap-stop` parse but aren't applied yet.
+With that, one wheel notch (or Page Up / Down) moves exactly one page. A touch or trackpad drag follows the finger and doesn't snap: browsers snap such a gesture at its end (`ScrollPhase::End`), and BUI doesn't yet. `scroll-padding`, `scroll-margin` and `scroll-snap-stop` parse but aren't applied yet.
 
 ## Container queries
 
