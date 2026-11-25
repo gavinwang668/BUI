@@ -827,6 +827,10 @@ int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods);
  * (BK_EV_WHEEL) carry the pixels in `b`. */
 int BK_scroll_px(BKContext *ctx, int x, int y, float dx, float dy, int mods);
 int BK_key(BKContext *ctx, const char *text, const char *keysym, int mods);
+/* Called by a binding while it handles a key's raw event (BK_EV_KEY) when it acted on the key:
+ * BK_key then returns 1 and no widget or shortcut sees the key. A host acts on a key BK_key
+ * returned 0 for (Android's Back key finishes the activity). */
+void BK_key_taken(BKContext *ctx);
 int BK_context_menu(BKContext *ctx, int x, int y, int mods);
 
 /* -- Input methods (IME) ------------------------------------------------------
@@ -981,10 +985,16 @@ void BK_window_set_keep_alive(int on);
  * callbacks and starts a new run (a relaunch after Back reuses the process); BK_window_supported()
  * is 1 from then on. `android_main` calls BK_android_detach before it returns (the glue then frees
  * the app): a BK_window_wake from another thread does nothing from then on. BK_android_assets is
- * the APK's `AAssetManager *` (the assets/ folder). */
+ * the APK's `AAssetManager *` (the assets/ folder). BK_android_activity is the `ANativeActivity *`
+ * (its `vm` and `clazz` are what JNI code needs), NULL while no activity runs.
+ *
+ * Attaching points HOME at the app's private files folder, XDG_CACHE_HOME and TMPDIR at its cache
+ * folder (which the system may clear), so code that asks for the usual folders (Rust's `dirs`)
+ * gets folders the app may write. Variables already set are left alone. */
 void BK_android_attach(void *android_app);
 void BK_android_detach(void);
 void *BK_android_assets(void);
+void *BK_android_activity(void);
 #endif
 
 /* One of Blender's widgets drawn straight into a raster, outside any BKContext: the same

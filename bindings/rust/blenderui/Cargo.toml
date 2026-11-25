@@ -26,6 +26,10 @@ paste = "1"
 foldhash = { version = "0.2", default-features = false }
 smallvec = { version = "1", features = ["union", "const_generics"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+# the activity's JNI handles for crates that call into Java (android::run sets them)
+ndk-context = "0.1"
+
 [features]
 # Draw text with Windows' native GDI engine (system fonts) instead of the
 # default portable engine (embedded Inter, like Blender; Slug on the GPU).

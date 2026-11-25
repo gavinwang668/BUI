@@ -16,7 +16,12 @@ python platform/android/build.py --lua examples/android        # a Lua app (the 
 python platform/android/build.py --rust platform/android/rust  # a Rust app (a staticlib crate)
 python platform/android/build.py --js app.jsx                  # a JavaScript app: React, Vue or Svelte on QuickJS
 python platform/android/build.py --imgui [app.cpp]             # a Dear ImGui app (C++)
+python platform/android/build.py --rust app/android --label MyApp --package com.me.app --permission INTERNET
 ```
+
+`--label` names the app on the phone (and the APK file), `--package` is its id (default `org.bui.app`),
+and each `--permission` adds one (`INTERNET` for an app that goes online; a bare name means
+`android.permission.NAME`).
 
 Needs the Android SDK (`ANDROID_HOME`; build-tools, platform 34), an NDK (the newest in the SDK, or
 `ANDROID_NDK_HOME`), CMake, a JDK for `keytool`, and for Rust `cargo` with the Android targets
@@ -27,7 +32,7 @@ Needs the Android SDK (`ANDROID_HOME`; build-tools, platform 34), an NDK (the ne
 
 | Language | You write | Run it |
 | --- | --- | --- |
-| **Rust** | an ordinary `blenderui` app in a `staticlib` crate with `#[unsafe(no_mangle)] pub extern "C" fn bui_app_main() { Application::new().run(...) }` (`platform/android/rust`) | `--rust CRATE` |
+| **Rust** | an ordinary `blenderui` app in a `staticlib` crate with `blenderui::android_main!(run);`, where `run` is the `fn()` a desktop `main` would call (`platform/android/rust`) | `--rust CRATE` |
 | **Lua** | an ordinary BUI Lua script, `assets/main.lua`, ending in `bui.open{root=...}` or `bui.Window(...)` + `bui.run()`; `require` finds your other `.lua` files and `bui.lua` in the APK | `--lua DIR` |
 | **JavaScript** | an ordinary `@blender-ui/native`, React, Vue or Svelte app (`.js`, `.jsx`, `.vue`, `.svelte`); it is bundled into one script (`bui bundle`, needs Bun) and runs on QuickJS (`bindings/rust/blenderui-qjs`, the engine `bui build` embeds), as `assets/main.js`; `console.log` goes to logcat (tag `bui-js`) | `--js ENTRY` |
 | **Dear ImGui** | an ordinary ImGui frame function in a C++ file with `bui_app_main` (`ImGui_ImplBUI_CreateApp` / `RunApp`; `platform/android/imgui_app.cpp`), plus `BK_window_wm(win, "touch_drag", 1, 0)` so a drag is ImGui's (sliders, window moves) | `--imgui [FILE]` |
@@ -42,7 +47,21 @@ when it is fetched, a frame costs O(visible rows)). The emulator runs it at abou
 
 For Rust the staticlib carries its own copy of the kit (`blenderui-sys` builds it for the target), so
 the app crate sets the kit's features itself (see its `Cargo.toml`: no GPU, ImGui or extra image
-formats).
+formats). The system libraries the staticlib needs (rustc's `native-static-libs`: `aaudio` for a
+crate that plays sound, ...) are linked into the shared library for it.
+
+`android_main!` writes the unmangled entry point (so the app has no `unsafe`) and, before the app
+runs:
+
+- gives the activity's JNI handles to `ndk-context`, which crates that call into Java read (cpal
+  lists sound devices through it; without it they panic);
+- sends stdout and stderr to logcat, panics included: `adb logcat -s bui`;
+- and the kit has pointed `HOME` at the app's files folder and `XDG_CACHE_HOME` / `TMPDIR` at its
+  cache folder, so `dirs::cache_dir()`, `dirs::home_dir()` and `std::env::temp_dir()` are folders the
+  app may write.
+
+A real app is SpotiTube-sized: a library crate shared with the desktop `main`, plus a small
+`staticlib` crate whose whole source is the `android_main!` line.
 
 ## Behavior
 
@@ -59,6 +78,10 @@ formats).
   touch in the 20 dp strip at the right edge of a custom or canvas node is the app's press and drag
   (a list's scrollbar thumb), so a huge list can be dragged to any place. Two fingers always scroll. `BK_window_wm(win, "touch_drag", 1, 0)` gives
   the drags of custom and canvas nodes to the app instead (a paint app); by default they scroll.
+- **Back.** The Back key is the key `Escape`. It closes a popup or leaves a text field first; a Rust
+  key listener that acts on it calls `app.prevent_default()` (C bindings: `BK_key_taken`), and only a
+  Back nothing took finishes the activity. An app with screens of its own walks back through them
+  this way.
 - **Keyboard.** The soft keyboard opens while a text field or area is being edited (through the input
   method manager: the activity's view is not a text editor, so `ANativeActivity_showSoftInput` is
   ignored by current Android). Keys arrive as key events (`KeyEvent.getUnicodeChar`), so typing,
@@ -80,7 +103,8 @@ formats).
 
 Inter is left out of the build (`BUI_NO_INTER`, 0.8 MB). The shell registers the system's fonts
 (`platform/android/fonts.c`: Roboto and Droid Sans Mono from `/system/fonts` as the families `sans` and
-`mono`). To use your own, call `BUI_text_add_font(family, flags, data, len)` with the font's bytes
+`mono`). Characters Roboto lacks (Hangul, kana, Han, Thai, Indic, symbols) come from the phone's Noto
+fonts in `/system/fonts`, by the per-glyph fallback every platform has. To use your own, call `BUI_text_add_font(family, flags, data, len)` with the font's bytes
 (from `BK_android_assets()` or a file) and select it with `BK_set_font(family)`, as on any platform.
 
 ## Size

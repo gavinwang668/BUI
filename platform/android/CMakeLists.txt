@@ -10,6 +10,7 @@
 set(BUI_ANDROID_APP "demo" CACHE STRING "demo, lua, rust or imgui")
 set(BUI_ANDROID_IMGUI_SRC "${CMAKE_CURRENT_SOURCE_DIR}/imgui_app.cpp" CACHE FILEPATH "the Dear ImGui app (BUI_ANDROID_APP=imgui): a .cpp defining bui_app_main")
 set(BUI_ANDROID_RUST_LIB "" CACHE FILEPATH "libXXX.a of the Rust app (BUI_ANDROID_APP=rust)")
+set(BUI_ANDROID_RUST_LINK "" CACHE STRING "system libraries the Rust app needs (names, ;-separated)")
 set(_glue "${CMAKE_ANDROID_NDK}/sources/android/native_app_glue")
 
 add_library(bui_app SHARED bui_android.c fonts.c ${_glue}/android_native_app_glue.c)
@@ -42,7 +43,8 @@ elseif(BUI_ANDROID_APP STREQUAL "rust")
   # kit is not linked again; only its headers (the shell and fonts.c use them) and libc++ are needed
   target_include_directories(bui_app PRIVATE ${BUI_SOURCE_DIR}/kit/include ${BUI_SOURCE_DIR}/gpu/include)
   set_target_properties(bui_app PROPERTIES LINKER_LANGUAGE CXX)
-  target_link_libraries(bui_app PRIVATE "${BUI_ANDROID_RUST_LIB}")
+  # the system libraries the staticlib needs (rustc's native-static-libs: aaudio for sound, ...)
+  target_link_libraries(bui_app PRIVATE "${BUI_ANDROID_RUST_LIB}" ${BUI_ANDROID_RUST_LINK})
 else()
   message(FATAL_ERROR "BUI_ANDROID_APP must be demo, lua, rust or imgui")
 endif()

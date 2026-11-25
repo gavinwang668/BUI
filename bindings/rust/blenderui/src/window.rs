@@ -395,6 +395,8 @@ pub struct App {
     real_clock: bool,
     globals: HashMap<TypeId, Box<dyn Any>>,
     pub(crate) propagate: bool,
+    /// A key listener acted on the key ([`App::prevent_default`]).
+    default_prevented: bool,
     /// Work sent from other threads ([`UiSender`]).
     remote: Option<(std::sync::mpsc::Sender<RemoteJob>, std::sync::mpsc::Receiver<RemoteJob>)>,
     /// Called when the user closes a window.
@@ -452,7 +454,7 @@ impl App {
     fn create(headless: bool, real_clock: bool) -> App {
         crate::motion::start_clock(real_clock);
         App { windows: Vec::new(), entities: Vec::new(), headless, real_clock, globals: HashMap::new(), propagate: true,
-              remote: None, close_hooks: Vec::new(), closed_later: None,
+              default_prevented: false, remote: None, close_hooks: Vec::new(), closed_later: None,
               activation_hooks: Vec::new(), notified: 0, shutdown_later: false }
     }
 
@@ -625,6 +627,13 @@ impl App {
     /// Stop the current event from reaching ancestors.
     pub fn stop_propagation(&mut self) {
         self.propagate = false;
+    }
+
+    /// In a key listener: the app acted on the key, so the system doesn't (as a browser's
+    /// `preventDefault`). On Android, Back is the key `Escape`: a listener that closes something on
+    /// it calls this, and only a Back nothing took finishes the app.
+    pub fn prevent_default(&mut self) {
+        self.default_prevented = true;
     }
 
     /// Activate the app (no-op: windows come to the front when shown).
@@ -2406,7 +2415,12 @@ impl Window {
                         "pageup" => -1.0,
                         _ => 0.0,
                     };
+                    app.default_prevented = false;
                     self.emit(app, target, &KeyDownEvent { keystroke: ks }, |l| l.key_down.iter().collect());
+                    if std::mem::take(&mut app.default_prevented) && !self.ctx.is_null() {
+                        // SAFETY: the live context; the kit is delivering this key (BK_key) now.
+                        unsafe { sys::BK_key_taken(self.ctx) };
+                    }
                     if page != 0.0 {
                         self.scroll_page(page);
                     }

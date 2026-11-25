@@ -8,6 +8,7 @@
     python platform/android/build.py --rust platform/android/rust   # a Rust app (a staticlib crate)
     python platform/android/build.py --js app.jsx        # a JavaScript app (React, Vue, Svelte): QuickJS + the bundle
     python platform/android/build.py --imgui [app.cpp]   # a Dear ImGui app (C++; the default is the demo in imgui_app.cpp)
+    python platform/android/build.py --rust app/android --label MyApp --package com.me.app --permission INTERNET
 
 ANDROID_HOME / ANDROID_SDK_ROOT (else the usual per-user SDK folder) locates the SDK; the NDK is
 the newest one in it (or ANDROID_NDK_HOME).
@@ -83,8 +84,22 @@ def staticlib(messages, manifest):
     return found
 
 
+def native_libs(rendered):
+    """The system libraries the staticlib needs, from rustc's note (`native-static-libs: -llog
+    -ldl ...`, rendered by cargo on stderr), as names for CMake: a staticlib doesn't carry them, so
+    the shared library links them."""
+    libs = []
+    for line in rendered.splitlines():
+        _, found, rest = line.partition("native-static-libs:")
+        if found:
+            libs = [w[2:] for w in rest.split() if w.startswith("-l")]
+    # in order, once each; Bionic's libc has pthread and rt in it, and the NDK has no stubs for them
+    return [lib for lib in dict.fromkeys(libs) if lib not in ("pthread", "rt")]
+
+
 def build_rust(crate, ndk, abi, make):
-    """cargo builds the app's staticlib (and, through blenderui-sys, the kit) for one ABI."""
+    """cargo builds the app's staticlib (and, through blenderui-sys, the kit) for one ABI; gives
+    the library and the system libraries it needs."""
     triple = RUST_TARGETS[abi]
     # the cmake crate reads the toolchain file from the environment; `make` is found on PATH. CC /
     # CXX / AR name the NDK's clang so the crate passes clang's flags, not the host compiler's
@@ -106,11 +121,14 @@ def build_rust(crate, ndk, abi, make):
     env.setdefault("LIBCLANG_PATH", llvm if os.name == "nt" else os.path.normpath(os.path.join(llvm, "..", "lib")))
     env.update(**{"BINDGEN_EXTRA_CLANG_ARGS_" + var: shlex.quote("--sysroot=" + sysroot.replace("\\", "/"))})
     manifest = os.path.abspath(os.path.join(crate, "Cargo.toml"))
-    cmd = ["cargo", "build", "--release", "--lib", "--target", triple, "--manifest-path", manifest,
-           "--message-format=json-render-diagnostics"]
+    # `cargo rustc`: the note flag reaches the app crate alone, so no dependency builds again
+    cmd = ["cargo", "rustc", "--release", "--lib", "--target", triple, "--manifest-path", manifest,
+           "--message-format=json-render-diagnostics", "--", "--print=native-static-libs"]
     print("+", " ".join(cmd))
-    done = subprocess.run(cmd, env=env, check=True, stdout=subprocess.PIPE, text=True)
-    return staticlib(done.stdout, manifest)
+    done = subprocess.run(cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+    sys.stderr.write(done.stderr)  # cargo's progress and the diagnostics, as they would have shown
+    done.check_returncode()
+    return staticlib(done.stdout, manifest), native_libs(done.stderr)
 
 
 def build_abi(ndk, abi, out, app_args, rust=None):
@@ -121,7 +139,9 @@ def build_abi(ndk, abi, out, app_args, rust=None):
     make = os.path.join(ndk, "prebuilt", host, "bin", "make" + exe)
     bdir = os.path.join(out, abi)
     if rust:
-        app_args = ["-DBUI_ANDROID_APP=rust", "-DBUI_ANDROID_RUST_LIB=" + build_rust(rust, ndk, abi, make).replace("\\", "/")]
+        lib, libs = build_rust(rust, ndk, abi, make)
+        app_args = ["-DBUI_ANDROID_APP=rust", "-DBUI_ANDROID_RUST_LIB=" + lib.replace("\\", "/"),
+                    "-DBUI_ANDROID_RUST_LINK=" + ";".join(libs)]
     args = ["cmake", "-S", ROOT, "-B", bdir, "-G", "Unix Makefiles",
             "-DCMAKE_MAKE_PROGRAM=" + make.replace("\\", "/"),
             "-DCMAKE_TOOLCHAIN_FILE=" + os.path.join(ndk, "build", "cmake", "android.toolchain.cmake").replace("\\", "/"),
@@ -144,14 +164,28 @@ def keystore(out):
     return path
 
 
-def apk(root_sdk, libs, out, assets):
+def manifest(out, package, label, permissions):
+    """The shell's AndroidManifest.xml with the app's package, name and permissions."""
+    with open(os.path.join(ROOT, "platform", "android", "AndroidManifest.xml"), encoding="utf-8") as f:
+        text = f.read()
+    text = text.replace('package="org.bui.app"', 'package="%s"' % package)
+    text = text.replace('android:label="BUI"', 'android:label="%s"' % label)
+    uses = "".join('    <uses-permission android:name="%s" />\n' % (p if "." in p else "android.permission." + p)
+                   for p in permissions)
+    text = text.replace("    <application", uses + "    <application", 1)
+    path = os.path.join(out, "AndroidManifest.xml")
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    return path
+
+
+def apk(root_sdk, libs, out, assets, app):
     tools = newest(os.path.join(root_sdk, "build-tools", "*"))
     jar = os.path.join(root_sdk, "platforms", "android-%d" % PLATFORM, "android.jar")
     exe = ".exe" if os.name == "nt" else ""
     bat = ".bat" if os.name == "nt" else ""
     base = os.path.join(out, "base.apk")
-    run([os.path.join(tools, "aapt2" + exe), "link", "--manifest",
-         os.path.join(ROOT, "platform", "android", "AndroidManifest.xml"), "-I", jar,
+    run([os.path.join(tools, "aapt2" + exe), "link", "--manifest", manifest(out, *app), "-I", jar,
          "--min-sdk-version", str(API), "--target-sdk-version", str(PLATFORM), "-o", base])
     raw = os.path.join(out, "unaligned.apk")
     with zipfile.ZipFile(base) as src, zipfile.ZipFile(raw, "w", zipfile.ZIP_DEFLATED) as dst:
@@ -165,7 +199,7 @@ def apk(root_sdk, libs, out, assets):
     # 4-byte alignment for the stored entries (resources.arsc); the libraries are deflated, so the
     # 16 KB page alignment of -P (build-tools 35 or newer) has nothing to align
     run([os.path.join(tools, "zipalign" + exe), "-f", "4", raw, aligned])
-    final = os.path.join(out, "bui.apk")
+    final = os.path.join(out, "".join(c for c in app[1].lower() if c.isalnum()) + ".apk")
     run([os.path.join(tools, "apksigner" + bat), "sign", "--ks", keystore(out), "--ks-pass", "pass:android",
          "--out", final, aligned])
     return final
@@ -176,6 +210,10 @@ def main():
     ap.add_argument("--abi", action="append", help="arm64-v8a, x86_64, armeabi-v7a (default: arm64-v8a and x86_64)")
     ap.add_argument("--out", default=os.path.join(ROOT, "build-android"))
     ap.add_argument("--install", action="store_true")
+    ap.add_argument("--package", default="org.bui.app", help="the app's id (default org.bui.app)")
+    ap.add_argument("--label", default="BUI", help="the app's name on the phone; also the APK's file name")
+    ap.add_argument("--permission", action="append", default=[],
+                    help="a permission the app uses: INTERNET, RECORD_AUDIO, ... (or a full name); repeat for more")
     ap.add_argument("--rust", metavar="CRATE", help="a Rust app: a staticlib crate that defines bui_app_main (platform/android/rust)")
     ap.add_argument("--lua", metavar="DIR", help="a Lua app: DIR/main.lua returns the root node; every *.lua in DIR is an asset")
     ap.add_argument("--js", metavar="ENTRY", help="a JavaScript app: ENTRY (.js, .jsx, .vue, .svelte) is bundled (bindings/node: bui bundle, needs Bun) and run on QuickJS")
@@ -208,14 +246,14 @@ def main():
     ndk = os.environ.get("ANDROID_NDK_HOME") or newest(os.path.join(root_sdk, "ndk", "*"))
     os.makedirs(a.out, exist_ok=True)
     libs = {abi: build_abi(ndk, abi, a.out, app_args, rust) for abi in (a.abi or ["arm64-v8a", "x86_64"])}
-    final = apk(root_sdk, libs, a.out, assets)
+    final = apk(root_sdk, libs, a.out, assets, (a.package, a.label, a.permission))
     for abi, lib in libs.items():
         print("%-12s %8.1f KB" % (abi, os.path.getsize(lib) / 1024))
     print("%s  %.1f KB" % (final, os.path.getsize(final) / 1024))
     if a.install:
         adb = shutil.which("adb") or os.path.join(root_sdk, "platform-tools", "adb")
         run([adb, "install", "-r", final])
-        run([adb, "shell", "am", "start", "-n", "org.bui.app/android.app.NativeActivity"])
+        run([adb, "shell", "am", "start", "-n", a.package + "/android.app.NativeActivity"])
 
 
 if __name__ == "__main__":

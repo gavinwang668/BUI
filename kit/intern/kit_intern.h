@@ -625,6 +625,7 @@ struct BKContext {
   int ungrab_x, ungrab_y; /* where a continuous drag puts the pointer back */
   int press_button;       /* the button that started the grab (1, 2, 3) */
   char key_held[32];      /* wmWindow.pie_event_type_last: the key down now, "" = none */
+  int key_taken;          /* the host acted on the key's raw event (BK_key_taken) */
   bool has_ungrab;
   bool has_skip;
   int pointer_x, pointer_y;
