@@ -1,0 +1,10 @@
+{
+  "install": {
+    "lang": "bash",
+    "code": "cargo add --git https://github.com/ppmpreetham/BUI blenderui bui-charts"
+  },
+  "first": {
+    "lang": "rust",
+    "code": "use blenderui::prelude::*;\nuse bui_charts::*;\n\n#[derive(Clone, PartialEq)]\nstruct Reading {\n    temperature: f64,\n    load: f64,\n}\n\n#[component]\nfn dashboard() {\n    let readings = use_signal(vec![\n        Reading { temperature: 18., load: 32. },\n        Reading { temperature: 24., load: 51. },\n        Reading { temperature: 31., load: 77. },\n    ]);\n    rsx! {\n        <div class=\"flex flex-col gap-4 p-4\">\n            <XYChart data={readings} class=\"h-72\">\n                <Series name=\"Load\" x={|r: &Reading| r.temperature} y={|r: &Reading| r.load} />\n            </XYChart>\n            <BarGauge data={readings} value={|r: &Reading| r.load} class=\"h-16\" />\n        </div>\n    }\n}"
+  }
+}

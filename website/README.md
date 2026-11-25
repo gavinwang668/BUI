@@ -3,7 +3,9 @@
 The documentation site for [BUI](https://github.com/ppmpreetham/BUI): an
 [Astro](https://astro.build) static site with MDX content, Tailwind CSS 4 and
 a little vanilla JavaScript (tabs, search, theme toggle, the landing-page
-demos). No framework runtime ships to the browser.
+demos). No framework runtime ships to the browser, except on `/charts`: the
+BUI Charts pages (ported from the Zopra Charts site) are React components,
+and their sidebar, search, filters, example list and live stage hydrate.
 
 **Writing docs?** Read [WRITING.md](WRITING.md): voice, page template,
 components, and the list of planned pages to claim.
@@ -40,7 +42,7 @@ SITE_URL=https://user.github.io BASE_PATH=/BUI pnpm build   # served under /BUI/
 
 `SITE_URL` is used for canonical links, Open Graph images and the sitemap
 (default: `https://bui.preetham.top`, see `astro.config.mjs`). Every internal
-link goes through `href()` in `src/lib/docs.ts`, so a sub-path deploy works.
+link goes through `href()` in `src/lib/href.ts`, so a sub-path deploy works.
 The host should serve `404.html` for unknown paths (most do by default).
 
 ### bui.preetham.top
@@ -85,11 +87,18 @@ website/
     components/landing/   the landing page sections and demos
     layouts/              Base (head, theme) and DocsLayout (sidebar, TOC, prev/next)
     lib/docs.ts           ordering, prev/next, links, last-updated dates
+    lib/href.ts           href(): site paths under the deploy's base (also used in the browser)
     lib/string-search.ts  Blender's fuzzy search, ported (docs search, landing demo)
     lib/shots.ts          finds light/dark screenshot pairs in public/images/shots/
     data/bench.ts         every benchmark number (charts and tables read it)
     components/charts/    BenchChart, BarChart, GroupedBarChart, LineChart, BenchTable
-    pages/                index (landing), docs/[...slug], search.json, 404
+    pages/                index (landing), docs/[...slug], charts/, search.json, 404
+    pages/charts/         /charts, /charts/all, /charts/which, /charts/domains, /charts/[slug]
+    layouts/ChartsLayout  the charts' shell (sidebar, chart search) around a /charts page
+    components/chart-docs/  the /charts pages and islands (React): stage, example list, grid, TOC
+    data/charts/          one .ts per chart (math, story, pitfalls ...), domains, intents, registry
+    data/charts/generated/  API and highlighted examples per chart, from scripts/gen-charts.mjs
+    styles/chart-docs.css the /charts code, API and KaTeX styles
     styles/global.css     design tokens, prose styles, the hatch
 ```
 
@@ -104,6 +113,24 @@ website/
   modification time before it's committed).
 - **Theme**: light and dark follow the system until the reader picks one with
   the toggle (stored in `localStorage` as `bui:theme`).
+
+## Charts (`/charts`)
+
+The pages read `src/data/charts/`. The registry, API sections and example code
+come from `addons/bui-charts` (its `docs/` and `examples/gallery/registry.rs`):
+
+```sh
+node scripts/gen-charts.mjs     # src/data/charts/generated/*.json (BUI_CHARTS=... for another checkout)
+node scripts/gen-loaders.mjs    # src/data/charts/loaders.ts, after adding a chart's .ts
+node scripts/chart-images.mjs ~/Pictures/bui-charts   # previews: the first example of each chart
+```
+
+The previews (`public/charts/images/*.webp`, 800 x 450) come from the
+gallery's screenshots, `NNN-<chart>-<example>.png` in gallery order. The live
+render on each chart page is `addons/bui-charts/web` (a blenderui-web app)
+built to `public/charts/wasm/bui-charts.wasm` and run by
+`bindings/rust/blenderui-web/js/bui-web.js`; without it the page shows the
+preview image instead.
 
 ## Design tokens
 

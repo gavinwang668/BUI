@@ -329,7 +329,7 @@ bool bk_shell_os_tray_update(BKTray *t, int changed)
   return ok; /* BK_TRAY_MENU: built when it opens */
 }
 
-bool bk_shell_os_notify(int id, const char *title, const char *body, const char *icon)
+bool bk_shell_os_notify(int nid, const char *title, const char *body, const char *icon)
 {
   (void)icon; /* both centers show the app's icon (an attachment would need a file) */
   @autoreleasepool {
@@ -341,7 +341,7 @@ bool bk_shell_os_notify(int id, const char *title, const char *body, const char 
       id content = [[[content_cls alloc] init] autorelease];
       [content setTitle:t];
       [content setBody:b];
-      id request = [request_cls requestWithIdentifier:[NSString stringWithFormat:@"bui-%d", id]
+      id request = [request_cls requestWithIdentifier:[NSString stringWithFormat:@"bui-%d", nid]
                                               content:content
                                               trigger:nil];
       [un addNotificationRequest:request withCompletionHandler:nil];
@@ -354,7 +354,7 @@ bool bk_shell_os_notify(int id, const char *title, const char *body, const char 
     id note = [[[NSClassFromString(@"NSUserNotification") alloc] init] autorelease];
     [note setTitle:t];
     [note setInformativeText:b];
-    [note setIdentifier:[NSString stringWithFormat:@"%d", id]];
+    [note setIdentifier:[NSString stringWithFormat:@"%d", nid]];
     [ns deliverNotification:note];
   }
   return true;

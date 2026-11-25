@@ -10,7 +10,7 @@ sources: ["docs/publishing.md", "docs/javascript.md", "pyproject.toml", ".github
 
 This page is for maintainers cutting a release. If you just want to use BUI, [Install BUI](../../start/installation/) is what you're after.
 
-BUI ships to four registries: **PyPI** (`blenderui`), **npm** (`@blender-ui/native` and `@blender-ui/react`), **crates.io** (the `blenderui` crates) and **LuaRocks** (`blenderui`). Each has its own version and its own steps.
+BUI ships to five registries: **PyPI** (`blenderui`), **npm** (`@blender-ui/native` and `@blender-ui/react`), **crates.io** (the `blenderui` crates), **LuaRocks** (`blenderui`) and **NuGet** (`BlenderUI`). Each has its own version and its own steps.
 
 ## At a glance
 
@@ -20,6 +20,7 @@ BUI ships to four registries: **PyPI** (`blenderui`), **npm** (`@blender-ui/nati
 | npm | `@blender-ui/native`, `@blender-ui/react` | Each package's `package.json` | `npm publish`, by hand, native first |
 | crates.io | `blenderui-tailwind`, `-macros`, `-sys`, `-paint`, `-table`, `-vlist`, `blenderui`, `blenderui-imgui` | `bindings/rust/Cargo.toml` (`[workspace.package]`) | `cargo publish`, by hand, after vendoring the C sources |
 | LuaRocks | `blenderui` | `bindings/lua/blenderui-<version>-1.rockspec` (its name, `version` and source `tag`) | Push a `v*` tag; `release.yml` uploads the rockspec |
+| NuGet | `BlenderUI` | `bindings/csharp/Directory.Build.props` (`<Version>`) | Push a `v*` tag; `release.yml` builds the native kit per platform, packs and pushes |
 
 ## PyPI
 
@@ -157,6 +158,17 @@ A published crate can't reach files outside itself, so `blenderui-sys` must carr
 CI (`ci.yml`, job `luarocks`) lints the rockspec, runs `luarocks make` on Linux and macOS and loads the installed module. On a tag, the `luarocks` job of `release.yml` uploads the rockspec (a version that is already there is skipped).
 
 One-time setup: a repository secret `LUAROCKS_API_KEY`, an API key made on luarocks.org (Settings > API keys) by the account that owns the package. The first upload creates the package.
+
+## NuGet
+
+The C# binding loads the kit as one shared library. `release.yml` builds it once per platform (`nuget-native`: linux-x64 on Ubuntu 22.04, osx-arm64, osx-x64, and win-x64 with MSVC). The `nuget` job then packs it as `runtimes/<rid>/native/`, the folder .NET takes native assets from, and pushes the package with `--skip-duplicate`. On Windows, the export list of `bui_kit.dll` is generated from the functions the binding imports (`bindings/csharp/CMakeLists.txt`).
+
+One-time setup:
+
+1. On nuget.org, open the user menu > **Trusted Publishing** and add a policy: this repository's owner and name, and the workflow file `release.yml` (the file name only).
+2. In the GitHub repository, add the secret `NUGET_USER`: the nuget.org profile name (not the e-mail address).
+
+The policy is bound to the repository's GitHub IDs at the first successful push. Each run trades the job's OIDC token for an API key that is valid for one hour.
 
 ## Known gaps before 1.0
 

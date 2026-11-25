@@ -1,6 +1,7 @@
 // @ts-check
 import { defineConfig } from "astro/config";
 import mdx from "@astrojs/mdx";
+import react from "@astrojs/react";
 import sitemap from "@astrojs/sitemap";
 import expressiveCode from "astro-expressive-code";
 import tailwindcss from "@tailwindcss/vite";
@@ -23,9 +24,12 @@ export default defineConfig({
   integrations: [
     expressiveCode(),
     mdx(),
+    react(), // the /charts pages
     sitemap(),
   ],
   vite: {
     plugins: [tailwindcss()],
+    // /charts imports the page side of blenderui-web (bindings/rust/blenderui-web/js) from the repository
+    server: { fs: { allow: [".."] } },
   },
 });

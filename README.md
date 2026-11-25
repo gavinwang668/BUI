@@ -9,7 +9,7 @@
     BUI
   </h1>
 
-**Blender's user interface, as a library you can use from Python, Rust, JavaScript (React, Svelte, Vue), C, C++, Go, Lua, Ruby, D and Dear ImGui.**
+**Blender's user interface, as a library you can use from Python, Rust, JavaScript (React, Svelte, Vue), C, C++, C#, Go, Lua, Ruby, D and Dear ImGui.**
 
 People spent decades building and optimizing Blender's GUI. It's battery and memory efficient, and super duper fast. We decoupled it, to give everyone a chance to build their own products with it. It supports multiple languages and frameworks, so you won't miss a beat!
 
@@ -196,6 +196,7 @@ all get the same widgets and interactions:
 | **Dear ImGui** from C++, C, Python or Rust                                                                                                               | The real Dear ImGui on BUI windows in Blender's theme, or a build where ImGui's widgets _are_ Blender's widgets                                 | Working               |
 | **C** (`BUI_kit.h`)                                                                                                                                      | The kit itself: nodes, widgets, windows                                                                                                         | Working               |
 | **D** (the `bui` DUB package in `bindings/d`)                                                                                                            | Idiomatic D wrappers, the complete raw C API and an HTML/CSS/RSX authoring layer                                                                                                | Working               |
+| **C#** (the `Bui` assembly in `bindings/csharp`): `Node`, `Frame`, `Button`, `Context`, `Window` | C# components over every `BK_*` function, generated from `BUI_kit.h` | Partial |
 | **Go**: the kit's nodes (`bindings/go/bui`), or [MyGo](https://github.com/egoist/mygo)-style views (`ui.Column(c).Children(...)`, `ui.Checkbox(c, &v, "Sync")`) | Blender's widgets from Go, with a headless `Tester` for `go test` | Working |
 | **Ruby** (the `blenderui` gem in `bindings/ruby`) | A C extension over the kit (no FFI): nodes, windows and menus, interfaces built from blocks, headless tests | Working |
 | **Lua** 5.4 (`luarocks install blenderui`, or the `bui-lua` host in `bindings/lua`) | The kit's nodes, widgets and windows as a native Lua module; the same scripts run as Android apps | Working |
@@ -1665,6 +1666,7 @@ All 26 run headless (`bui-lua --headless app.lua`) for CI and documentation scre
 | [D](bindings/d/README.md)                          | DUB package: raw kit declarations, D wrappers, HTML/CSS/RSX, ownership, examples and the integration suite                                         |
 | [Go](bindings/go/README.md) | cgo module: the kit's nodes, windows and menus in `bui`, MyGo-style views and a headless `Tester` in `ui` |
 | [Ruby](bindings/ruby/README.md) | C extension gem: the kit's nodes, windows, menus, trees and images, `BUI::Builder` blocks, headless tests |
+| [C#](bindings/csharp/README.md), [docs/csharp.md](docs/csharp.md) | The `Bui` assembly (NuGet `BlenderUI`): every `BK_*` function generated from `BUI_kit.h`, components, windows, headless rendering |
 | [Editor support](addons/bui-vscode/README.md)      | VS Code (`addons/bui-vscode`) and Zed (`addons/bui-zed`) extensions for `rsx!`: Tailwind-aware highlighting, snippets, class completion |
 | [Integration](INTEGRATION.md)                      | Embedding BUI drawing in C, C++, Qt or PySide hosts                                                                                  |
 | [Architecture](ARCHITECTURE.md)                    | Modules and what was taken from Blender                                                                                              |
@@ -1997,6 +1999,7 @@ py bindings/python/bench/tk_canvas_bench.py 3000 one    # move one
 | Rust (`cargo add blenderui`) | Works                            | Works                                                    | Works                  | Works (`android_main!`)                   | Works (`blenderui-web`, `wasm32-wasip1`) |
 | JavaScript / React           | Works: prebuilt on npm           | Works: prebuilt on npm (glibc 2.35+); native X11 windows | Headless (see below)   | Works: React, Vue, Svelte on QuickJS      | Not yet                                |
 | C, C++, Dear ImGui           | Works                            | Works                                                    | Works                  | Works                                     | Not yet (Rust apps only)               |
+| C# (.NET 8+)                 | Works                            | Works                                                    | Works                  | Not yet                                   | Not yet                                |
 | Lua, Ruby                    | Works                            | Works                                                    | Works                  | Lua works                                 | Not yet                                |
 | Go, D                        | Works                            | Works                                                    | Untested               | Not yet                                   | Not yet                                |
 | Renderer                     | CPU raster, or GPU (Direct3D 11; 12 opt-in) | CPU raster, or GPU (OpenGL 3.3)               | CPU raster             | CPU raster                                | CPU raster                             |
@@ -2030,6 +2033,7 @@ and on an NVIDIA GPU.
 | `@blender-ui/native`, `@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue` on npm | Windows x64, Linux x64 (glibc 2.35+), macOS arm64 and x64        | Node.js 18+ (22.15+ for Svelte and Vue) or Bun. Elsewhere, build the addon from source. |
 | `blenderui` on LuaRocks                                                                   | Linux, macOS (Windows untested)                                  | Lua 5.4; builds the kit from the release tag (CMake and a C and C++20 compiler).        |
 | Go (`bindings/go`), Ruby (`bindings/ruby`), D (`bindings/d`)                              | Windows, Linux (macOS for Ruby)                                  | From this repository for now; they build the kit with CMake.                            |
+| `BlenderUI` on NuGet                                                                      | Windows x64, Linux x64, macOS arm64 and x64                      | .NET 8+; the native kit ships in the package. Published from the next release.        |
 | C and C++ (CMake)                                                                         | Windows, Linux, macOS                                            | CMake 3.20+, a C11 and C++20 compiler.                                                  |
 
 ## 37. Environment variables
@@ -2086,6 +2090,7 @@ python examples/components_demo.py
 (cd bindings/d && dub run --config=test)    # D: raw kit, wrappers, HTML/CSS/RSX, menus, canvas, trees
 (cd bindings/go && go generate ./bui && go test ./...)   # Go: the kit, MyGo-style views, headless
 (cd bindings/ruby && bundle install && rake test)   # Ruby: the kit, blocks, events, the GC, headless
+(cd bindings/csharp && dotnet run --project tests/Bui.Tests)   # C#: needs the shared kit (-DBUI_BUILD_CSHARP_BINDINGS=ON)
 ```
 
 | Option                      | Default                  | What it does                                                                                           |
@@ -2143,6 +2148,7 @@ How each was counted: [Coverage](https://bui.preetham.top/docs/reference/coverag
 | `bindings/d/`                                           | The `bui` DUB package: raw `extern(C)` declarations, D wrappers, HTML/CSS/RSX, examples and the integration suite                                                                                                                                                                                                                                                                                                                                             |
 | `bindings/go/` | The Go module: `bui` (the kit over cgo), `ui` (MyGo-style views and `Tester`), the kit builder `go generate` runs, examples |
 | `bindings/ruby/` | The `blenderui` gem: the C extension (`ext/bui`), the Ruby layer and builder (`lib`), examples and tests |
+| `bindings/csharp/` | The C# binding: `Bui` (interop generated by ClangSharp, components, windows), the shared kit's CMake, examples, tests and the cells benchmark |
 | `bindings/imgui/`                                       | Dear ImGui (vendored), the BUI backend, Blender style, the C API and its generator, the Blender-widgets build                                                                                                                                                                                                                                                                                                                                   |
 | `backends/qt/`                                          | C++ Qt/QPainter render-sink backend                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `bench/`                                                | The start time and battery benchmark; `bench/images/` (decoders, thumbnail grid)                                                                                                                                                                                                                                                                                                                                                                |
@@ -2179,6 +2185,7 @@ How each was counted: [Coverage](https://bui.preetham.top/docs/reference/coverag
 | [`bindings/d/examples/headless.d`](bindings/d/examples/headless.d)                                                                                            | D: render, click and inspect pixels without a window                                                                                                                                                                                                            |
 | [`bindings/ruby/examples/counter.rb`](bindings/ruby/examples/counter.rb), [`todos.rb`](bindings/ruby/examples/todos.rb), [`hello.rb`](bindings/ruby/examples/hello.rb), [`headless.rb`](bindings/ruby/examples/headless.rb) | Ruby: a counter built from blocks, a to-do list with rows added and removed and a clock from another thread, the kit's nodes in a window and without one |
 | [`bindings/d/examples/rsx_page.d`](bindings/d/examples/rsx_page.d) | D: an HTML/CSS page from `rsx!` in a native window |
+| [`bindings/csharp/examples/Hello`](bindings/csharp/examples/Hello/Program.cs), [`Widgets`](bindings/csharp/examples/Widgets/Program.cs) | C#: a button in a native window; Blender's widgets with their events |
 | [`bindings/go/examples/counter`](bindings/go/examples/counter/main.go), [`todos`](bindings/go/examples/todos/main.go) | Go: MyGo-style views: a counter with its test, a to-do list with keyed rows and a panel |
 | [`bindings/go/examples/hello`](bindings/go/examples/hello/main.go), [`headless`](bindings/go/examples/headless/main.go) | Go: the kit's nodes in a window, and without one |
 | Lua (27 in [`bindings/lua/examples/`](bindings/lua/examples/))                                                                                               | 27 examples covering every BUI widget type: `hello.lua`, `counter.lua`, `forms.lua`, `gallery.lua`, `split.lua`, `grid.lua`, `box.lua`, `dashboard.lua`, `textarea.lua`, `enum.lua`, `listview.lua`, `data_table.lua`, `menus.lua`, `menubar.lua`, `popover.lua`, `color_picker.lua`, `ramp.lua`, `curve.lua`, `histogram.lua`, `canvas.lua`, `anim.lua`, `todos.lua`, `filebrowser_demo.lua`, `image_viewer.lua`, `editor_screenshot.lua`, `lua_table_editor.lua`, `ph_nutrients.lua` |
@@ -2242,6 +2249,7 @@ ship. The tables below have the details.
 | Dear ImGui         | The real Dear ImGui 1.93 on BUI (CPU, Direct3D 11, OpenGL), Blender theme and Inter; C++ / C (399/399 functions) / Python and Rust (366–385/399); the Blender-widgets build                                                                                                                                                                                                                                                                                                                                                     |
 | Go                 | `bindings/go`: the kit over cgo (nodes, contexts, windows, menus, canvas, trees, themes) and MyGo-style views (`ui.Column(c).Children(...)`, controls bound to pointers, `Clicked` / `Changed`, keys, rows and columns, a headless `Tester`) |
 | Ruby               | `bindings/ruby`: the `blenderui` gem, a C extension over the kit (nodes, properties, events, menus, trees, canvas, images, themes, native windows and the loop, with other threads running while it waits), `BUI::Builder` blocks, headless tests, checked with AddressSanitizer |
+| C#                 | `bindings/csharp`: the `Bui` assembly over every `BK_*` function (generated from `BUI_kit.h`), with `Node`, `Frame`, `Button`, `Label`, `Panel`, `Canvas`, `Context`, `Window` and `Raster`; headless tests on Windows, Linux and macOS. Partial: components cover the common widgets |
 | Rendering          | Software raster (parallel, damage-tracked), GPU renderer (Direct3D 11 or 12 on Windows, OpenGL 3.3 on Linux), textured meshes, portable text engine (FreeType, as in Blender)                                                                                                                                                                                                                                                                                                                                                         |
 | JavaScript / React | `@blender-ui/native`: a DOM-like API over napi-rs, with its own UI thread, only changes crossing the boundary, vsync-paced `requestAnimationFrame` and signals. `@blender-ui/react`: a React 19.3 renderer whose hooks (`useState`, `useMemo`, `useEffect` ...) hold signals that update nodes without re-renders. Both on Node.js and Bun, with headless testing. `bui build` makes standalone executables: about 7 MB with the embedded QuickJS runtime, or Bun's with `--bun` ([guide](docs/javascript.md))                  |
 | Packaging          | [`blenderui` on PyPI](https://pypi.org/project/blenderui/), with a CI workflow for wheels on all platforms (Linux wheels with the native X11 host); [`blenderui` on crates.io](https://crates.io/crates/blenderui); [`@blender-ui/react`](https://www.npmjs.com/package/@blender-ui/react) and [`@blender-ui/native`](https://www.npmjs.com/package/@blender-ui/native) on npm                                                                                                                                                  |
@@ -2351,7 +2359,9 @@ headless there. Python can always fall back to the Tk window
 </details>
 
 <details>
-<summary><b>Can I use BUI from Vue, Angular, Ruby, Go or Lua?</b></summary>
+<summary><b>Can I use BUI from Vue, Angular, Ruby, Go, Lua or C#?</b></summary>
+C# is supported: the <code>Bui</code> assembly in <code>bindings/csharp</code>
+(NuGet <code>BlenderUI</code>; <a href="docs/csharp.md">docs/csharp.md</a>).
 Ruby is supported: the <code>blenderui</code> gem in <code>bindings/ruby</code>
 is a C extension over the kit (<a href="bindings/ruby/README.md">its README</a>).
 Lua is too: <code>cmake -DBUI_BUILD_LUA_BINDINGS=ON</code> builds
@@ -2447,7 +2457,7 @@ now. Read [CONTRIBUTING.md](CONTRIBUTING.md) first, and please follow the
 
 Releases go to PyPI (`blenderui`, wheels built by CI on a `v*` tag), crates.io
 (the nine Rust crates, in dependency order), npm (`@blender-ui/native` and its platform packages,
-`@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue`) and LuaRocks (`blenderui`). The steps are
+`@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue`), LuaRocks (`blenderui`) and NuGet (`BlenderUI`). The steps are
 in [docs/publishing.md](docs/publishing.md).
 
 ## 45. License and credits

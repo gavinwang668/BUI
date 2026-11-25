@@ -25,13 +25,8 @@ static const GUID k_IID_IDXGIFactory6 = {
 
 IDXGIAdapter *bui_dx_preferred_adapter(void)
 {
-  const char *pref = getenv("BUI_GPU_ADAPTER");
-  if (!pref || !pref[0] || strcmp(pref, "default") == 0) {
-    return NULL;
-  }
-  if (strcmp(pref, "high-performance") != 0) {
-    bui_gpu_fail("BUI_GPU_ADAPTER: expected \"high-performance\" or \"default\"", 0);
-    return NULL;
+  if (BUI_gpu_adapter() != BUI_GPU_ADAPTER_HIGH_PERFORMANCE) {
+    return NULL; /* the display's adapter, the first DXGI lists */
   }
   typedef HRESULT(WINAPI * FactoryFn)(REFIID, void **);
   HMODULE dxgi = LoadLibraryW(L"dxgi.dll");

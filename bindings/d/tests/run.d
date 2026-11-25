@@ -31,6 +31,7 @@ void main() {
     testMenus();
     testCustom();
     testTouch();
+    testCollected();
     testHostErrors();
     testTheme();
     testCss();
@@ -431,6 +432,29 @@ private void testTouch() {
     raster.free();
     context.free();
     root.free();
+}
+
+/* Wrappers the garbage collector finalizes: their native nodes and contexts are queued and freed at
+ * the next safe point, never from the finalizer, which must reach no other D object (the crash
+ * this guards against was a finalizer walking a handler store the GC had already freed). */
+private void testCollected() {
+    foreach (i; 0 .. 20) {
+        auto root = new Node("column");
+        root.add(new Node("button"));
+        auto custom = new Node("custom");
+        setCustom(custom, CustomHandlers((Node, CustomEvent) { return 0; }, null, null, null, 10, 10));
+        root.add(custom);
+        root.on(BK_EV_CLICK, (NodeEvent) {});
+        auto context = new Context(root);
+        auto raster = new Raster(64, 64);
+        context.render(raster, true);
+        raster.free();
+        new Node("label"); // detached, never freed by hand
+    }
+    GC.collect();
+    auto after = new Node("frame"); // frees what the collection queued
+    check(after.handle !is null, "collected: a node after a collection");
+    after.free();
 }
 
 private void testHostErrors() {
