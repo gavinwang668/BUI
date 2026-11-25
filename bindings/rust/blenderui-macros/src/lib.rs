@@ -93,9 +93,14 @@ fn expand(input: TokenStream) -> Result<String, String> {
         if name.is_empty() {
             return Err(format!("css!: missing property name in `{part}`"));
         }
+        // `!important`: `!` and `important` may have whitespace between them and any case (the
+        // run-time parser, `css::strip_important`, does the same; a proc macro cannot share it)
         let mut value = value.trim();
         let mut important = false;
-        if let Some(v) = value.strip_suffix("!important") {
+        if let Some(v) = value.len().checked_sub(9)
+            .filter(|&n| value.is_char_boundary(n) && value[n..].eq_ignore_ascii_case("important"))
+            .and_then(|n| value[..n].trim_end().strip_suffix('!'))
+        {
             value = v.trim_end();
             important = true;
         }

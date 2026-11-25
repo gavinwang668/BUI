@@ -3,7 +3,7 @@
 //! margin and gap, with `calc()`, `min()`, `max()` and `clamp()` as the custom
 //! math. Every test checks exact boxes against numbers worked out by hand (or by
 //! a small independent formula). `scene_timings` prints the layout time per node
-//! for the same scenes: `cargo test --release --test pangui_layout -- --ignored --nocapture`.
+//! for the same scenes: `cargo test --release --test suite pangui_layout:: -- --ignored --nocapture`.
 
 use blenderui::prelude::*;
 use std::time::Instant;

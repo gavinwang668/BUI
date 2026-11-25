@@ -4,7 +4,7 @@ description: Run your Rust UI without a window, click and type into it from a te
 section: Rust
 order: 80
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/headless.rs", "bindings/rust/blenderui/tests/animation.rs", "bindings/rust/blenderui/tests/rsx.rs", "bindings/rust/blenderui/tests/hooks.rs", "bindings/rust/blenderui/tests/parity.rs", "bindings/rust/blenderui/examples/hello.rs"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/suite/headless.rs", "bindings/rust/blenderui/tests/suite/animation.rs", "bindings/rust/blenderui/tests/suite/rsx.rs", "bindings/rust/blenderui/tests/suite/hooks.rs", "bindings/rust/blenderui/tests/suite/parity.rs", "bindings/rust/blenderui/examples/hello.rs"]
 ---
 
 The best UI bug is the one your test catches before anyone sees it. **BUI can run your whole app off-screen**: same code, same layout, same pixels, no window. Your tests click buttons, type text, scroll lists and check the result, in plain `cargo test`, on CI machines with no display.
@@ -178,19 +178,19 @@ BUI's Rust tests are a good library of working examples. From `bindings/rust`:
 
 ```sh
 cargo test                                  # everything
-cargo test --test headless                  # layout, painting and input
-cargo test --test parity -- --nocapture     # print the HTML and CSS coverage report
+cargo test --test suite headless::          # layout, painting and input
+cargo test --test suite parity:: -- --nocapture  # print the HTML and CSS coverage report
 ```
 
 | File | What it shows |
 | --- | --- |
-| `tests/headless.rs` | Layout, clicks, hover, stylesheets, tables, the canvas painter, incremental frames |
-| `tests/rsx.rs` | `rsx!` control flow, variant attributes, Tailwind attributes |
-| `tests/hooks.rs` | Hooks, context, keys and optional props |
-| `tests/animation.rs` | Keyframes, fill modes, easing, transitions and the virtual clock |
-| `tests/effects.rs` | Filters, transforms, clip paths, masks, blend modes, scroll snap, Blender components |
-| `tests/basic_css.rs`, `tests/modern_css.rs` | Borders, counters, `styled`, variables, grid areas, selectors, at-rules |
-| `tests/parity.rs` | The coverage numbers |
+| `tests/suite/headless.rs` | Layout, clicks, hover, stylesheets, tables, the canvas painter, incremental frames |
+| `tests/suite/rsx.rs` | `rsx!` control flow, variant attributes, Tailwind attributes |
+| `tests/suite/hooks.rs` | Hooks, context, keys and optional props |
+| `tests/suite/animation.rs` | Keyframes, fill modes, easing, transitions and the virtual clock |
+| `tests/suite/effects.rs` | Filters, transforms, clip paths, masks, blend modes, scroll snap, Blender components |
+| `tests/suite/basic_css.rs`, `tests/suite/modern_css.rs` | Borders, counters, `styled`, variables, grid areas, selectors, at-rules |
+| `tests/suite/parity.rs` | The coverage numbers |
 
 <Callout type="joke">
 Headless mode: all of the UI, none of the window. Like rendering with the viewport set to wireframe and the monitor switched off.

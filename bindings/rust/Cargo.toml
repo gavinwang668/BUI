@@ -12,6 +12,14 @@ homepage = "https://bui.preetham.top"
 authors = ["BUI contributors"]
 rust-version = "1.88"
 
+# Each test and example links the whole kit: full debug info made each one's .pdb ~290 MB.
+# Line tables keep file:line in backtraces and panics.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
+
 # Shipped binaries (bindings/node/scripts/build.js: the Node addon and the
 # QuickJS runtime): whole-program LTO in one codegen unit. bui-runtime.exe
 # measured 7.56 MB with `release`, 7.09 MB with this (Windows, MSVC).

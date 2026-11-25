@@ -3,6 +3,12 @@
 
 use blenderui::prelude::*;
 
+/// Boxes at y = 70, 80, 90 (x < 10) that follow the theme's mode.
+const LIGHT_DARK: &str = "#ld { background: light-dark(#00ff00, #ff0000) }
+    #sys { background: Canvas }
+    #mq { background: #ff0000 }
+    @media (prefers-color-scheme: light) { #mq { background: #00ff00 } }";
+
 struct Page;
 
 impl Render for Page {
@@ -11,6 +17,10 @@ impl Render for Page {
             .m_0()
             .child(div().id("themed").styled().h(px(40.0)).child(pre().id("pre").child("x")))
             .child(div().id("plain").h(px(20.0)))
+            .child(style().child(LIGHT_DARK))
+            .child(div().id("ld").w(px(10.0)).h(px(10.0)))
+            .child(div().id("sys").w(px(10.0)).h(px(10.0)))
+            .child(div().id("mq").w(px(10.0)).h(px(10.0)))
     }
 }
 
@@ -18,7 +28,7 @@ fn draw(cx: &mut App) -> (usize, usize, Vec<u32>) {
     let opts = WindowOptions {
         window_bounds: Some(WindowBounds::Windowed(Bounds {
             origin: point(px(0.0), px(0.0)),
-            size: size(px(200.0), px(80.0)),
+            size: size(px(200.0), px(100.0)),
         })),
         ..Default::default()
     };
@@ -50,16 +60,36 @@ fn dark_and_light_themes() {
         let dark = draw(cx);
         assert_eq!(at(&dark, 190.0, 38.0), 0x303030, "styled: Blender's dark background");
         assert_eq!(at(&dark, 190.0, 70.0), 0xffffff, "plain HTML stays white");
+        assert_eq!((at(&dark, 5.0, 75.0), at(&dark, 5.0, 85.0), at(&dark, 5.0, 95.0)), (0xff0000, 0x282828, 0xff0000),
+                   "dark: light-dark() takes its dark color, Canvas is dark, prefers-color-scheme is dark");
     });
     Application::headless().theme("light").run(|cx| {
         assert_eq!(blenderui::theme_name(), "light");
         let light = draw(cx);
         assert_eq!(at(&light, 190.0, 38.0), 0xb3b3b3, "styled: Blender_Light.xml's background");
         assert_eq!(at(&light, 190.0, 70.0), 0xffffff, "plain HTML stays white");
+        assert_eq!((at(&light, 5.0, 75.0), at(&light, 5.0, 85.0), at(&light, 5.0, 95.0)), (0x00ff00, 0xffffff, 0x00ff00),
+                   "light: the light color, a light Canvas, prefers-color-scheme: light");
     });
     assert!(blenderui::set_theme("dark"));
     Application::headless().run(|cx| {
         let again = draw(cx);
         assert_eq!(at(&again, 190.0, 38.0), 0x303030);
+    });
+    // switching while a window is open: its cached styles follow the new mode
+    Application::headless().run(|cx| {
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(200.0), px(100.0)),
+            })),
+            ..Default::default()
+        };
+        let win = cx.open_window(opts, |_, cx| cx.new(|_| Page)).unwrap();
+        assert_eq!(at(&cx.draw(win.id), 5.0, 75.0), 0xff0000);
+        assert!(blenderui::set_theme("light"));
+        assert_eq!(at(&cx.draw(win.id), 5.0, 75.0), 0x00ff00, "restyled in the new mode");
+        assert!(blenderui::set_theme("dark"));
+        assert_eq!(at(&cx.draw(win.id), 5.0, 75.0), 0xff0000);
     });
 }

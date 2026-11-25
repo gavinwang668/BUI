@@ -4,7 +4,7 @@ description: Give components state, derived values, effects and shared context, 
 section: Rust
 order: 20
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/hooks.rs", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui/tests/hooks.rs", "CHANGELOG.md"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/hooks.rs", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui/tests/suite/hooks.rs", "CHANGELOG.md"]
 ---
 
 State is what makes a UI feel alive: a counter that counts, a panel that remembers it's open. **Hooks give a component its own state**, and BUI re-renders the window whenever that state changes. You don't pass `cx` around, you don't wrap anything in `Rc<RefCell<…>>`, and you can write them in the style you know from Leptos or zopra, or with explicit dependency lists.
@@ -227,7 +227,7 @@ rsx! {
 }
 ```
 
-The repository's test (`tests/hooks.rs`) checks both cases: with keys, removing `"a"` leaves `"b"`'s clicks with `"b"`; without keys, `"c"` inherits them. Nested keys combine, so a keyed row inside a keyed list works as you'd expect.
+The repository's test (`tests/suite/hooks.rs`) checks both cases: with keys, removing `"a"` leaves `"b"`'s clicks with `"b"`; without keys, `"c"` inherits them. Nested keys combine, so a keyed row inside a keyed list works as you'd expect.
 
 ## Lifetimes and cost
 

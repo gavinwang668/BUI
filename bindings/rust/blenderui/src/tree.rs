@@ -1,5 +1,5 @@
 //! The layout tree: taffy's algorithms (block with floats, flexbox, grid,
-//! out-of-flow positioning, rounding) over our own node storage.
+//! out-of-flow positioning) over our own node storage.
 //!
 //! taffy's `TaffyTree` resolves every `calc()` to 0; this tree resolves
 //! them (`crate::calc`), so `width: calc(100% - 2rem)` and friends work. It
@@ -9,13 +9,13 @@
 
 use taffy::compute::{
     compute_block_layout, compute_cached_layout, compute_flexbox_layout, compute_grid_layout,
-    compute_hidden_layout, compute_oof_layout, compute_root_layout, round_layout, BlockContext,
+    compute_hidden_layout, compute_oof_layout, compute_root_layout, BlockContext,
 };
 use taffy::prelude::*;
 use taffy::tree::{Cache, DetailedLayoutInfo, Layout, LayoutInput, LayoutOutput, RunMode};
 use taffy::{
     CacheTree, DetailedGridInfo, LayoutBlockContainer, LayoutContainingBlock, LayoutFlexboxContainer,
-    LayoutGridContainer, LayoutPartialTree, RoundTree, TraversePartialTree, TraverseTree,
+    LayoutGridContainer, LayoutPartialTree, TraversePartialTree, TraverseTree,
 };
 
 struct Node<C> {
@@ -25,7 +25,6 @@ struct Node<C> {
     hoisted: Vec<NodeId>,
     cache: Cache,
     unrounded: Layout,
-    layout: Layout,
     detail: DetailedLayoutInfo,
     live: bool,
 }
@@ -62,7 +61,6 @@ impl<C> LayoutTree<C> {
             hoisted: Vec::new(),
             cache: Cache::new(),
             unrounded: Layout::new(),
-            layout: Layout::new(),
             detail: DetailedLayoutInfo::None,
             live: true,
         };
@@ -178,9 +176,10 @@ impl<C> LayoutTree<C> {
         self.nodes[ix(id)].cache.clear();
     }
 
-    /// The final (rounded) layout of a node.
+    /// The layout of a node, in fractional pixels as browsers lay out (paint snaps box edges to
+    /// device pixels: `Item::snap` in `paint.rs`).
     pub fn layout(&self, id: NodeId) -> &Layout {
-        &self.nodes[ix(id)].layout
+        &self.nodes[ix(id)].unrounded
     }
 
     /// Lay out the tree under `root`; `measure` sizes leaves that carry a context.
@@ -190,7 +189,6 @@ impl<C> LayoutTree<C> {
     {
         let mut view = View { t: self, measure };
         compute_root_layout(&mut view, root, available);
-        round_layout(&mut view, root);
     }
 }
 
@@ -207,7 +205,7 @@ where
     fn child_layout(&mut self, id: NodeId, inputs: LayoutInput, block: Option<&mut BlockContext<'_>>)
         -> LayoutOutput {
         if inputs.run_mode == RunMode::PerformHiddenLayout {
-            self.t.nodes[ix(id)].layout = Layout::with_order(0);
+            self.t.nodes[ix(id)].unrounded = Layout::with_order(0);
             return compute_hidden_layout(self, id);
         }
         compute_cached_layout(self, id, inputs, |tree, id, inputs| {
@@ -405,37 +403,6 @@ where
     #[inline(always)]
     fn set_detailed_grid_info(&mut self, id: NodeId, info: DetailedGridInfo) {
         self.t.nodes[ix(id)].detail = DetailedLayoutInfo::Grid(Box::new(info));
-    }
-}
-
-impl<C, M> RoundTree for View<'_, C, M>
-where
-    M: FnMut(Size<Option<f32>>, Size<AvailableSpace>, &C) -> Size<f32>,
-{
-    #[inline(always)]
-    fn get_unrounded_layout(&self, id: NodeId) -> Layout {
-        self.t.nodes[ix(id)].unrounded
-    }
-
-    #[inline(always)]
-    fn set_final_layout(&mut self, id: NodeId, layout: &Layout) {
-        self.t.nodes[ix(id)].layout = *layout;
-    }
-
-    #[inline(always)]
-    fn is_out_of_flow(&self, id: NodeId) -> bool {
-        let s = self.t.style(id);
-        s.position.is_out_of_flow() && s.display != Display::None
-    }
-
-    #[inline(always)]
-    fn hoisted_child_count(&self, id: NodeId) -> usize {
-        self.t.nodes[ix(id)].hoisted.len()
-    }
-
-    #[inline(always)]
-    fn get_hoisted_child_id(&self, id: NodeId, k: usize) -> NodeId {
-        self.t.nodes[ix(id)].hoisted[k]
     }
 }
 

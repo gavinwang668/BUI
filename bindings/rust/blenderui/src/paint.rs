@@ -317,6 +317,9 @@ struct Item {
     clip: Option<Bounds<f32>>,
     /// Its element has `pointer-events: none`: the pointer goes through it.
     through: bool,
+    /// A CSS box's rectangle (background, border, image): its edges snap to device pixels, as
+    /// browsers paint boxes laid out at fractional positions.
+    snap: bool,
 }
 
 /// Draws into a canvas display list, in logical pixels.
@@ -335,6 +338,8 @@ pub struct Painter {
     clip: Option<Bounds<f32>>,
     /// The box being painted has `pointer-events: none`.
     through: bool,
+    /// What is being painted is a CSS box (not a canvas's own drawing): see `Item::snap`.
+    pub(crate) snap: bool,
     opacity: f32,
     /// Retained painting (frames where only moving values changed): each
     /// box's items (start, end; u32::MAX when it painted none), each item's
@@ -499,6 +504,7 @@ impl Painter {
                 _ => {}
             }
             it.clip = clip_through(it.clip, m, outer);
+            it.snap = false; // a moved, scaled or turned box: its corners are not a pixel grid's
         }
     }
 
@@ -560,7 +566,7 @@ impl Painter {
             Kind::Oval { outline, width } => Kind::Oval { outline: outline.opacity(self.opacity), width },
             k => k,
         };
-        self.items.push(Item { kind, coords, fill, clip: self.clip, through: self.through });
+        self.items.push(Item { kind, coords, fill, clip: self.clip, through: self.through, snap: self.snap });
     }
 
     fn corners(b: Bounds<f32>) -> Coords {
@@ -831,9 +837,21 @@ impl Painter {
                 }
             }
         }
+        // a CSS box laid out at fractional positions: each edge on its nearest device pixel (so
+        // neighbours still meet), not blended across two
+        let snap = it.snap && matches!(it.kind, Kind::Rect { .. } | Kind::Image(_) | Kind::File { .. } | Kind::Video(..));
+        if snap {
+            coords.iter_mut().for_each(|v| *v = v.round());
+        }
         if let Some(c) = it.clip {
             ci.clip_on = 1;
-            ci.clip = [c.origin.x * scale, c.origin.y * scale, c.size.width * scale, c.size.height * scale];
+            let (x, y) = (c.origin.x * scale, c.origin.y * scale);
+            let (r, b) = (x + c.size.width * scale, y + c.size.height * scale);
+            ci.clip = if snap {
+                [x.round(), y.round(), r.round() - x.round(), b.round() - y.round()]
+            } else {
+                [x, y, r - x, b - y]
+            };
         }
         ci.ncoords = coords.len() as i32;
         Some(ci)
@@ -990,7 +1008,7 @@ fn border_widths(c: &Computed, w: f32) -> [f32; 4] {
 }
 
 fn radius_px(c: &Computed, b: Bounds<f32>, vp: (f32, f32)) -> f32 {
-    let u = Units { font_size: c.font_size, viewport: vp };
+    let u = c.units(vp);
     let m = b.size.width.min(b.size.height);
     c.radius.iter().map(|r| r.resolve(&u, m)).fold(0.0, f32::max).min(m / 2.0)
 }
@@ -1173,7 +1191,7 @@ fn vector_mats(frame: &Frame, styles: &StyleStore, vp: (f32, f32), out: &mut Mat
         // parents come before their children
         let (mut m, mut outer) = n.parent.and_then(|p| Some((*out.m.get(p)?, out.outer[p]))).unwrap_or((IDENTITY, (None, None)));
         if let Some(e) = effects_of(frame, styles, i) {
-            let u = Units { font_size: styles[n.style].font_size, viewport: vp };
+            let u = styles[n.style].units(vp);
             out.layered |= !e.backdrop.is_empty() || e.needs_layer(n.bounds, &u);
             let vector = e.vector(n.bounds, &u);
             let under = out.under[i];
@@ -1417,7 +1435,7 @@ fn paint_list(cx: &mut LayerCx, list: &[usize], p: &mut Painter, root: Option<us
         if fx.is_some_and(|e| !e.backdrop.is_empty()) && Some(i) != root {
             paint_backdrop(cx, i, p);
         }
-        let u = Units { font_size: cx.styles[n.style].font_size, viewport: cx.vp };
+        let u = cx.styles[n.style].units(cx.vp);
         if (cx.mats.pixel[i] || fx.is_some_and(|e| e.needs_layer(n.bounds, &u))) && Some(i) != root {
             // a list kept from an earlier layer (a nested layer takes the next)
             let mut sub = cx.subs.pop().unwrap_or_default();
@@ -1632,7 +1650,7 @@ fn paint_layer_inner(cx: &mut LayerCx, root: usize, list: &[usize], p: &mut Pain
     let side = |s: usize, at: usize, i: usize| s.max(at + i).min(crate::effects::MAX_RASTER);
     let (w, h) = (side(w, at_inner.0, iw), side(h, at_inner.1, ih));
     let b = n.bounds;
-    let u = Units { font_size: c.font_size, viewport: cx.vp };
+    let u = c.units(cx.vp);
     // the root's own transform (a layer's: more than a move and a scale), about
     // its origin as its ancestors' vector transforms placed the content
     let outside = cx.mats.m[root];
@@ -1994,6 +2012,7 @@ fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, 
     let n = &frame.nodes[i];
     let c = &styles[n.style];
     p.through = !c.pointer_events;
+    p.snap = true; // a CSS box (a canvas's own drawing turns it off)
     let b = n.bounds;
     match &n.content {
         Content::Word { .. } => {
@@ -2067,7 +2086,10 @@ fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, 
                     },
                     Replaced::Video(v) => p.with_clip(inner, |p| p.video(inner, v, c.images.as_ref().map_or(
                         sys::BK_FIT_CONTAIN, |st| st.object_fit.kit_video()))),
-                    Replaced::Painted(f) => p.with_clip(inner, |p| f(inner, p, app)),
+                    Replaced::Painted(f) => {
+                        p.snap = false; // the canvas draws as it says, anti-aliased (as a browser canvas)
+                        p.with_clip(inner, |p| f(inner, p, app));
+                    }
                     Replaced::Placeholder(tag) => {
                         p.fill(inner, crate::color::rgb(0x282828));
                         let label = frame.attr(i, "alt").unwrap_or(tag);
@@ -2311,7 +2333,7 @@ fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_ba
     let styled = visible.iter().any(|&k| c.border_style[k] != BorderStyle::Solid);
     let border_image = c.effects.as_ref().and_then(|e| e.border_image.as_ref()).filter(|bi| bi.source.is_some());
     if let Some(bi) = border_image {
-        paint_border_image(p, bi, b, &bw, &Units { font_size: c.font_size, viewport: vp });
+        paint_border_image(p, bi, b, &bw, &c.units(vp));
     } else if styled && uniform && r > 0.0 && c.border_style.iter().all(|s| *s == c.border_style[0]) {
         paint_rounded_styled(p, b, r, bw[0], c.border_color[0], c.border_style[0]);
     } else if styled {
