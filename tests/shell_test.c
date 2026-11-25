@@ -23,7 +23,9 @@
 #  define WM_BK_TRAY (WM_APP + 20) /* shell_win32.c */
 #else
 #  include <unistd.h>
+#  ifndef __APPLE__
 void bk_shell_poll(void); /* kit_intern.h: the window loop's call */
+#  endif
 #endif
 
 static int g_fail = 0;
@@ -76,9 +78,11 @@ static void pump_ms(int ms)
     if (windows) {
       BK_window_pump(); /* its loop reads the shell's D-Bus too */
     }
+#  ifndef __APPLE__
     else {
-      bk_shell_poll();
+      bk_shell_poll(); /* D-Bus (Linux): macOS's notification centers need no polling */
     }
+#endif
     usleep(10000);
   }
 #endif
