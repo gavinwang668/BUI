@@ -23,5 +23,3 @@ pnpm-debug.log*
 # jetbrains setting folder
 .idea/
 
-# the charts stage (python platform/wasm/build.py addons/bui-charts/web): built at deploy time
-/public/charts/wasm/
