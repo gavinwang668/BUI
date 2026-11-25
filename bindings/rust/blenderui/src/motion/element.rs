@@ -734,6 +734,7 @@ impl Elements {
                 }
             }
             self.clear_shift();
+            frame.moved();
         }
         // a moved clip: the frame is placed again first, and the states follow that placement
         Some(!(reclip || self.reclip) && self.in_view(frame, viewport))

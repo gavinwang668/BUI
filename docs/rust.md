@@ -437,22 +437,44 @@ gets `on_click`.
 
 ## Events
 
+Every HTML `on*` event has a listener, named in snake case (`onPointerDown` is
+`.on_pointer_down`, in `rsx!` too). A listener gets the event, the `Window` and
+the `App`.
+
 | Listener                                   | Event                                                   | Bubbles |
 | ------------------------------------------ | ------------------------------------------------------- | ------- |
-| `on_click`                                 | `ClickEvent { down, up }` (press and release on the element) | yes |
+| `on_click`, `on_double_click`, `on_aux_click` | `ClickEvent { down, up }` (press and release on the element; `auxclick`: middle or secondary button) | yes |
+| `on_context_menu`                          | `ContextMenuEvent { position, modifiers }`              | yes     |
 | `on_mouse_down(button, ..)`, `on_any_mouse_down` | `MouseDownEvent { button, position, modifiers, click_count }` | yes |
 | `on_mouse_up(button, ..)`                  | `MouseUpEvent`                                          | yes     |
-| `on_mouse_move`                            | `MouseMoveEvent { position, pressed_button, modifiers }` | yes    |
+| `on_mouse_move`, `on_mouse_over`, `on_mouse_out` | `MouseMoveEvent { position, pressed_button, modifiers }` | yes |
+| `on_mouse_enter`, `on_mouse_leave`         | `MouseMoveEvent` (this element only)                    | no      |
 | `on_hover`                                 | `bool`: entered / left                                  | no      |
-| `on_scroll_wheel`                          | `ScrollWheelEvent { position, delta, pixels, phase, modifiers }` | yes     |
+| `on_pointer_down` / `up` / `move` / `over` / `out` / `cancel` | `PointerEvent { pointer_id, pointer_type, is_primary, button, buttons, position, modifiers, pressure, click_count }` | yes |
+| `on_pointer_enter` / `leave`, `on_got_pointer_capture` / `on_lost_pointer_capture` | `PointerEvent` | no |
+| `on_press_drag`                            | `PressDragEvent { button, start, position, modifiers, direction }`: Blender's `KM_PRESS_DRAG`, once per press past `DRAG_THRESHOLD` (3 px) | yes |
+| `on_scroll_wheel` (`on_wheel`)             | `ScrollWheelEvent { position, delta, pixels, phase, modifiers }` | yes   |
 | `on_pan`                                   | `PanEvent { position, delta, phase, modifiers }`: a finger (or two) dragging the content, before it scrolls | yes |
 | `on_pinch`                                 | `PinchEvent { position, delta, modifiers, touch }`: two fingers or a trackpad pinch | yes |
 | `on_rotate`                                | `RotateEvent { position, degrees, modifiers, touch }`: two fingers or a trackpad turn | yes |
-| `on_key_down`, `on_key_up`                 | `KeyDownEvent { keystroke: Keystroke { key, key_char, modifiers } }` | yes (from the focused element) |
+| `on_scroll`                                | `ScrollEvent { offset }`: a scroll container moved, whatever moved it | no |
+| `on_key_down`, `on_key_up`, `on_key_press` | `KeyDownEvent { keystroke: Keystroke { key, key_char, modifiers } }` (`KeyUpEvent`; `KeyPressEvent` for a key that types) | yes (from the focused element) |
+| `on_focus`, `on_blur` / `on_focus_in`, `on_focus_out` | `FocusEvent`                                 | no / yes |
 | `on_change`, `on_input`                    | `ChangeEvent { value, checked, number }`                | yes     |
 
 Positions are logical pixels. Clicking an element focuses it; key events go
-to the focused element and bubble up. `cx.stop_propagation()` stops bubbling.
+to the focused element and bubble up. An event goes down from the root to the
+target first (the `_capture` twin of every listener: `on_click_capture`,
+`onClickCapture` in `rsx!`), then back up; `cx.stop_propagation()` ends the
+pass it is in. `window.set_pointer_capture(cx)` (from a listener) keeps the
+pointer's events on that element until the button is released, and
+`on_mouse_event` / `on_key_event` / `on_window_event` hear every event of a
+kind in the window in both passes, with the `DispatchPhase` (gpui's
+`on_mouse_event`). A hover, press or focus change renders the view again only
+when something answers to it (a `:hover` / `:active` / `:focus` rule, a
+`.hover()` style, Motion gestures, a listener on the element, or a `render`
+that read `window.is_hovered(..)` / `focused_id()`). `App::simulate_button`
+clicks with the middle or secondary button in tests.
 
 ### Touch screens and trackpads
 
@@ -651,7 +673,7 @@ Application::headless().run(|cx| {
 });
 ```
 
-Also `simulate_mouse_move`, `simulate_scroll`, `simulate_key(text, keysym)`, `simulate_key_with` (Ctrl, Shift), `simulate_click_with`, and `simulate_press`, `simulate_release`, `simulate_cancel` (the host lost the pointer: no release, no click, a drag goes back) and `simulate_drag(from, to)` for a held button.
+Also `simulate_mouse_move`, `simulate_button(x, y, MouseButton::Right)` (middle or secondary click), `simulate_scroll`, `simulate_key(text, keysym)`, `simulate_key_with` (Ctrl, Shift), `simulate_click_with`, and `simulate_press`, `simulate_release`, `simulate_cancel` (the host lost the pointer: no release, no click, a drag goes back) and `simulate_drag(from, to)` for a held button.
 Touch: `simulate_touch(win.id, id, TouchPhase::Down | Move | Up | Cancel, x, y)` feeds one contact
 to the kit's touch model as a window host does (taps, scrolls, flings, two-finger gestures), and
 `simulate_magnify(win.id, x, y, delta)` / `simulate_rotate(win.id, x, y, degrees)` are a

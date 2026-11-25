@@ -132,3 +132,33 @@ fn a_tap_clicks_and_a_finger_scrolls_unless_a_pan_listener_takes_it() {
         assert!(!PANS.lock().unwrap().is_empty());
     });
 }
+
+static ORDER: Mutex<Vec<&'static str>> = Mutex::new(Vec::new());
+
+struct Nested;
+
+impl Render for Nested {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        let log = |s: &'static str| move |_: &PinchEvent, _: &mut Window, _: &mut App| ORDER.lock().unwrap().push(s);
+        div()
+            .w(px(300.0))
+            .h(px(200.0))
+            .on_pinch_capture(log("outer capture"))
+            .on_pinch(log("outer"))
+            .child(div().id("inner").w(px(300.0)).h(px(200.0)).on_pinch(log("inner")))
+            .on_mouse_event(|_: &RotateEvent, phase, _, _| {
+                ORDER.lock().unwrap().push(if phase.capture() { "wide capture" } else { "wide bubble" });
+            })
+    }
+}
+
+#[test]
+fn gestures_take_the_capture_and_bubbling_passes() {
+    Application::headless().run(|cx| {
+        let win = open(cx, 300.0, 200.0, Nested);
+        cx.draw(win.id);
+        cx.simulate_magnify(win.id, 120.0, 80.0, 0.25);
+        cx.simulate_rotate(win.id, 120.0, 80.0, 30.0);
+        assert_eq!(*ORDER.lock().unwrap(), ["outer capture", "inner", "outer", "wide capture", "wide bubble"]);
+    });
+}
