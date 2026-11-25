@@ -247,6 +247,17 @@ public unsafe class Node : KitRef, IDisposable
         FreeRef();
     }
 
+    /// <summary>A borrowed wrapper is let go when the kit frees its node (a panel's body with the
+    /// panel): it no longer reaches the node, and its handle is freed.</summary>
+    private protected override void KitReleased()
+    {
+        if (!owned)
+        {
+            handle = null;
+            FreeRef();
+        }
+    }
+
     /// <summary>Delivers a kit event; components override it to raise typed events.</summary>
     protected virtual void OnEvent(NodeEvent e) => Event?.Invoke(this, e);
 

@@ -80,7 +80,16 @@ public sealed unsafe class Window : IDisposable
         {
             int w, h;
             BK_window_get_size(Handle, &w, &h);
-            return (w, h);
+            double scale = 1, unused;
+            using var key = new Utf8Z("scale", stackalloc byte[Utf8Z.StackSize]);
+            fixed (byte* k = key)
+            {
+                if (BK_window_wm_get(Handle, (sbyte*)k, &scale, &unused) == 0 || scale <= 0)
+                {
+                    scale = 1;
+                }
+            }
+            return ((int)Math.Round(w / scale), (int)Math.Round(h / scale));
         }
         set => BK_window_set_size(Handle, value.Width, value.Height);
     }

@@ -39,12 +39,17 @@ Add a project reference to your app's `.csproj`:
 
 In Rider or Visual Studio, you can also add the project to your solution (**Add → Existing Project**), then add the reference in the app's dependencies.
 
-At each build, `Bui.csproj` copies the native library from `build/bindings/csharp` into your app's output folder. If you built the kit in a different folder, set `BuiNativeDir` in your app's `.csproj`:
+At each build, `Bui.csproj` copies the native library from `build/bindings/csharp` into your app's output folder. If you built the kit in a different folder, `BuiNativeDir` has to reach `Bui.csproj` itself: a property in your app's `.csproj` doesn't, because MSBuild only passes global properties on to a referenced project. Either give it on the command line:
+
+```sh
+dotnet build -p:BuiNativeDir=/absolute/path/to/your-build/bindings/csharp
+```
+
+or put it on the project reference, so Rider and Visual Studio use it too:
 
 ```xml
-<PropertyGroup>
-  <BuiNativeDir>path/to/your-build/bindings/csharp</BuiNativeDir>
-</PropertyGroup>
+<ProjectReference Include="path/to/BUI/bindings/csharp/src/Bui/Bui.csproj"
+                  AdditionalProperties="BuiNativeDir=/absolute/path/to/your-build/bindings/csharp" />
 ```
 
 After a change to the C code, build `bui_kit_shared` again. The next build of your app copies the new library.

@@ -143,7 +143,7 @@ static void WithWindow(Context ctx, Action<Window> body)
     {
         w = new Window(ctx, "test", 200, 100);
     }
-    catch (Exception e) when (e is PlatformNotSupportedException or InvalidOperationException)
+    catch (PlatformNotSupportedException e)
     {
         Console.WriteLine($"     (no window host: {e.Message})");
         return;

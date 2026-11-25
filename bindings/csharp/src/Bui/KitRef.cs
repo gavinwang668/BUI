@@ -14,7 +14,7 @@ namespace Bui;
 /// </summary>
 public abstract unsafe class KitRef
 {
-    private readonly GCHandle self;
+    private GCHandle self; // not readonly: Free() must clear this field, not a copy of it
     private GCHandle keep;
     private int kitRefs;
 
@@ -61,6 +61,12 @@ public abstract unsafe class KitRef
         if (k is not null && --k.kitRefs == 0)
         {
             k.keep.Free();
+            k.KitReleased();
         }
+    }
+
+    /// <summary>The kit holds this object no more.</summary>
+    private protected virtual void KitReleased()
+    {
     }
 }

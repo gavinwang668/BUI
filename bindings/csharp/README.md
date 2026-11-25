@@ -45,7 +45,7 @@ Two procedures, both from the native build above. They work the same in Rider, V
 </ItemGroup>
 ```
 
-`Bui.csproj` copies the native library from `build/bindings/csharp` into your app's output folder. For a different build folder, set `<BuiNativeDir>` in your app's `.csproj`.
+`Bui.csproj` copies the native library from `build/bindings/csharp` into your app's output folder. For a different build folder, `BuiNativeDir` has to reach `Bui.csproj` itself (a property in your app's `.csproj` doesn't): build with `dotnet build -p:BuiNativeDir=/absolute/path/to/build/bindings/csharp`, or put it on the reference, `<ProjectReference Include="...Bui.csproj" AdditionalProperties="BuiNativeDir=/absolute/path/to/build/bindings/csharp" />`.
 
 **Install a local package**, to give an app a fixed build. Put each library in a folder with the name of its platform, then pack:
 

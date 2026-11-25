@@ -28,7 +28,7 @@ public sealed unsafe class Raster : IDisposable
 
     public int Height { get; }
 
-    /// <summary>The pixels, row by row, premultiplied 0xAARRGGBB; valid until the next render or dispose.</summary>
+    /// <summary>The pixels, row by row, opaque 0x00RRGGBB (the top byte is unused, not alpha); valid until the next render or dispose.</summary>
     public ReadOnlySpan<uint> Pixels => new(BUI_raster_pixels(Handle), Width * Height);
 
     internal BuiRaster* Handle => handle is not null ? handle : throw new ObjectDisposedException(nameof(Raster));

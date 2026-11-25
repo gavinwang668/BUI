@@ -360,7 +360,7 @@ namespace Bui.Interop
         public delegate* unmanaged[Cdecl]<void*, BKNode*, void> frame;
 
         [NativeTypeName("void (*)(void *, BKNode *, BuiRaster *, const int *)")]
-        public delegate* unmanaged[Cdecl]<void*, BKNode*, BuiRaster*, int, void> draw;
+        public delegate* unmanaged[Cdecl]<void*, BKNode*, BuiRaster*, int*, void> draw;
 
         [NativeTypeName("void (*)(void *, BKNode *)")]
         public delegate* unmanaged[Cdecl]<void*, BKNode*, void> free;

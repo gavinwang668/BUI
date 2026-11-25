@@ -76,7 +76,7 @@ shading.Event += (_, e) =>
 };
 name.Event += (_, e) =>
 {
-    if (e.Kind == EventKind.Submit)
+    if (e.Kind == EventKind.Change)
     {
         status.Text = $"Hello, {name.GetString("value")}";
     }

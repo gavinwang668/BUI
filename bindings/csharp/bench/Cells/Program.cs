@@ -60,7 +60,7 @@ window.Frame += (_, _) =>
     {
         for (int i = 0; i < cells; i++)
         {
-            grid.Put(canvas, i, t);
+            grid.Put(canvas, i, one && i != 0 ? 0 : t);
         }
     }
     Interlocked.Increment(ref frames);
