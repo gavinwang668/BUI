@@ -17,6 +17,7 @@ web-time = "1"
 
 [dev-dependencies]
 bui-panels = { path = "../bui-panels" }
+png = "0.17" # tests/gallery.rs screenshots
 
 [profile.dev]
 debug = "line-tables-only"
