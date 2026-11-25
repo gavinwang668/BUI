@@ -1,0 +1,29 @@
+---
+// The /charts pages: the charts' own shell (sidebar, search) around a page, as in the Zopra Charts site.
+import "katex/dist/katex.min.css";
+import "../styles/chart-docs.css";
+import Base from "./Base.astro";
+import ThemeToggle from "../components/site/ThemeToggle.astro";
+import { ChartsShell } from "../components/chart-docs/shell";
+
+interface Props {
+  /** The page's own title; the index page has none. */
+  title?: string;
+  description?: string;
+  /** Path of the OG image, relative to the site root. */
+  image?: string;
+}
+
+const {
+  title,
+  description = "80 charts for BUI apps. Each one has the math behind it, advice on when to use it, a short story, runnable examples and a live render that runs in your browser.",
+  image,
+} = Astro.props;
+---
+
+<Base title={title ? `${title} · Charts` : "BUI Charts: every chart, with the math, the story and a live render"} description={description} image={image}>
+  <ChartsShell client:load pathname={Astro.url.pathname}>
+    <ThemeToggle slot="actions" />
+    <slot />
+  </ChartsShell>
+</Base>

@@ -363,6 +363,20 @@ BuiGpuApi BUI_gpu_api(void);
 /* The API raster `r`'s device runs on (after any fall back); BUI_GPU_API_DEFAULT when it draws on
  * the CPU. */
 BuiGpuApi BUI_raster_gpu_api(const BuiRaster *r);
+/* Which GPU renders on a machine with two, as a hybrid laptop's integrated and discrete ones
+ * (Windows; elsewhere the GPU is the display's). */
+typedef enum BuiGpuAdapter {
+  BUI_GPU_ADAPTER_DEFAULT = 0, /* the display's: the integrated GPU of most hybrid laptops, which
+                                * costs the least power and needs no copy between GPUs */
+  BUI_GPU_ADAPTER_HIGH_PERFORMANCE = 1, /* the one DXGI picks for high performance: the discrete
+                                         * GPU (and the one vendor profilers see) */
+} BuiGpuAdapter;
+/* The app's choice for devices created from now on (other values are ignored). */
+void BUI_gpu_set_adapter(BuiGpuAdapter adapter);
+/* The adapter new devices start on, first of: the BUI_GPU_ADAPTER environment variable
+ * ("high-performance" or "default"; anything else is ignored, with a message under
+ * BUI_GPU_DEBUG=1), BUI_gpu_set_adapter(), the display's. */
+BuiGpuAdapter BUI_gpu_adapter(void);
 /* The baked default: a fixed-size marker in the program's data that tools may patch in a built
  * executable (the `bui` CLI does). It is exactly BUI_GPU_API_MARKER_LEN bytes: the ASCII text
  * "BUIGPUAPI=d3d11" (or "BUIGPUAPI=d3d12") followed by NUL bytes, so the patch is a same-length

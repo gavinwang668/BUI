@@ -340,16 +340,6 @@ static void def_free(ThemeDef *d)
   memset(d, 0, sizeof(*d));
 }
 
-static char *dup(const char *s)
-{
-  const size_t n = strlen(s) + 1;
-  char *r = (char *)malloc(n);
-  if (r) {
-    memcpy(r, s, n);
-  }
-  return r;
-}
-
 static bool names_equal(const char *a, const char *b)
 {
   for (; *a && *b; a++, b++) {
@@ -400,7 +390,7 @@ static bool add_custom(ThemeDef *d, const BKJson *m)
     return false;
   }
   d->custom = grown;
-  e.name = dup(m->key);
+  e.name = bk_strdup(m->key);
   d->custom[d->ncustom++] = e;
   return true;
 }
@@ -449,7 +439,7 @@ static bool add_entry(ThemeDef *d, const BKJson *m)
     return false;
   }
   d->entries = grown;
-  e.name = dup(m->key);
+  e.name = bk_strdup(m->key);
   d->entries[d->n++] = e;
   return true;
 }
@@ -464,7 +454,7 @@ static bool def_from_json(ThemeDef *d, const BKJson *t, int index)
     return false;
   }
   memset(d, 0, sizeof(*d));
-  d->name = dup(name->string);
+  d->name = bk_strdup(name->string);
   d->shadow = -1;
   d->radius = -1.0f;
   const BKJson *mode = bk_json_get(t, "mode");
@@ -480,7 +470,7 @@ static bool def_from_json(ThemeDef *d, const BKJson *t, int index)
   }
   const BKJson *fam = bk_json_get(t, "font.family");
   if (fam && fam->type == BK_JSON_STRING) {
-    d->font_family = dup(fam->string);
+    d->font_family = bk_strdup(fam->string);
   }
   const BKJson *size = bk_json_get(t, "font.size");
   if (size && size->type == BK_JSON_NUMBER && size->number > 0.0) {

@@ -213,6 +213,9 @@ if(BUI_IMAGE_TIFF) # libtiff 4.7.2 (its decoders; JPEG with the libjpeg-turbo ab
   add_library(bui_zlib OBJECT extern/zlib/adler32.c extern/zlib/crc32.c extern/zlib/inffast.c
     extern/zlib/inflate.c extern/zlib/inftrees.c extern/zlib/zutil.c)
   target_compile_definitions(bui_zlib PUBLIC Z_PREFIX)
+  # Z_PREFIX leaves zlib's one internal global, z_errmsg, as every zlib names it: the copy in a host
+  # (D's Phobos, say) would be a second definition
+  target_compile_definitions(bui_zlib PRIVATE z_errmsg=bui_z_errmsg)
   target_compile_options(bui_zlib PRIVATE ${_bui_quiet} $<$<NOT:$<C_COMPILER_ID:MSVC>>:-O2>)
   set(_bui_tiff_names aux close codec color compress dir dirinfo dirread dirwrite dumpmode error
     extension fax3 fax3sm flush getimage hash_set luv lzw next open packbits predict print read

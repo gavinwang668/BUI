@@ -1,0 +1,211 @@
+export type Pick = { slug: string; when: string }
+
+export type Intent = {
+  id: string
+  question: string
+  blurb: string
+  picks: Pick[]
+}
+
+export const intents: Intent[] = [
+  {
+    id: "compare",
+    question: "I want to compare things",
+    blurb: "Same measure, different items. The eye is good at lengths and positions, so these charts lean on both.",
+    picks: [
+      { slug: "lollipop", when: "You have a long list of categories and bars would be a wall of ink." },
+      { slug: "dumbbell", when: "Each item has a before and an after, and the gap is the story." },
+      { slug: "slope", when: "Two moments, many items, and you want to see who crossed whom." },
+      { slug: "bump", when: "Rank matters more than the value, and it changes over time." },
+      { slug: "back-to-back", when: "Two groups share the same categories, such as men and women by age band." },
+      { slug: "bullet", when: "Each value has a target and some qualitative ranges to sit in." },
+      { slug: "spider", when: "One item scored on several measures, and you want to see its shape against another." },
+      { slug: "bar-gauge", when: "You want to show how full each value is between a minimum and a maximum." },
+      { slug: "forest", when: "Every row is an estimate with a confidence interval, such as a study." },
+    ],
+  },
+  {
+    id: "parts",
+    question: "I want to show parts of a whole",
+    blurb: "Shares, mixes and breakdowns. Pie charts are on holiday. These are the people covering for them.",
+    picks: [
+      { slug: "mekko", when: "The size of each group matters as much as its internal mix." },
+      { slug: "waffle", when: "You want people to count units, such as 63 out of 100 users." },
+      { slug: "warped-waffle", when: "A waffle, but bent into a ring when the page needs to feel like a dashboard." },
+      { slug: "sunburst", when: "The whole splits into parts, which split into parts, a few levels deep." },
+      { slug: "icicle", when: "The hierarchy is deep or the names are long and need room to breathe." },
+      { slug: "treemap-force", when: "Groups have sizes and the items inside are also linked to each other." },
+      { slug: "ternary", when: "Every observation is a mixture of exactly three components that sum to one." },
+      { slug: "nightingale-rose", when: "The parts repeat around a cycle, like months or hours of the day." },
+      { slug: "funnel", when: "Each stage keeps only some of the previous stage, and you want to see the leak." },
+    ],
+  },
+  {
+    id: "time",
+    question: "I want to see something change over time",
+    blurb: "A line is the default for good reason. These are the options for when the default is not enough.",
+    picks: [
+      { slug: "time-series", when: "One or more measurements over time, with annotations or a comparison to last week." },
+      { slug: "trend", when: "The x-axis is not time but still only goes up, such as distance or load." },
+      { slug: "horizon", when: "Many series, little height, and you still want to see the shape of each." },
+      { slug: "state-timeline", when: "A thing is in one of a few states, and you care how long each lasted." },
+      { slug: "status-history", when: "A grid of checks or jobs over time, one cell each." },
+      { slug: "gantt", when: "Tasks with a start and an end, and who is waiting for whom." },
+      { slug: "heatmap", when: "Time on one axis and a value range on the other, and the counts are the story." },
+      { slug: "bump", when: "The question is who was ahead, not by how much." },
+    ],
+  },
+  {
+    id: "distribution",
+    question: "I want to see how values are spread",
+    blurb: "Averages hide things. These charts show the whole crowd, including the person standing awkwardly at the back.",
+    picks: [
+      { slug: "histogram", when: "One variable, one picture, counts per bucket." },
+      { slug: "barcode", when: "You want to see every value as a tick, without binning anything." },
+      { slug: "beeswarm", when: "Every point deserves to be seen, grouped by category, with no overlaps." },
+      { slug: "ridgeline", when: "You want to compare the shapes of many distributions, stacked like mountains." },
+      { slug: "heatmap", when: "A distribution that changes over time, so every column is a histogram." },
+      { slug: "control-chart", when: "Is this process still behaving, or has something changed?" },
+      { slug: "bland-altman", when: "Two methods measure the same thing and you want to know if they agree." },
+      { slug: "spectrogram", when: "A signal's frequencies as they change over time." },
+    ],
+  },
+  {
+    id: "relationship",
+    question: "I want to see how variables relate",
+    blurb: "Correlation, trade-off and structure. Draw it before you fit it.",
+    picks: [
+      { slug: "xy-chart", when: "Two numeric variables, optionally a third as size or colour." },
+      { slug: "parallel-coordinates", when: "Many variables per item, and you want to see which items run alike." },
+      { slug: "efficient-frontier", when: "Risk against return, and the edge of what is possible." },
+      { slug: "attention-map", when: "A matrix of weights, such as which token looks at which token." },
+      { slug: "h-r-diagram", when: "A scatter whose shape is the whole point: stars, by temperature and brightness." },
+      { slug: "ternary-contour", when: "A value that changes across the three-part mixture triangle." },
+      { slug: "dendrogram", when: "You want to see which items cluster together, and how tightly." },
+    ],
+  },
+  {
+    id: "flows",
+    question: "I want to show flows and connections",
+    blurb: "Things moving from here to there, or being linked to each other. Arrows are cheap. Clarity isn't.",
+    picks: [
+      { slug: "sankey", when: "Quantities flow through stages and you want to see where they go." },
+      { slug: "sankey-funnel", when: "A funnel in which you also care where the drop-offs went." },
+      { slug: "sankey-matrix", when: "A Sankey that got too tangled, and you want exact values per pair." },
+      { slug: "alluvial", when: "Groups change membership between a few moments in time." },
+      { slug: "chord-diagram", when: "Flows between every pair of groups, in both directions." },
+      { slug: "arc-diagram", when: "Links between items in a meaningful order, such as time or position." },
+      { slug: "circos", when: "Links between positions on long segments, like a genome." },
+      { slug: "node-graph", when: "Services and the calls between them, with health at a glance." },
+      { slug: "treemap-force", when: "A graph whose nodes also belong to groups of different sizes." },
+    ],
+  },
+  {
+    id: "sets",
+    question: "I want to see how groups overlap",
+    blurb: "Who is in A, who is in B, and who is awkwardly in both.",
+    picks: [
+      { slug: "venn", when: "Two or three sets, where the shapes can be exact." },
+      { slug: "upset", when: "Four or more sets, or you need to read exact combination sizes." },
+    ],
+  },
+  {
+    id: "hierarchy",
+    question: "I want to see a hierarchy or a profile",
+    blurb: "Things inside things inside things.",
+    picks: [
+      { slug: "flame-graph", when: "Where does a program spend its time, call by call?" },
+      { slug: "icicle", when: "Same as a flame graph, but the tree is anything you like." },
+      { slug: "sunburst", when: "A compact tree with a few levels and shares at each." },
+      { slug: "dendrogram", when: "A tree of merges, with the height of each merge meaning something." },
+      { slug: "traces", when: "One request, many services, and where the time went." },
+      { slug: "ishikawa", when: "A problem with a list of possible causes, grouped by category." },
+    ],
+  },
+  {
+    id: "number",
+    question: "I want to show one number",
+    blurb: "A dashboard is mostly numbers in costumes.",
+    picks: [
+      { slug: "stat", when: "A big number with its history and its change." },
+      { slug: "gauge", when: "A value on a scale with thresholds that mean something." },
+      { slug: "bar-gauge", when: "Several values, each against its own range." },
+      { slug: "bullet", when: "A value against a target, with qualitative bands behind it." },
+      { slug: "honeycomb", when: "Many numbers, each one a cell, coloured by state." },
+    ],
+  },
+  {
+    id: "prices",
+    question: "I want to chart prices",
+    blurb: "There are five ways to draw the same market. Each one is a different opinion about time.",
+    picks: [
+      { slug: "candlestick", when: "Open, high, low and close per period, with volume." },
+      { slug: "heikin-ashi", when: "You want candles that smooth over the noise and make trends easier to see." },
+      { slug: "renko", when: "Time is a distraction and only price moves of a set size matter." },
+      { slug: "kagi", when: "Reversals matter, and you want thick and thin lines to mark the regime." },
+      { slug: "point-figure", when: "A column of Xs and Os, because someone in your trading room insists." },
+      { slug: "waterfall", when: "Starting value, a list of gains and losses, ending value." },
+    ],
+  },
+  {
+    id: "signals",
+    question: "I work with signals and control",
+    blurb: "Waveforms, spectra and the stability of things that feed back on themselves.",
+    picks: [
+      { slug: "oscilloscope", when: "A waveform, triggered and drawn like the real instrument." },
+      { slug: "spectrogram", when: "Frequency content over time." },
+      { slug: "eye-diagram", when: "A high-speed link, and whether its bits can still be told apart." },
+      { slug: "smith-chart", when: "Impedance and matching on a transmission line." },
+      { slug: "root-locus", when: "How the poles of a loop move when you turn the gain." },
+      { slug: "radiation-pattern", when: "How an antenna sends power in different directions." },
+    ],
+  },
+  {
+    id: "dynamics",
+    question: "I study dynamics and chaos",
+    blurb: "When a system has a state and rules for how the state changes.",
+    picks: [
+      { slug: "phase-portrait", when: "The trajectories of a system in its state space." },
+      { slug: "poincare-map", when: "A continuous system sampled once per cycle." },
+      { slug: "bifurcation", when: "How long-term behaviour changes as a parameter is turned." },
+      { slug: "quiver", when: "A vector field drawn as little arrows." },
+      { slug: "hodograph", when: "The path of a vector's tip, such as wind with height." },
+    ],
+  },
+  {
+    id: "earth",
+    question: "I work with earth, weather and geology",
+    blurb: "Maps, soundings and the chemistry of rocks and water.",
+    picks: [
+      { slug: "choropleth", when: "A value per region, shaded on a map." },
+      { slug: "stuve", when: "An atmospheric sounding on straight isotherms and adiabats." },
+      { slug: "tephigram", when: "The same sounding, on the diagram your forecasters grew up on." },
+      { slug: "piper", when: "Groundwater chemistry, with all the major ions in one picture." },
+      { slug: "harker", when: "How oxides change as magma gets more evolved." },
+      { slug: "ternary", when: "A mix of three things, such as sand, silt and clay." },
+    ],
+  },
+  {
+    id: "life",
+    question: "I work with biology and text",
+    blurb: "Letters, structures and words.",
+    picks: [
+      { slug: "sequence-logo", when: "Which letters are conserved at each position of an alignment?" },
+      { slug: "ramachandran", when: "The backbone angles of a protein." },
+      { slug: "circos", when: "A genome with links, rings and coverage tracks." },
+      { slug: "word-cloud", when: "A first impression of which words come up most." },
+    ],
+  },
+  {
+    id: "causes",
+    question: "I am hunting for a cause",
+    blurb: "Something is wrong, and you need to find out what before the meeting.",
+    picks: [
+      { slug: "pareto", when: "A few causes make most of the trouble, and you want to see which." },
+      { slug: "ishikawa", when: "You need to brainstorm causes by category before you measure them." },
+      { slug: "control-chart", when: "You need to know whether the process changed or just wobbled." },
+      { slug: "flame-graph", when: "The thing that is slow is a program." },
+      { slug: "traces", when: "The thing that is slow is a request across services." },
+    ],
+  },
+]

@@ -131,7 +131,7 @@ In short: the GPU halves (or better) the CPU cost per frame. In exchange, the pr
 | --- | --- |
 | `gpu=True` seems to do nothing | Run with `BUI_GPU_DEBUG=1`. It prints which step failed to stderr. |
 | No GPU in a Windows VM or CI | `BUI_GPU_WARP=1` creates the device on WARP, Windows' software Direct3D 11 driver. Handy for testing the GPU path. |
-| A hybrid laptop renders on the integrated GPU | Windows gives Direct3D the display's adapter. `BUI_GPU_ADAPTER=high-performance` asks for the discrete GPU, as for profiling it with the vendor's tools (NVIDIA Nsight). |
+| A hybrid laptop renders on the integrated GPU | Windows gives Direct3D the display's adapter. `Application::gpu_adapter(GpuAdapter::HighPerformance)` (C: `BUI_gpu_set_adapter`) or `BUI_GPU_ADAPTER=high-performance` asks for the discrete GPU, as for profiling it with the vendor's tools (NVIDIA Nsight). |
 | Headless OpenGL on Linux picks the wrong display | `BUI_GPU_EGL=surfaceless` or `BUI_GPU_EGL=default` picks the EGL platform. |
 | GPU text looks heavier than you'd like, or costs too much | Try the atlas: `BUI_SLUG=0`. |
 
