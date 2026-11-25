@@ -32,7 +32,8 @@ FROM_TOUCH = 64
 TOUCH_DOWN, TOUCH_MOVE, TOUCH_UP, TOUCH_CANCEL = range(4)
 
 # Cursor ids (BK_CURSOR_*).
-CURSORS = (None, "ew", "ns", "text", "crosshair", "hand", "move", "none")
+CURSORS = (None, "ew", "ns", "text", "crosshair", "hand", "move", "none", "nesw", "nwse",
+           "not_allowed", "wait", "progress")
 
 
 def mods_bits(mods) -> int:

@@ -32,6 +32,14 @@ These are on `main` and will ship in the next release; the details are under **U
 - **Fonts for every script.** A CSS family list is used whole, glyphs a font lacks come from the rest of the list, then from the system's fallback fonts for their script when one is installed, and installed fonts are found by their own names. See [Text and fonts](../../concepts/text-and-fonts/).
 - **Rust: `Window::scroll_into_view`**, with an eased glide, and hover and copy on painted lists. See [Virtual lists](../../rust/virtual-list/).
 - **Images** are no longer repainted at every render, and a window resize reuses their decodes instead of blinking.
+- **Touch screens and trackpad gestures.** One model in the kit for every platform: a tap clicks, a drag scrolls and flings, a long press opens the context menu, and two fingers pan, pinch and turn. Rust has `on_pan`, `on_pinch` and `on_rotate`. On Android the `touch_drag` window key is gone: a custom node calls `BK_custom_set_touch(node, BK_TOUCH_MODE_POINTER)`. See [Touch and gestures](../../concepts/touch/).
+- **CSS measured against web-platform-tests.** Inline layout as browsers do it (text goes round floats, `text-align: justify`), grid lanes, subgrid, anchor positioning and view transitions: 4,860 of the 7,135 reftests that run pass (68.1%). See [Coverage](../../reference/coverage/#css-against-web-platform-tests).
+- **More image formats.** TIFF and HEIC (through the OS) are on by default; OpenEXR, AVIF and JPEG XL are opt-in. See [Images](../../concepts/images/).
+- **The desktop shell.** Tray icons with menus, notifications, taskbar progress and recent files, from every language. See [Desktop shell](../../concepts/desktop-shell/).
+- **Screen readers on Windows**, through AccessKit (the new `bui-a11y` crate in `a11y/`). See [Limitations](../limitations/#accessibility).
+- **Direct3D 12, opt-in**, and `BUI_GPU_ADAPTER=high-performance` for the discrete GPU. See [Rendering](../../concepts/rendering/).
+- **MSIX packages.** `bui build app.jsx --msix`, or `bui package` for any BUI executable. See [Standalone executables](../../javascript/standalone-executables/#releasing-on-windows).
+- **Android apps in Rust** with `blenderui::android_main!`, and **a blenderui app in a web page** through WebAssembly. See [Android](../../concepts/android/) and [WebAssembly](../../rust/webassembly/).
 
 ## In 0.5.1
 

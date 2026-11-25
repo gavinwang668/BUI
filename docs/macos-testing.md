@@ -18,7 +18,7 @@ What runs on macOS:
 - **Native windows** through AppKit (`kit/intern/kit_window_cocoa.m`, ported
   from Blender's GHOST Cocoa backend): Retina scaling, trackpad scrolling,
   cursor warping for drag-to-scrub, the clipboard, cursors, full screen.
-- **Drawing on the CPU.** The GPU renderer is Direct3D 11 on Windows and
+- **Drawing on the CPU.** The GPU renderer is Direct3D 11 (or 12) on Windows and
   OpenGL on Linux. There is no Metal renderer yet, so `BUI_GPU=1` is ignored
   and frames are drawn by the software rasterizer and shown with
   CoreGraphics.

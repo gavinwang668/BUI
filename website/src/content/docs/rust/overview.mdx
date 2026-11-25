@@ -157,7 +157,7 @@ Application::new().gpu(true).run(|cx| { /* every window on the GPU */ });
 cx.open_window(WindowOptions { gpu: Some(true), ..Default::default() }, build);
 ```
 
-- The GPU renderer is **Direct3D 11 on Windows and OpenGL 3.3 on Linux**. Elsewhere, or without a device, windows stay on the software raster.
+- The GPU renderer is **Direct3D 11 on Windows and OpenGL 3.3 on Linux**; `Application::gpu_api(GpuApi::D3d12)` opts into Direct3D 12. Elsewhere, or without a device, windows stay on the software raster.
 - `BUI_GPU=1` or `BUI_GPU=0` overrides both settings.
 - `window.is_gpu()` turns `true` a few frames in, once the device is ready.
 - Both renderers produce the same pixels; the `gpu_parity` test checks it.
@@ -212,10 +212,9 @@ The `gdi-text` feature draws text with Windows' GDI engine and system fonts inst
 
 BUI's Rust side covers a lot, but not everything. Each page lists its own gaps; here they are in one place:
 
-- **Text:** floats place block boxes, but text doesn't wrap around them. Right-to-left text is reordered but not shaped (no Arabic joining). There's no per-glyph fallback between the faces of a `font-family` list. `text-align: justify` aligns left.
-- **Inline boxes** paint their background per word; borders and padding on inline elements (`<kbd>`, `<code>`) aren't drawn.
+- **Text:** right-to-left text is reordered but not shaped (no Arabic joining), and there are no OpenType features.
 - **Widgets draw above page content**, so a `z-index`ed box such as a `<dialog>` over a form field doesn't cover the field.
-- **Images**: every [format](/docs/concepts/images) decodes and animations play, but one inside a CSS effect layer (filters, masks, 3D transforms) shows its first frame. `video`, `audio` and `iframe` show a placeholder.
+- **Images**: every [format](/docs/concepts/images) decodes and animations play, but one inside a CSS effect layer (filters, masks, 3D transforms) shows its first frame. `video` plays; `audio` and `iframe` show a placeholder.
 - **Transforms:** every 2D transform draws, but clicks use the untransformed box. 3D transforms have no effect.
 - **Tables** size columns from their widest single-line content, a simpler version of browsers' auto layout.
 - **Windows** are native on Windows (Win32), Linux (X11) and macOS (Cocoa). The Cocoa host is new and has been tried by hand on three Macs (two Apple Silicon, one Intel) so far, and it needs the main thread. The GPU renderer runs on Windows and Linux.

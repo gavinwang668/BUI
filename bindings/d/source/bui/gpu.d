@@ -38,6 +38,20 @@ enum BUI_IMAGE_ATLAS_MAX = 2047;
 enum BUI_MESH_INDEX32 = 1 << 0;
 enum BUI_MESH_NEAREST = 1 << 1;
 
+/* GPU renderer graphics APIs (BuiGpuApi): Windows picks Direct3D 11 or 12. */
+enum BUI_GPU_API_DEFAULT = 0;
+enum BUI_GPU_API_D3D11 = 1;
+enum BUI_GPU_API_D3D12 = 2;
+enum BUI_GPU_API_OPENGL = 3;
+
+/* Application shaders (BUI_effect_*) and their render targets. */
+enum BUI_EFFECT_MAX_INPUTS = 8;
+enum BUI_EFFECT_MAX_FLOATS = 256;
+enum BUI_EFFECT_MAX_SOURCE = 65536;
+enum BUI_TARGET_RGBA8 = 0;
+enum BUI_TARGET_RGBA16F = 1;
+enum BUI_TARGET_RGBA32F = 2;
+
 /// One image: premultiplied 0xAARRGGBB, or NV12 video (see GPU_raster.h).
 struct BuiPixmap {
     const(uint32_t)* px;
@@ -230,6 +244,8 @@ const(uint8_t)* BUI_text_run_mask(const(BuiTextRun)* run,
                                   int* r_ox,
                                   int* r_ascent);
 int BUI_text_add_font(const(char)* family, int flags, const(void)* data, int len);
+int BUI_text_vmetrics(
+    const(char)* family, int flags, float* r_ascent, float* r_descent, float* r_gap);
 const(void)* BUI_text_default_font(int* r_len);
 int BUI_text_font_dir(int i, char* r_dir, int cap);
 
@@ -243,6 +259,31 @@ void BUI_gpu_set_default(int on);
 int BUI_gpu_default();
 void BUI_gpu_set_slug(int on);
 int BUI_gpu_slug();
+void BUI_gpu_set_api(int api);
+int BUI_gpu_api();
+int BUI_raster_gpu_api(const(BuiRaster)* r);
+
+/* -- application shaders and render targets -------------------------------- */
+int BUI_effect_create(const(char)* name, const(char)* source, int n_inputs, int n_floats);
+void BUI_effect_free(int id);
+const(char)* BUI_effect_error(int id);
+int BUI_raster_effect(BuiRaster* r,
+                      float x,
+                      float y,
+                      float w,
+                      float h,
+                      int effect,
+                      const(int)* inputs,
+                      const(float)* floats,
+                      int n_floats);
+int BUI_target_create(int w, int h, int format);
+int BUI_raster_effect_to(BuiRaster* r,
+                         int target,
+                         int effect,
+                         const(int)* inputs,
+                         const(float)* floats,
+                         int n_floats);
+int BUI_raster_target_clear(BuiRaster* r, int target, const(float)* rgba);
 const(BuiGpuSink)* BUI_raster_sink(BuiRaster* r);
 int BUI_raster_present_native(BuiRaster* r, void* window_handle, int full);
 

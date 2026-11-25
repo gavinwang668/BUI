@@ -170,7 +170,7 @@ the software raster.
 - **Images.** `PhotoImage` decodes with the kit's image module (the C
   decoders every BUI binding shares): Tk's PNG, GIF (`format="gif -index n"`
   picks a frame) and PPM / PGM, and also JPEG, WebP, BMP, TGA, QOI, Radiance
-  HDR and SVG. It supports `put` / `get` / `copy` / `zoom` / `subsample` /
+  HDR, SVG, TIFF and HEIC (where the OS has a decoder). It supports `put` / `get` / `copy` / `zoom` / `subsample` /
   `copy_replace` / `data` and `write` (PNG, PPM). `BitmapImage` reads XBM.
 
 ## The Blender look

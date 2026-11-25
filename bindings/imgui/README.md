@@ -61,6 +61,7 @@ draws it with Direct3D 11 / OpenGL 3.3 instead of the software raster.
 | ImGui | BUI |
 |---|---|
 | mouse pos / buttons (left, right, middle, held together) | `BKCustomEvent` PRESS / RELEASE / MOTION (the node grabs the pointer while a button is held) |
+| touch screen (`AddMouseSourceEvent(ImGuiMouseSource_TouchScreen)`) | `BK_custom_set_touch(node, BK_TOUCH_MODE_POINTER)`: a finger is the pointer at once (sliders, window moves); events the kit made from a finger carry `BK_FROM_TOUCH`. Pinches and turns are not ImGui's |
 | wheel, horizontal wheel (`AddMouseWheelEvent(-x, y)`) | `BK_scroll` precise deltas (Win32 `WM_MOUSEWHEEL` / `WM_MOUSEHWHEEL`, X11 buttons 4-7) |
 | keys (`ImGuiKey_*`), modifiers | X11 keysym names in KEY / KEYUP events; Ctrl / Shift / Alt from the event, Super from its key |
 | text (`AddInputCharactersUTF8`) | KEY event text |

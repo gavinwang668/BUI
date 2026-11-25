@@ -29,7 +29,8 @@ from bui.components.core import CURSORS, mods_bits
 
 TK_CURSORS = {None: "", "ew": "sb_h_double_arrow", "ns": "sb_v_double_arrow",
               "text": "xterm", "crosshair": "crosshair", "hand": "hand2", "move": "fleur",
-              "none": "none"}
+              "none": "none", "nesw": "bottom_left_corner", "nwse": "bottom_right_corner",
+              "not_allowed": "X_cursor", "wait": "watch", "progress": "watch"}
 
 
 def native_available() -> bool:

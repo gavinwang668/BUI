@@ -200,10 +200,9 @@ Try it without publishing: Actions > release > Run workflow, enter the tag and l
 # Publishing the Rust crates (crates.io)
 
 `blenderui` is on [crates.io](https://crates.io/crates/blenderui)
-(`cargo add blenderui`). The workspace in `bindings/rust/` has eight crates;
-all but the three JavaScript crates are published to crates.io, in
-dependency order (a `v*` tag does it, see above), and those three stay in the
-repository:
+(`cargo add blenderui`). The workspace in `bindings/rust/` has thirteen crates
+(`bui-a11y` joins it from `a11y/`). A `v*` tag publishes nine of them to crates.io, in dependency order (see
+above); the others stay in the repository:
 
 | Crate | What it is | Depends on | crates.io |
 |---|---|---|---|
@@ -219,6 +218,13 @@ repository:
 | `blenderui-jsview` | The JavaScript view of a window, shared by the Node.js addon and the QuickJS runtime | `blenderui` | `publish = false` |
 | `blenderui-node` | The napi-rs addon behind `@blender-ui/native` | `blenderui`, `blenderui-jsview` | `publish = false` (ships on npm) |
 | `blenderui-qjs` | `bui-runtime`: BUI with embedded QuickJS, for `bui build` | `blenderui`, `blenderui-jsview` | `publish = false` (ships on npm) |
+| `blenderui-web` | A blenderui app in a web page (`wasm32-wasip1`, `js/bui-web.js`) | `blenderui`, `blenderui-sys` | Not published by `release.yml` |
+
+`bui-a11y` (screen readers through AccessKit) lives in `a11y/` but is a member of
+this workspace, so it shares the version and lock. `blenderui-sys` depends on it
+with the `a11y` feature (it is published first), and the C kit's CMake build builds
+it with cargo. It is new in 0.5.x: until it is on crates.io, package `blenderui-sys`
+together with it.
 
 `blenderui-sys` must carry the C sources, because a published crate can't
 reach `../../..`. Vendor them first. They're git-ignored and listed in the
@@ -241,8 +247,10 @@ cargo package --workspace --allow-dirty           # builds each packaged crate i
 
 1. Bump `version` in `bindings/rust/Cargo.toml` (`[workspace.package]`). The
    crates share one version. Then update the `version = "..."` of the path
-   dependencies in `blenderui/Cargo.toml`, `blenderui-macros/Cargo.toml` and
-   `blenderui-imgui/Cargo.toml`.
+   dependencies in `blenderui/Cargo.toml`, `blenderui-macros/Cargo.toml`,
+   `blenderui-imgui/Cargo.toml`, `blenderui-table/Cargo.toml`,
+   `blenderui-vlist/Cargo.toml` and `blenderui-web/Cargo.toml`
+   (`python tools/bump_version.py` does all of them).
 2. `cargo login` once with a crates.io API token.
 3. Vendor, then publish in order. `cargo publish --workspace` does the
    ordering itself on Cargo 1.90+:
@@ -255,12 +263,16 @@ cargo publish --workspace --allow-dirty   # or, one by one:
 # cargo publish -p blenderui-macros
 # cargo publish -p bui-a11y
 # cargo publish -p blenderui-sys --allow-dirty
+# cargo publish -p blenderui-paint
+# cargo publish -p blenderui-table
+# cargo publish -p blenderui-vlist
 # cargo publish -p blenderui
+# cargo publish -p blenderui-imgui
 ```
 
-`cargo publish --workspace` skips the `publish = false` crates. To publish
-`blenderui-imgui` too (once it's ready), run `cargo publish -p blenderui-imgui`
-after `blenderui-sys`.
+`cargo publish --workspace` skips the `publish = false` crates, but not
+`blenderui-web`. `release.yml` publishes the nine crates one by one, in the
+order above.
 
 `--allow-dirty` is needed because `csrc/` is untracked. Users need CMake and
 a C compiler (MSVC, MinGW, gcc or clang) to build `blenderui-sys`.

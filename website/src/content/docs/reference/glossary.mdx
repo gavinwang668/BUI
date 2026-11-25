@@ -54,7 +54,7 @@ A popular immediate-mode UI library for C++ by Omar Cornut. BUI runs the real De
 
 ### Direct3D 11
 
-Microsoft's graphics API. BUI's GPU renderer uses it on Windows.
+Microsoft's graphics API. BUI's GPU renderer uses it on Windows by default; Direct3D 12 is opt-in (`BUI_GPU_API=d3d12`).
 
 ### Dirty rectangle
 
@@ -94,7 +94,7 @@ Blender's window-system layer: the code that opens windows and reads input on ea
 
 ### GPU renderer
 
-BUI's optional renderer that draws on the graphics card: Direct3D 11 on Windows, OpenGL 3.3 on Linux. It draws the same pixels as the [software raster](#software-raster). Turn it on with `BUI_GPU=1`.
+BUI's optional renderer that draws on the graphics card: Direct3D 11 on Windows (Direct3D 12 opt-in), OpenGL 3.3 on Linux. It draws the same pixels as the [software raster](#software-raster). Turn it on with `BUI_GPU=1`.
 
 ### gpui
 

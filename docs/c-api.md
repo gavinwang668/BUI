@@ -88,6 +88,7 @@ int main(void)
 | **Specialised** | Canvas display list (`BK_canvas_set_item`), text area (`BK_textarea_*`), trees (`BK_tree_item_*`), menus (`BK_open_menu`, `BK_open_pie`), the hit test (`BK_hit_at`), color ramps and curves, `BK_undo` / `BK_redo` |
 | **Custom nodes** | A `custom` node draws and handles input itself: `BK_custom_set(node, &cls, data)` with `event` (pointer with all three buttons and a grab, precise wheel via `BK_scroll`, keys and text while focused, key releases, focus, pinches and turns as `BK_CUSTOM_MAGNIFY` / `ROTATE`; what a finger does on it is `BK_custom_set_touch(node, BK_TOUCH_MODE_SCROLL / POINTER / RAW)`, see [touch.md](touch.md#custom-nodes)), `frame` (called by `BK_render` when requested with `BK_custom_request_frame(node, ms)`: immediate-mode UIs build their frame there) and `draw` (raster + rect). `BK_custom_set_cursor`, `BK_node_context`. Dear ImGui runs on it: [../bindings/imgui](../bindings/imgui/README.md). |
 | **File browser** | `BK_node_new("filebrowser")`: Blender's File Browser in any window. Strings `dir`, `file`, `button`, `search`; numbers `mode` (0 open, 1 save, 2 directory), `multiple`, `hidden`, `sort`, `invert`; list `filters` (`"Label\tpattern ..."`); read `state` and `result`. `BK_file_dialog(title, mode, dir, file, filters, n, multiple, &paths)` runs one in its own window and returns the number of chosen paths (free them with `BK_file_dialog_free`). |
+| **Accessibility** | One accessibility tree per context, built only when a screen reader asks (UI Automation on Windows, through `bui-a11y` in `a11y/`; the `a11y` feature). The kit's widgets describe themselves; a host that draws its own content into a node attaches it with `BK_a11y_set_subtree(node, nodes, n)` (`BKA11yNode`, `BK_ROLE_*`, `BK_A11Y_*`). `BK_a11y_tree` reads the tree (headless tests), `BK_a11y_action` performs a reader's request, `BK_a11y_wanted` says whether one is reading. Without the feature the API stays and `BK_a11y_supported()` is 0. |
 | **Meshes and textures** | `BUI_texture_create/update/free` (RGBA8, shared by every raster and GPU device), `BUI_raster_mesh(r, vertices, n, indices, n_idx, flags, tex, clip, ox, oy)`: indexed triangles with position, UV and color, straight-alpha blending, per-call clip; the same pixels on the software raster, Direct3D 11 and OpenGL. |
 | **GPU effects** | Your own pixel shader over a canvas item: `BK_effect_create(name, source, n_inputs, n_floats)` (an id > 0, 0 for bad arguments), `BK_effect_free`, `BK_effect_error(id)` (the compile/link log of the last GPU attempt: "" when fine, NULL for an unknown id), then a `BK_ITEM_EFFECT` canvas item (`effect`, `effect_inputs[8]` BUI textures, `effect_floats`; its image is the fallback), or `BUI_raster_effect` on a raster. The source is GLSL with a small compat set, compiled at run time by Direct3D 11 (`d3dcompiler_47.dll`, loaded dynamically) and OpenGL; the software raster draws the fallback. See [GPU effects](../website/src/content/docs/rust/gpu-effects.mdx). |
 
@@ -243,7 +244,7 @@ if (BK_version() != BUI_KIT_VERSION) {
 }
 ```
 
-The macros are `BUI_KIT_VERSION_MAJOR`, `_MINOR`, `_PATCH`, `BUI_KIT_VERSION_STRING` (`"0.4.0"`) and `BUI_KIT_VERSION` (one number: 0.4.0 is 400, 1.2.3 is 10203). The Python wheels, Rust crates and npm packages carry the same number, and a release is refused when any of them differs.
+The macros are `BUI_KIT_VERSION_MAJOR`, `_MINOR`, `_PATCH`, `BUI_KIT_VERSION_STRING` (`"0.5.1"` today) and `BUI_KIT_VERSION` (one number: 0.4.0 is 400, 1.2.3 is 10203). The Python wheels, Rust crates and npm packages carry the same number, and a release is refused when any of them differs.
 
 **Before 1.0 there is no promise that the API stays the same.** Any release may add to it, and a release may change or remove a function. Every change that breaks existing code is listed under "C API changes" in `CHANGELOG.md`, with what to use instead. Pin a release number, not a commit.
 
@@ -259,7 +260,7 @@ The macros are `BUI_KIT_VERSION_MAJOR`, `_MINOR`, `_PATCH`, `BUI_KIT_VERSION_STR
 ## Showing the kit in your own window
 
 The kit always draws into a `BuiRaster`: the software raster, or Direct3D 11
-/ OpenGL instances when the window is on the GPU. To put kit widgets inside
+(or 12) / OpenGL instances when the window is on the GPU. To put kit widgets inside
 your own renderer or framework, render the context into a raster with
 `BK_render(ctx, raster, w, h, full)`, upload or blit its pixels (32-bit
 `0x00RRGGBB`, rows top-down), and feed input back with `BK_press`,

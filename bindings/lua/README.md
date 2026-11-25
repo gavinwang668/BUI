@@ -202,8 +202,11 @@ A `custom` node hands drawing and input to the script: `custom_set` takes
 `{natural_w, natural_h}` and the callbacks `on_event(self, e)`, `on_frame(self)`,
 `on_draw(self, raster, x, y, w, h)` and `on_free(self)`. The event table carries
 `type` (`bui.CUSTOM_PRESS`, `..._RELEASE`, `..._MOTION`, `..._LEAVE`,
-`..._WHEEL`, `..._KEY`, `..._KEYUP`, `..._FOCUS`, `..._BLUR`), `x`, `y`,
-`button`, `mods`, `clicks`, `wheel_x`, `wheel_y`, `text` and `keysym`.
+`..._WHEEL`, `..._KEY`, `..._KEYUP`, `..._FOCUS`, `..._BLUR`, `..._TOUCH`,
+`..._MAGNIFY`, `..._ROTATE`), `x`, `y`, `button`, `mods`, `clicks`, `wheel_x`,
+`wheel_y`, `text`, `keysym`, `touch_id`, `touch_phase`, `magnify` and `rotate`.
+`node:custom_set_touch(bui.TOUCH_MODE_SCROLL / _POINTER / _RAW)` says what a
+finger on the node does (RAW: every contact as `CUSTOM_TOUCH`).
 `on_event` returns true when it used the event (keys it ignores reach the kit's
 shortcuts). Draw with `bui.draw_widget(raster, spec)` — one of Blender's widgets,
 the same drawing the kit's own nodes use (`bui.WIDGET_BUTTON`, `bui.WS_HOVER`,

@@ -266,7 +266,9 @@ bui.Run()
   `GridWeight`.
 - **Contexts**: `NewContext(root)`, `Render` into a `Raster`, `Configure`,
   input (`Press`, `Release`, `Motion`, `Click`, `Wheel`, `Scroll`, `Key`,
-  `ContextMenu`), `Bind("ctrl+s", fn)`, `HitAt`, `Hover`, `Focus`,
+  `ContextMenu`; touch screen contacts with `Touch` and trackpad pinches and
+  turns with `Magnify` and `Rotate`, which reach "events" nodes as
+  `EventGesture`), `Bind("ctrl+s", fn)`, `HitAt`, `Hover`, `Focus`,
   `FocusNode`, `Popups`, `Undo`, `Redo`, the clipboard.
 - **Windows**: `NewWindow(WindowOptions)` with a `Root`, a `Context` or a
   `Content`, `Show`, `Close`, `SetTitle`, `SetSize`, `Size`, `UseGPU`, `Timer`,

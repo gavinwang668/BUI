@@ -57,10 +57,12 @@ Every sizeable optional part of the C kit is one row of `features.json`, the sin
 | `BUI_IMAGE_JXL` | `jxl` | `OFF` | libjxl's decoder on Highway (C++17). |
 | `BUI_IMAGE_HEIC` | `heic` | `ON` | HEIC through the OS decoder (WIC, ImageIO, libheif), loaded at run time: nothing vendored. |
 | `BUI_VIDEO` | `video` | `ON` | [Video](/docs/concepts/video) through the OS: Media Foundation, AVFoundation or GStreamer, loaded at run time. |
-| `BUI_GPU` | `gpu` | `ON` | The Direct3D 11 / OpenGL renderers. Off: every window draws with the software raster. |
+| `BUI_GPU` | `gpu` | `ON` | The Direct3D 11 / 12 and OpenGL renderers. Off: every window draws with the software raster. |
 | `BUI_TEXT_FREETYPE` | `freetype` | `ON` | Text through FreeType like Blender (else stb_truetype). |
 | `BUI_FILEBROWSER` | `filebrowser` | `ON` | Blender's File Browser: the `filebrowser` node and `BK_file_dialog`. |
 | `BUI_SHELL` | `shell` | `ON` | The [desktop shell](/docs/concepts/desktop-shell): tray icons, notifications, taskbar progress, recent files (shell32 / libdbus-1 loaded at run time). |
+| `BUI_ANIM` | `anim` | `ON` | The animation engine: GSAP- and Motion-style tweens, timelines, springs and easings (`kit/intern/anim`). |
+| `BUI_A11Y` | `a11y` | `OFF` (CMake), on in cargo | Screen readers: each window's accessibility tree, served to UI Automation on Windows through AccessKit (`bui-a11y` in `a11y/`). CMake builds it with cargo, so it needs Rust. |
 | `BUI_BUILD_IMGUI` | `imgui` | `ON` (CMake, with a C++ compiler), off in cargo | Dear ImGui on BUI. |
 
 See [Text and fonts](../../concepts/text-and-fonts/) for what these change on screen.

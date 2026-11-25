@@ -15,11 +15,13 @@ engine ([Standalone apps](#standalone-apps)).
 | [`@blender-ui/svelte`](https://www.npmjs.com/package/@blender-ui/svelte) (`bindings/svelte`) | Svelte 5 components (runes, snippets, scoped styles) on the DOM-like API |
 | [`@blender-ui/vue`](https://www.npmjs.com/package/@blender-ui/vue) (`bindings/vue`) | Vue 3.5 single-file components, through Vue's own `createRenderer` |
 
-**Platforms:** prebuilt for Windows x64. On Linux, build the addon from
-source (see [Building](#building)); windows are native X11 windows, on the CPU or
+**Platforms:** prebuilt for Windows x64, Linux x64 (glibc 2.35 or later) and
+macOS (arm64 and x64), one npm package per platform (`@blender-ui/native-<tag>`,
+`bindings/node/platform.js`); elsewhere, build the addon from source (see
+[Building](#building)). On Linux windows are native X11 windows, on the CPU or
 with OpenGL. On macOS use `headless: true`: macOS only allows windows on the
-main thread, and BUI runs on a UI thread of its own in Node. A browser
-(WebAssembly) build is planned.
+main thread, and BUI runs on a UI thread of its own in Node. In a browser,
+Rust apps run today ([wasm.md](wasm.md)); the JavaScript API there is planned.
 
 ## Plain JavaScript
 

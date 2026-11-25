@@ -91,7 +91,7 @@ rgba, delay_ms = frames[0]                       # straight RGBA bytes
 bui.image_probe(data)                            # ("webp", w, h, frames): header only
 ```
 
-tkinter: `PhotoImage(file=...)` reads Tk's formats (PNG, GIF with `format="gif -index n"`, PPM/PGM) through the kit, and also JPEG, WebP, BMP, TGA, QOI, HDR and SVG. A canvas item can show a file directly: `node.canvas_set(id, 6, [x0, y0, x1, y1], src="photo.jpg", fit=2)`.
+tkinter: `PhotoImage(file=...)` reads Tk's formats (PNG, GIF with `format="gif -index n"`, PPM/PGM) through the kit, and also every other format the build has (JPEG, WebP, BMP, TGA, QOI, HDR, SVG, TIFF, HEIC ...). A canvas item can show a file directly: `node.canvas_set(id, 6, [x0, y0, x1, y1], src="photo.jpg", fit=2)`.
 
 </Tab>
 <Tab label="C">

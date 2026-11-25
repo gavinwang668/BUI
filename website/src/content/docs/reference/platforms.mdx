@@ -15,10 +15,10 @@ BUI runs on Windows, Linux and macOS. Windows and Linux are fully supported; mac
 | Window | Native (Win32) | Native (X11, and Wayland: experimental) | Native (Cocoa) |
 | Python (`pip install`) | Works: wheels | Works: wheels | Works: wheels |
 | Rust | Works | Works | Works |
-| JavaScript and React | Works: prebuilt on npm | Works: build the addon from source (`npm run build`) | Headless |
+| JavaScript and React | Works: prebuilt on npm | Works: prebuilt on npm (glibc 2.35+) | Headless |
 | C, C++, Dear ImGui | Works | Works | Works |
 | C# (.NET 8+) | Works | Works | Works |
-| Renderer | CPU raster, or GPU (Direct3D 11) | CPU raster, or GPU (OpenGL 3.3) | CPU raster |
+| Renderer | CPU raster, or GPU (Direct3D 11; Direct3D 12 opt-in) | CPU raster, or GPU (OpenGL 3.3) | CPU raster |
 | HiDPI | Per-monitor DPI | `Xft.dpi` | Retina (backing scale) |
 | Images | All [built-in formats](/docs/concepts/images); decode threads; GPU atlas | All built-in formats; decode threads; GPU atlas | All built-in formats; decode threads (CPU raster) |
 | [Video](/docs/concepts/video) | Works: Media Foundation (DXVA), tested | Works: GStreamer (VA-API where available), tested under WSL | AVFoundation: written, **untested** |
@@ -28,7 +28,7 @@ BUI runs on Windows, Linux and macOS. Windows and Linux are fully supported; mac
 ## Windows
 
 - **Window:** a native Win32 host, per-monitor DPI aware, with animation paced to the display.
-- **GPU renderer:** Direct3D 11 (feature level 10.0 or newer). Machines without it stay on the CPU raster.
+- **GPU renderer:** Direct3D 11 (feature level 10.0 or newer). Machines without it stay on the CPU raster. Direct3D 12 is opt-in (`BUI_GPU_API=d3d12`, `Application::gpu_api`, `bui build --gpu d3d12`); a device that can't start on 12 starts on 11. `BUI_GPU_ADAPTER=high-performance` renders on the discrete GPU of a hybrid laptop.
 - **Compilers:** MSVC, or MinGW-w64 GCC. The published Python wheels are built with MinGW (UCRT) and statically linked to the GCC runtime, so they depend only on system DLLs and Python's. The Rust crate's default target uses MSVC: install the Visual Studio Build Tools.
 - **JavaScript:** the npm packages ship a prebuilt addon and the `bui-runtime` for **Windows x64**.
 - **Video:** Media Foundation, loaded at run time (Windows "N" editions without the Media Feature Pack start normally and report no video). H.264 always; HEVC, VP9 and AV1 with Microsoft's Store extensions. Tested on Windows 11 (Ryzen 7 5800U, Radeon graphics).
@@ -40,7 +40,7 @@ BUI runs on Windows, Linux and macOS. Windows and Linux are fully supported; mac
 - **GPU renderer:** OpenGL 3.3 core, through GLX for windows and EGL for offscreen rendering. Where OpenGL is missing, BUI falls back to the CPU raster.
 - **Tested on:** the C, Python, window and GPU parity tests pass on Mesa's software OpenGL and on an NVIDIA GPU. The suites also run under WSLg.
 - **Building from source** needs the X11 headers: `libx11-dev` (Debian, Ubuntu) or `libX11-devel` (Fedora). No GL headers are needed.
-- **JavaScript:** no prebuilt npm addon yet. Build it from a clone with `npm run build` in `bindings/node` (needs Rust, CMake and a C compiler); windows are native.
+- **JavaScript:** the npm packages ship a prebuilt addon and the `bui-runtime` for **Linux x64** (glibc 2.35 or later); windows are native. Elsewhere (musl, arm64), build it from a clone with `npm run build` in `bindings/node` (needs Rust, CMake and a C compiler).
 - **Video:** GStreamer 1.x, `dlopen`ed (no headers needed to build): install `gstreamer1.0-plugins-base` and `-good`, plus `gstreamer1.0-libav` (or `-plugins-bad` for openh264/dav1d) for H.264 and friends, and `gstreamer1.0-vaapi` / the `va` plugin for hardware decoding. Tested under WSL (Kali, GStreamer 1.24, software decoding); the OpenGL NV12 shader passes the parity test there on Mesa.
 
 ## macOS
@@ -60,7 +60,7 @@ The GPU renderer on Metal (or the OpenGL backend), and Node windows on the main 
 | Package | Platforms | Notes |
 | --- | --- | --- |
 | `blenderui` on PyPI | Windows x86_64, Linux x86_64 (manylinux), macOS arm64 and x86_64 | CPython 3.11, 3.12, 3.13 and 3.14. No musllinux or 32-bit wheels. Linux wheels include the native X11 host. |
-| `@blender-ui/native`, `@blender-ui/react` on npm | Windows x64 | Node.js 18 or newer, or Bun. Elsewhere, build the addon from source. |
+| `@blender-ui/native`, `@blender-ui/react` on npm | Windows x64, Linux x64 (glibc 2.35+), macOS arm64 and x64 (headless) | Node.js 18 or newer, or Bun. One package per platform (`@blender-ui/native-<platform>`), installed as an optional dependency. Elsewhere, build the addon from source. |
 | `blenderui` on crates.io | Any platform with CMake and a C compiler | `cargo add blenderui`; the C kit is compiled on first build. Rust 1.88 or newer. `blenderui-imgui` (Dear ImGui) is published too, next to the smaller crates `blenderui` builds on (`blenderui-sys`, `-macros`, `-tailwind`, `-paint`, `-table`, `-vlist`). |
 | `BlenderUI` on NuGet | Windows x64, Linux x64, macOS arm64 and x64 | .NET 8 or newer; the native kit ships in the package. Published from the next release. |
 | C and C++ (CMake) | Windows, Linux, macOS | CMake 3.20+, a C11 and C++20 compiler. |
@@ -78,9 +78,9 @@ The GPU renderer on Metal (or the OpenGL backend), and Node windows on the main 
 ## Not yet
 
 <StatusTable rows={[
-  ["WebAssembly", "planned", "The kit in a browser <code>&lt;canvas&gt;</code>, with the React and DOM-like APIs on top"],
+  ["WebAssembly", "partial", "Rust apps run in a browser <code>&lt;canvas&gt;</code> (<code>blenderui-web</code>, software raster only); the React and DOM-like APIs on top not yet"],
   ["Vulkan and WebGPU", "planned", "More GPU backends drawing the same instance stream"],
-  ["npm addons beyond Windows x64", "partial", "Build the addon from source on Linux; prebuilt per-platform packages would follow the napi-rs convention"],
+  ["npm addons for musl and arm64 Linux", "planned", "Prebuilt for Windows x64, Linux x64 (glibc) and macOS; build the addon from source elsewhere"],
 ]} />
 
 ## Next steps
