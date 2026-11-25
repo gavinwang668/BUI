@@ -95,8 +95,9 @@ const KEYSYMS = {
   Home: 'Home', End: 'End', PageUp: 'Prior', PageDown: 'Next', Insert: 'Insert', ' ': 'space',
 }
 
-/** Writes a string into the module's memory for `bui_key`; the module frees it. */
-function putString (exports, s) {
+/** Writes a string into the module's memory (`bui_alloc`) for `bui_key` or an app's own export that takes
+ *  one; the module frees it. Returns `[ptr, len]`. */
+export function putString (exports, s) {
   const bytes = new TextEncoder().encode(s)
   const ptr = exports.bui_alloc(bytes.length)
   new Uint8Array(exports.memory.buffer, ptr, bytes.length).set(bytes)

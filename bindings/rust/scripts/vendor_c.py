@@ -64,7 +64,8 @@ def check_sources() -> list[str]:
         text = re.sub(r"#[^\n]*", "", text)
         ft = cm.parent / "extern" / "freetype"
         imgui = cm.parent / "extern" / "imgui"
-        for tok in re.findall(r"[\w${}/.+-]+\.(?:c|cc|cpp|m|mm|h|hh)\b", text):
+        # not right after a backslash: `tif_\1.c` in a list(TRANSFORM ... REPLACE) is a pattern
+        for tok in re.findall(r"(?<![\\\w${}/.+-])[\w${}/.+-]+\.(?:c|cc|cpp|m|mm|h|hh)\b", text):
             if "CMAKE_SOURCE_DIR" in tok or tok.startswith(("tests/", "bench/")) and cm.parent == DEST:
                 continue  # examples/, tests/, bench/ of the top directory: only with tests/examples on
             path = (tok.replace("${CMAKE_CURRENT_SOURCE_DIR}/", "")

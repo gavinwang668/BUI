@@ -1,0 +1,156 @@
+/* The /charts pages (src/components/chart-docs). Colours are the site's tokens (global.css), and
+   dark mode follows <html data-theme>, like the rest of the site. */
+
+.charts-doc {
+  text-wrap: pretty;
+  font-variant-numeric: normal;
+}
+
+.charts-doc h1,
+.charts-doc h2,
+.charts-doc h3 {
+  text-wrap: balance;
+}
+
+/* shiki's two themes, written by scripts/gen-charts.mjs */
+.shiki,
+.shiki span {
+  color: var(--shiki-light);
+  font-style: var(--shiki-light-font-style);
+  font-weight: var(--shiki-light-font-weight);
+  text-decoration: var(--shiki-light-text-decoration);
+}
+
+.shiki {
+  background-color: transparent !important;
+}
+
+:root[data-theme="dark"] .shiki,
+:root[data-theme="dark"] .shiki span {
+  color: var(--shiki-dark);
+  font-style: var(--shiki-dark-font-style);
+  font-weight: var(--shiki-dark-font-weight);
+  text-decoration: var(--shiki-dark-text-decoration);
+}
+
+.code-block pre {
+  margin: 0;
+  padding: 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  tab-size: 4;
+}
+
+.api-doc {
+  font-size: 0.9375rem;
+  line-height: 1.7;
+}
+
+.api-doc > * + * {
+  margin-top: 1rem;
+}
+
+.api-doc h3,
+.api-doc h4,
+.api-doc h5 {
+  margin-top: 2rem;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  scroll-margin-top: 5rem;
+}
+
+.api-doc h3 {
+  font-size: 1.125rem;
+}
+
+.api-doc h4,
+.api-doc h5 {
+  font-size: 1rem;
+}
+
+.api-doc p code,
+.api-doc li code,
+.api-doc td code,
+.charts-doc :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+  padding: 0.1em 0.35em;
+  background: var(--surface-2);
+  outline: 1px solid var(--outline);
+  outline-offset: -1px;
+}
+
+.api-doc a,
+.prose-link {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  text-decoration-color: color-mix(in oklab, var(--link) 55%, transparent);
+}
+
+.api-doc a:hover,
+.prose-link:hover {
+  text-decoration-color: var(--link);
+}
+
+.api-doc ul {
+  list-style: disc;
+  padding-left: 1.25rem;
+}
+
+.api-doc ol {
+  list-style: decimal;
+  padding-left: 1.25rem;
+}
+
+.api-doc li + li {
+  margin-top: 0.35rem;
+}
+
+.api-doc pre {
+  border: 1px solid var(--border);
+  background: var(--code-bg);
+  padding: 1rem;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+
+.api-table {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+}
+
+.api-table table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.875rem;
+}
+
+.api-table th {
+  text-align: left;
+  font-weight: 600;
+  padding: 0.6rem 0.85rem;
+  background: var(--surface-2);
+  border-bottom: 1px solid var(--border);
+  white-space: nowrap;
+}
+
+.api-table td {
+  padding: 0.6rem 0.85rem;
+  vertical-align: top;
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.api-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 0.5rem 0;
+}

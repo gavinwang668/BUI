@@ -22,9 +22,9 @@ extern const GUID bui_IID_IDXGIFactory4;
 extern const GUID bui_IID_IDXGIAdapter;
 extern const GUID bui_IID_IDXGIAdapter1;
 
-/* The adapter `BUI_GPU_ADAPTER` asks for: "high-performance" is DXGI's choice for that preference
- * (the discrete GPU of a hybrid laptop, which Nsight and other vendor tools profile); unset or
- * "default" is NULL, the display's adapter Windows picks. The caller releases it. */
+/* The adapter BUI_gpu_adapter() names: for BUI_GPU_ADAPTER_HIGH_PERFORMANCE, DXGI's choice for that
+ * preference (the discrete GPU of a hybrid laptop, which Nsight and other vendor tools profile);
+ * otherwise NULL, the display's adapter Windows picks. The caller releases it. */
 IDXGIAdapter *bui_dx_preferred_adapter(void);
 /* BUI_GPU_DEBUG: which API and adapter the device runs on. */
 void bui_dx_report(const char *api, IDXGIAdapter *ad);

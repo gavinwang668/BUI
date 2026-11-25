@@ -17,8 +17,11 @@
  */
 module bui.node;
 
+import core.memory : GC;
+
 import bui.errors : BuiException;
 import bui.image : Image;
+import bui.internal.collected : deferFree, freeCollected;
 import bui.internal.refs : ensureRefHooks;
 import bui.internal.util : cslice, cstr;
 import bui.kit;
@@ -258,6 +261,7 @@ final class Node {
     /// Create a node of `type` (`"frame"`, `"button"`, `"slider"`, ...).
     this(string type) {
         ensureRefHooks();
+        freeCollected();
         handle = BK_node_new(cstr(type));
         if (handle is null) {
             throw new BuiException("Node", "unknown node type '" ~ type ~ "'");
@@ -279,7 +283,25 @@ final class Node {
     }
 
     ~this() {
+        if (GC.inFinalizer) {
+            collected();
+            return;
+        }
         free();
+    }
+
+    /// The GC finalized this wrapper (see bui.internal.collected): the D objects it reaches may be
+    /// gone already, so only native links are cut here and the node is freed at the next safe
+    /// point. A borrowed wrapper's node is the kit's.
+    private void collected() {
+        auto h = handle;
+        if (h is null || !owned) {
+            return;
+        }
+        handle = null;
+        BK_node_set_ref(h, null);
+        BK_custom_set(h, null, null); /* a custom node's handlers are D objects; 0 for other nodes */
+        deferFree(h, false);
     }
 
     /// Free the C node. A rooted tree's C-owned children are freed by the kit;
@@ -461,8 +483,8 @@ final class Node {
     /// away. Only an owned node reaches here; a borrowed wrapper has no say
     /// over the kit's native node. A detached D-owned child survives the free,
     /// so it takes its own subtree's entries into its own store while entries
-    /// for the freed tree go away. No allocation: this also runs from the GC
-    /// finalizer.
+    /// for the freed tree go away. Not from a GC finalizer: that path is
+    /// `collected`, which reaches no D object.
     private void dropHandlers(BKNode* h) {
         auto owner = handlerOwner();
         auto store = owner is null ? &store_ : &owner.store_;
