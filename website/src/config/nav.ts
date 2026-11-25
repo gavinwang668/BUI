@@ -15,6 +15,7 @@ export const sections = [
   { label: "C & C++", blurb: "The C kit and embedding BUI in your host", icon: "file-c" },
   { label: "Lua", blurb: "The bui-lua host and the bui module", icon: "moon" },
   { label: "D", blurb: "A DUB package with raw C declarations and D wrappers", icon: "code" },
+  { label: "C#", blurb: "C# components over every kit function", icon: "file-c-sharp" },
   { label: "Go", blurb: "The kit from Go, and MyGo-style views", icon: "file-code" },
   { label: "Ruby", blurb: "A C extension gem, with interfaces built from blocks", icon: "diamond" },
   { label: "Concepts", blurb: "How BUI works under the hood", icon: "lightbulb-filament" },
@@ -39,6 +40,7 @@ export const languages = [
   { id: "cpp", label: "C++" },
   { id: "imgui", label: "Dear ImGui" },
   { id: "d", label: "D" },
+  { id: "csharp", label: "C#" },
   { id: "go", label: "Go" },
   { id: "ruby", label: "Ruby" },
 ] as const;
