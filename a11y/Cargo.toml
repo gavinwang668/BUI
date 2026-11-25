@@ -1,13 +1,17 @@
 [package]
 name = "bui-a11y"
 description = "Screen-reader accessibility for the BUI kit: its flat node trees as AccessKit trees, and the platform adapters"
-version = "0.5.1"
-edition = "2024"
-license = "GPL-3.0-or-later"
-repository = "https://github.com/ppmpreetham/BUI"
-homepage = "https://bui.preetham.top"
-authors = ["BUI contributors"]
-rust-version = "1.88"
+# a member of the Rust bindings' workspace: one version and lock with the crates that use it, and
+# blenderui-sys can be packaged against it before it is on crates.io (`cargo package -p bui-a11y
+# -p blenderui-sys`)
+workspace = "../bindings/rust"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+homepage.workspace = true
+authors.workspace = true
+rust-version.workspace = true
 # include/bui_a11y.h: the C declarations of the ABI (the kit includes it)
 include = ["src/**", "include/**", "Cargo.toml"]
 
