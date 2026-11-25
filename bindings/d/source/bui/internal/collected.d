@@ -26,7 +26,7 @@ private struct Entry {
 private shared(Entry*) g_queue;
 
 /// Queue a native node or context for `freeCollected`. Finalizer-safe: no GC memory, no D calls.
-package void deferFree(void* handle, bool context) nothrow @nogc {
+package(bui) void deferFree(void* handle, bool context) nothrow @nogc {
     auto e = cast(Entry*) malloc(Entry.sizeof);
     if (e is null) {
         return; /* no memory: the native object leaks, which beats a crash */
@@ -41,7 +41,7 @@ package void deferFree(void* handle, bool context) nothrow @nogc {
 }
 
 /// Free what finalizers queued: every context, then every node. Call from ordinary code only.
-package void freeCollected() {
+package(bui) void freeCollected() {
     auto all = cast(Entry*) atomicExchange(&g_queue, cast(shared(Entry*)) null);
     foreach (pass; 0 .. 2) {
         const contexts = pass == 0;
