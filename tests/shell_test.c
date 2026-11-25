@@ -178,11 +178,13 @@ int main(void)
         g_ev[1].kind == BK_EV_DOUBLE && g_ev[2].kind == BK_EV_CLICK && g_ev[2].a == 2);
 #endif
 
-  /* a notification (on the tray icon) */
+  /* a notification (on the tray icon); without a notification center (macOS: a process that is not
+   * an app bundle) BK_notify refuses */
+  const int notifies = !!(features & BK_SHELL_NOTIFY);
   const int note = BK_notify("BUI", "A notification from the shell test", NULL);
-  CHECK(note > 0);
+  CHECK(notifies ? note > 0 : note == 0);
   const int note2 = BK_notify("BUI", "With an icon", "BLENDER");
-  CHECK(note2 > note);
+  CHECK(notifies ? note2 > note : note2 == 0);
 #ifdef _WIN32
   g_nev = 0;
   PostMessageW(shell, WM_BK_TRAY, 0, MAKELPARAM(NIN_BALLOONUSERCLICK, tray->uid));
@@ -283,7 +285,7 @@ int main(void)
 
   /* a notification without a tray: the shell's own icon shows while it does */
   const int note3 = BK_notify("BUI", "Without a tray icon", NULL);
-  CHECK(note3 > 0);
+  CHECK(notifies ? note3 > 0 : note3 == 0);
 #ifdef _WIN32
   CHECK(icon_exists(shell, 0));
   g_nev = 0;
