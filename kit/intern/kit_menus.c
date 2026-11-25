@@ -785,7 +785,58 @@ void bk_menu_on_close(BKNode *menu)
   (void)menu;
 }
 
-const BKClass bk_cls_menu = {.name = "menu",
+/* Accessibility (a11y/a11y.c): the rows as menu items, and a reader picking or focusing one. */
+static bool menu_a11y_item(BKNode *n, int i, BKA11yNode *r)
+{
+  int count;
+  BKMenuSpec *items = menu_items(n, &count);
+  if (i >= count) {
+    return false;
+  }
+  const BKMenuSpec *it = &items[i];
+  if (is_sep(it)) {
+    return true; /* generic: not shown */
+  }
+  r->role = it->checked >= 0 ? BK_ROLE_MENU_ITEM_CHECKBOX : BK_ROLE_MENU_ITEM;
+  r->name = it->text;
+  r->description = it->shortcut;
+  r->flags = BK_A11Y_CLICKABLE | BK_A11Y_FOCUSABLE | (it->enabled ? 0 : BK_A11Y_DISABLED);
+  if (it->checked >= 0) {
+    r->flags |= BK_A11Y_CHECKABLE | (it->checked ? BK_A11Y_CHECKED : 0);
+  }
+  if (it->nsub) {
+    r->flags |= BK_A11Y_POPUP | BK_A11Y_EXPANDABLE |
+                (menu_child_row(n) == i ? BK_A11Y_EXPANDED : 0);
+  }
+  int rr[4];
+  BK_menu_row_rect(n, i, rr);
+  r->x = (float)rr[0];
+  r->y = (float)rr[1];
+  r->w = (float)rr[2];
+  r->h = (float)rr[3];
+  return true;
+}
+
+static int menu_a11y_do(BKNode *n, int item, int action)
+{
+  if (item < 0) {
+    return 0;
+  }
+  if (action == BK_A11Y_CLICK || action == BK_A11Y_EXPAND) {
+    menu_pick(n, item);
+    return 1;
+  }
+  if (action == BK_A11Y_FOCUS) {
+    n->hot = item;
+    bk_invalidate(n);
+    return 1;
+  }
+  return 0;
+}
+
+const BKClass bk_cls_menu = {.name = "menu", .a11y_role = BK_ROLE_MENU,
+                             .a11y_item = menu_a11y_item,
+                             .a11y_do = menu_a11y_do,
                              .flags = CLS_INTERACTIVE | CLS_POPUP,
                              .free_ext = menu_free,
                              .measure = menu_measure,
@@ -1266,7 +1317,7 @@ static void pie_free(BKNode *n)
   free(pd);
 }
 
-const BKClass bk_cls_pie = {.name = "pie",
+const BKClass bk_cls_pie = {.name = "pie", .a11y_role = BK_ROLE_MENU,
                             .flags = CLS_INTERACTIVE | CLS_POPUP,
                             .anim_time = PIE_ANIMATION_TIMEOUT_S,
                             .free_ext = pie_free,
@@ -1368,7 +1419,7 @@ static void popover_panel_free(BKNode *n)
   free(n->ext);
 }
 
-const BKClass bk_cls_popover_panel = {.name = "popover_panel",
+const BKClass bk_cls_popover_panel = {.name = "popover_panel", .a11y_role = BK_ROLE_DIALOG,
                                       .flags = CLS_INTERACTIVE | CLS_POPUP,
                                       .free_ext = popover_panel_free,
                                       .measure = popover_panel_measure,

@@ -96,6 +96,29 @@ pub use blenderui_macros::rsx as view;
 /// `Option<T>` fields and `children`, and names missing required ones.
 pub use blenderui_macros::Props;
 
+#[cfg(target_os = "android")]
+pub mod android;
+
+/// Defines the Android entry point of the app: `blenderui::android_main!(my_app::run);` in the
+/// app's `staticlib` crate, where `run` is a `fn()` that runs an [`Application`](crate::prelude::Application)
+/// (the same function a desktop `main` calls). `platform/android/build.py --rust CRATE` links it
+/// into the APK.
+///
+/// The function the NativeActivity shell calls must have an unmangled name, which only `unsafe`
+/// code may give; the macro writes it, so the app's own code stays `unsafe`-free.
+#[macro_export]
+macro_rules! android_main {
+    ($main:path) => {
+        #[cfg(target_os = "android")]
+        #[unsafe(no_mangle)]
+        pub extern "C" fn bui_app_main() {
+            $crate::android::run($main);
+        }
+    };
+}
+
+#[cfg(feature = "a11y")]
+pub mod a11y;
 pub mod anim;
 pub mod motion;
 pub mod calc;

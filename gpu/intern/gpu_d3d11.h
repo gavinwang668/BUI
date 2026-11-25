@@ -1,9 +1,11 @@
-/* BUI GPU renderer (Direct3D 11) — private interface for gpu_raster.c.
+/* BUI GPU renderer — private interface for gpu_raster.c.
  *
  * A BuiRaster in GPU mode records its primitives as instances instead of
- * rasterizing them; this backend draws them into a persistent render target
+ * rasterizing them; the renderer draws them into a persistent render target
  * (so damage-region redraws work exactly like the software raster) and
- * presents it with a flip-model swap chain plus dirty rects.
+ * presents it with a flip-model swap chain plus dirty rects. On Windows it is
+ * gpu_device.c over a Direct3D 11 (gpu_d3d11.c) or Direct3D 12 (gpu_d3d12.c)
+ * backend; on Linux gpu_gl.c (OpenGL 3.3).
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #pragma once
@@ -44,11 +46,14 @@ typedef struct BuiGpuInst {
 typedef struct BuiGpu BuiGpu;
 
 /* Starts creating the device on a worker thread (the first frames keep
- * using the software raster). NULL when D3D11 isn't available. */
+ * using the software raster), on the API BUI_gpu_api() names. NULL when no
+ * GPU renderer is available. */
 /* `alpha`: frames keep premultiplied alpha (the target starts transparent, and the window
  * shows it with per-pixel alpha). */
 BuiGpu *bui_gpu_create(void *hwnd, int alpha);
 void bui_gpu_free(BuiGpu *g);
+/* The API the (ready) device runs on. */
+BuiGpuApi bui_gpu_api_of(const BuiGpu *g);
 /* 1 once the device is ready, -1 when creation failed, 0 while pending
  * (never 0 with `wait`). */
 int bui_gpu_state(BuiGpu *g, int wait);

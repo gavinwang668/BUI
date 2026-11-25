@@ -1573,6 +1573,12 @@ int bui_gpu_state(BuiGpu *g, int wait)
   return __atomic_load_n(&g->state, __ATOMIC_ACQUIRE);
 }
 
+BuiGpuApi bui_gpu_api_of(const BuiGpu *g)
+{
+  (void)g;
+  return BUI_GPU_API_OPENGL;
+}
+
 void bui_gpu_free(BuiGpu *g)
 {
   if (!g) {

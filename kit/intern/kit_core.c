@@ -22,6 +22,7 @@
 
 #include "BUI_anim.h"
 #include "BUI_blender_c.h"
+#include "a11y/a11y.h"
 #include "blender/bk_blender.h"
 #include "kit_intern.h"
 #include <stddef.h>
@@ -266,6 +267,7 @@ void BK_node_free(BKNode *n)
     return;
   }
   BK_anim_kill_target(n, -1); /* its motions stop: nothing writes to it any more */
+  bk_a11y_node_free(n);       /* no accessibility subtree shows it, nor does it hold one */
   if (n->parent) {
     node_detach(n);
   }
@@ -874,6 +876,14 @@ int bk_value_key(BKNode *n, BKEvent *e)
   return 0;
 }
 
+int bk_node_key(BKNode *n, BKEvent *e)
+{
+  if (n->cls->key) {
+    return n->cls->key(n, e);
+  }
+  return (n->cls->flags & CLS_VALUE) && bk_value_key(n, e);
+}
+
 int bk_value_wheel(BKNode *n, BKEvent *e)
 {
   if (EV_CTRL(e) && n->cls->step) {
@@ -904,7 +914,7 @@ void bk_begin_edit(BKNode *n, const char *text, bool select_all)
   bk_invalidate(n);
 }
 
-static void end_edit(BKContext *ctx, bool confirm)
+void bk_end_edit(BKContext *ctx, bool confirm)
 {
   if (confirm) {
     bk_ime_commit(ctx); /* Blender: a click outside inserts the text being composed */
@@ -926,10 +936,10 @@ int bk_edit_key(BKNode *n, BKEvent *e)
   BKContext *ctx = bk_ctx(n);
   const int res = bk_te_key(n->edit, ctx, e->text, e->keysym, e->mods);
   if ((res == TE_CONFIRM || res == TE_CANCEL) && ctx) {
-    end_edit(ctx, res == TE_CONFIRM);
+    bk_end_edit(ctx, res == TE_CONFIRM);
   }
   else if ((res == TE_NEXT || res == TE_PREV) && ctx) {
-    end_edit(ctx, true);
+    bk_end_edit(ctx, true);
     bk_edit_next(n, res == TE_NEXT ? 1 : -1);
   }
   bk_invalidate(n);
@@ -1737,6 +1747,7 @@ void BK_context_free(BKContext *ctx)
       break;
     }
   }
+  bk_a11y_ctx_free(ctx);
   free(ctx);
 }
 
@@ -1982,6 +1993,7 @@ static void undo_forget(BKContext *ctx, BKNode *subtree);
 void bk_forget(BKContext *ctx, BKNode *subtree)
 {
   undo_forget(ctx, subtree);
+  bk_a11y_forget(ctx, subtree);
   for (int i = ctx->nanim - 1; i >= 0; i--) {
     if (is_within(ctx->anim[i], subtree)) {
       const int last = --ctx->nanim;
@@ -2971,7 +2983,7 @@ static int in_BK_press(BKContext *ctx, int x, int y, int mods)
   }
   BKNode *target = hit_all(ctx, x, y);
   if (ctx->focus && target != ctx->focus) {
-    end_edit(ctx, true);
+    bk_end_edit(ctx, true);
   }
   set_hover(ctx, target);
   if (!target || !NODE_ENABLED(target)) {
@@ -3156,7 +3168,7 @@ static int in_BK_context_menu(BKContext *ctx, int x, int y, int mods)
     return 1;
   }
   if (ctx->focus) {
-    end_edit(ctx, true);
+    bk_end_edit(ctx, true);
   }
   BKNode *under = hit_all(ctx, x, y);
   if (under && (under->flags & NF_EVENTS)) { /* <Button-3> bindings see it first */
@@ -3224,11 +3236,16 @@ static int in_BK_key(BKContext *ctx, const char *text, const char *keysym, int m
   e.keysym = keysym ? keysym : "";
   snprintf(ctx->key_held, sizeof(ctx->key_held), "%s", e.keysym);
   ctx->interaction++;
+  ctx->key_taken = 0;
   for (BKNode *n = ctx->focus ? ctx->focus : ctx->hover; n; n = n->parent) {
     if (n->flags & NF_EVENTS) { /* Tk/Qt key bindings see the key first */
       bk_event(n, BK_EV_KEY, mods, &e);
       break;
     }
+  }
+  if (ctx->key_taken) { /* the host's binding acted on it: nothing else does */
+    ctx->key_taken = 0;
+    return 1;
   }
   if (ctx->modal) {
     if (bk_keysym_is(e.keysym, "Escape")) {
@@ -3267,14 +3284,9 @@ static int in_BK_key(BKContext *ctx, const char *text, const char *keysym, int m
     if (!NODE_ENABLED(n)) {
       continue;
     }
-    if (n->cls->key) {
-      e.lx = e.x - n->x;
-      e.ly = e.y - n->y;
-      if (n->cls->key(n, &e)) {
-        return 1;
-      }
-    }
-    else if ((n->cls->flags & CLS_VALUE) && bk_value_key(n, &e)) {
+    e.lx = e.x - n->x;
+    e.ly = e.y - n->y;
+    if (bk_node_key(n, &e)) {
       return 1;
     }
   }
@@ -3412,7 +3424,7 @@ void BK_focus_node(BKContext *ctx, BKNode *n)
 {
   if (!n) {
     if (ctx->focus) {
-      end_edit(ctx, true);
+      bk_end_edit(ctx, true);
     }
     return;
   }
@@ -3421,7 +3433,7 @@ void BK_focus_node(BKContext *ctx, BKNode *n)
   }
   if (n->cls == &bk_cls_textarea) {
     if (ctx->focus) {
-      end_edit(ctx, true);
+      bk_end_edit(ctx, true);
     }
     ctx->focus = n;
     bk_invalidate(n);
@@ -3849,6 +3861,13 @@ static int wheel_axis(BKContext *ctx, int x, int y, int delta, float px, int mod
 int BK_key(BKContext *ctx, const char *text, const char *keysym, int mods)
 {
   INPUT_ENTRY(in_BK_key(ctx, text, keysym, mods));
+}
+
+void BK_key_taken(BKContext *ctx)
+{
+  if (ctx) {
+    ctx->key_taken = 1;
+  }
 }
 
 int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods)

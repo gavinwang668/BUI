@@ -320,5 +320,5 @@ jobs:
         run: |
           python bindings/rust/scripts/vendor_c.py
           cd bindings/rust
-          cargo package -p blenderui-sys --allow-dirty
+          cargo package -p bui-a11y -p blenderui-sys --allow-dirty
           ls -l target/package/*.crate

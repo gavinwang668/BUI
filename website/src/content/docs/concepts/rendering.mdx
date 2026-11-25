@@ -84,7 +84,7 @@ The cost of the software raster grows with the number of pixels, which is why ve
 
 ## The GPU renderer
 
-The **GPU renderer** uses Direct3D 11 on Windows (`gpu_d3d11.c`) and OpenGL 3.3 on Linux (`gpu_gl.c`). It's modeled on how Blender batches its widgets (`GPU_SHADER_2D_WIDGET_BASE_INST` in `interface_widgets.cc`):
+The **GPU renderer** uses Direct3D 11 on Windows (`gpu_d3d11.c`), or Direct3D 12 when an app asks for it (`gpu_d3d12.c`: `Application::gpu_api`, `BUI_GPU_API=d3d12` or `bui build --gpu d3d12`), and OpenGL 3.3 on Linux (`gpu_gl.c`). Both Direct3D backends share one core (`gpu_device.c`) and draw identical pixels; Direct3D 12 costs a little more CPU per frame (about 0.4 to 1 ms here), so Direct3D 11 stays the default. It's modeled on how Blender batches its widgets (`GPU_SHADER_2D_WIDGET_BASE_INST` in `interface_widgets.cc`):
 
 - **One shader, many instances.** The kit makes the same drawing calls as on the CPU. In GPU mode, each call records one 128-byte **instance** instead of touching pixels. A single "uber-shader" draws them all, so a frame of thousands of widgets is a handful of instanced draw calls.
 - **Same formulas, same pixels.** The pixel shader evaluates the software raster's coverage formulas. The `gpu_parity` test draws every primitive both ways and finds 10 of 172,800 pixels that differ by more than 3/255, on both backends.
@@ -131,6 +131,7 @@ In short: the GPU halves (or better) the CPU cost per frame. In exchange, the pr
 | --- | --- |
 | `gpu=True` seems to do nothing | Run with `BUI_GPU_DEBUG=1`. It prints which step failed to stderr. |
 | No GPU in a Windows VM or CI | `BUI_GPU_WARP=1` creates the device on WARP, Windows' software Direct3D 11 driver. Handy for testing the GPU path. |
+| A hybrid laptop renders on the integrated GPU | Windows gives Direct3D the display's adapter. `BUI_GPU_ADAPTER=high-performance` asks for the discrete GPU, as for profiling it with the vendor's tools (NVIDIA Nsight). |
 | Headless OpenGL on Linux picks the wrong display | `BUI_GPU_EGL=surfaceless` or `BUI_GPU_EGL=default` picks the EGL platform. |
 | GPU text looks heavier than you'd like, or costs too much | Try the atlas: `BUI_SLUG=0`. |
 

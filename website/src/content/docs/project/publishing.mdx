@@ -115,13 +115,14 @@ The addon and `bui-runtime` ship in one package per platform, the napi-rs conven
 
 ## crates.io
 
-The eight crates below are on crates.io (version 0.2.0 at the time of writing), and users add them with `cargo add blenderui` (or `cargo add blenderui-imgui`). A tag push publishes them in dependency order:
+The nine crates below are on crates.io (version 0.2.0 at the time of writing), and users add them with `cargo add blenderui` (or `cargo add blenderui-imgui`). A tag push publishes them in dependency order:
 
 | Crate | What it is | Depends on |
 | --- | --- | --- |
 | `blenderui-tailwind` | Tailwind v4 class compiler (std only) | Nothing |
 | `blenderui-macros` | `rsx!` / `view!`, `#[component]`, `css!`, `tw!` | `blenderui-tailwind` |
-| `blenderui-sys` | FFI over the C kit; builds it with CMake | Nothing (CMake at build time) |
+| `bui-a11y` | Screen readers: the kit's accessibility trees as AccessKit trees (in `a11y/`, a member of the Rust workspace) | Nothing |
+| `blenderui-sys` | FFI over the C kit; builds it with CMake | `bui-a11y` (`a11y` feature; CMake at build time) |
 | `blenderui-paint` | Shared painting types: geometry, colors, the `PaintSink` trait, the text cache | Nothing |
 | `blenderui-table` | The data table's core (virtualization, sorting, selection) | `blenderui-paint` |
 | `blenderui-vlist` | The variable-height list's core (height index, anchored scrolling, sources) | `blenderui-paint` |

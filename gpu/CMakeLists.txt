@@ -10,7 +10,12 @@ set(SRC
   intern/gpu_raster.c
   intern/gpu_fonts.c # font folders, families by name, fallback fonts per script
   intern/gpu_effect.c # the registry and dialect of application shaders (BUI_effect_*)
-  intern/gpu_d3d11.c # without BUI_GPU (features.json), the stubs that keep rasters on the CPU
+  # the GPU renderer on Windows: the API-independent core (without BUI_GPU, features.json, the
+  # stubs that keep rasters on the CPU) over a Direct3D 11 or 12 backend, picked per device
+  intern/gpu_device.c
+  intern/gpu_dx.c # what the Direct3D backends share
+  intern/gpu_d3d11.c
+  intern/gpu_d3d12.c
 )
 
 add_library(bui_gpu STATIC ${SRC})

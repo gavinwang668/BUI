@@ -884,7 +884,22 @@ static void panel_draw_tree(BKNode *n)
   bk_clip_pop();
 }
 
-const BKClass bk_cls_panel = {.name = "panel",
+/* Accessibility (a11y/a11y.c): a reader opens or closes the panel (clicking its header toggles). */
+static int panel_a11y_do(BKNode *n, int item, int action)
+{
+  if (action == BK_A11Y_EXPAND || action == BK_A11Y_COLLAPSE) {
+    panel_set_open(n, action == BK_A11Y_EXPAND);
+    return 1;
+  }
+  if (action == BK_A11Y_CLICK) {
+    panel_set_open(n, n->flags & NF_COLLAPSED);
+    return 1;
+  }
+  return 0;
+}
+
+const BKClass bk_cls_panel = {.name = "panel", .a11y_role = BK_ROLE_GROUP,
+                              .a11y_do = panel_a11y_do,
                               .draw_tree = panel_draw_tree,
                               .flags = CLS_INTERACTIVE,
                               .drag_group = DRAG_GROUP_PANEL,
@@ -1075,7 +1090,36 @@ static void tabs_draw_tree(BKNode *n)
   bk_clip_pop();
 }
 
-const BKClass bk_cls_tabs = {.name = "tabs",
+/* Accessibility (a11y/a11y.c): the tabs, and a reader picking one. */
+static bool tabs_a11y_item(BKNode *n, int i, BKA11yNode *r)
+{
+  if (i >= n->items.n) {
+    return false;
+  }
+  int tx, tw;
+  tab_geom(n, i, &tx, &tw);
+  r->role = BK_ROLE_TAB;
+  r->name = n->items.v[i];
+  r->flags = BK_A11Y_SELECTABLE | BK_A11Y_CLICKABLE | (i == n->current ? BK_A11Y_SELECTED : 0);
+  r->x = (float)tx;
+  r->y = (float)n->y;
+  r->w = (float)tw;
+  r->h = (float)tab_h();
+  return true;
+}
+
+static int tabs_a11y_do(BKNode *n, int item, int action)
+{
+  if (item < 0 || action != BK_A11Y_CLICK) {
+    return 0;
+  }
+  tabs_select(n, item);
+  return 1;
+}
+
+const BKClass bk_cls_tabs = {.name = "tabs", .a11y_role = BK_ROLE_TAB_LIST,
+                             .a11y_item = tabs_a11y_item,
+                             .a11y_do = tabs_a11y_do,
                              .draw_tree = tabs_draw_tree,
                              .flags = CLS_INTERACTIVE,
                              .measure = tabs_measure,
@@ -1226,7 +1270,7 @@ static void sidetabs_draw(BKNode *n)
   }
 }
 
-const BKClass bk_cls_sidetabs = {.name = "sidetabs",
+const BKClass bk_cls_sidetabs = {.name = "sidetabs", .a11y_role = BK_ROLE_TAB_LIST,
                                  .flags = CLS_INTERACTIVE,
                                  .measure = sidetabs_measure,
                                  .arrange = sidetabs_arrange,
@@ -1501,7 +1545,7 @@ static void sb_init(BKNode *n)
   n->factor = 1.0;
 }
 
-const BKClass bk_cls_scrollbar = {.name = "scrollbar",
+const BKClass bk_cls_scrollbar = {.name = "scrollbar", .a11y_role = BK_ROLE_SCROLL_BAR,
                                   .flags = CLS_INTERACTIVE,
                                   .init = sb_init,
                                   .measure = sb_measure,
@@ -1569,7 +1613,7 @@ static void label_draw(BKNode *n)
   }
 }
 
-const BKClass bk_cls_label = {.name = "label", .measure = label_measure, .draw = label_draw};
+const BKClass bk_cls_label = {.name = "label", .a11y_role = BK_ROLE_LABEL, .measure = label_measure, .draw = label_draw};
 
 static void separator_init(BKNode *n)
 {
@@ -1622,7 +1666,7 @@ static void progress_draw(BKNode *n)
 }
 
 const BKClass bk_cls_progress = {
-    .name = "progress", .measure = progress_measure, .draw = progress_draw};
+    .name = "progress", .a11y_role = BK_ROLE_PROGRESS, .measure = progress_measure, .draw = progress_draw};
 
 /** \} */
 
@@ -1708,7 +1752,7 @@ static void button_draw(BKNode *n)
                BK_ALIGN_CENTER, NODE_ENABLED(n));
 }
 
-const BKClass bk_cls_button = {.name = "button",
+const BKClass bk_cls_button = {.name = "button", .a11y_role = BK_ROLE_BUTTON,
                                .flags = CLS_INTERACTIVE,
                                .measure = button_measure,
                                .draw = button_draw,
@@ -1811,7 +1855,7 @@ static void checkbox_draw(BKNode *n)
   .release = bool_release, .to_text = bool_to_text, .from_text = bool_from_text, .step = bool_step, \
   .reset = bool_reset, .activate = bool_toggle
 
-const BKClass bk_cls_checkbox = {.name = "checkbox",
+const BKClass bk_cls_checkbox = {.name = "checkbox", .a11y_role = BK_ROLE_CHECKBOX,
                                  BOOL_CLASS_COMMON,
                                  .measure = checkbox_measure,
                                  .draw = checkbox_draw};
@@ -1845,7 +1889,7 @@ static void toggle_draw(BKNode *n)
 }
 
 const BKClass bk_cls_toggle = {
-    .name = "toggle", BOOL_CLASS_COMMON, .measure = button_measure, .draw = toggle_draw};
+    .name = "toggle", .a11y_role = BK_ROLE_BUTTON, BOOL_CLASS_COMMON, .measure = button_measure, .draw = toggle_draw};
 
 static void decorator_measure(BKNode *n, int *rw, int *rh)
 {
@@ -1868,7 +1912,7 @@ static int decorator_context(BKNode *n, BKMenuSpec *items, int max)
   return 0;
 }
 
-const BKClass bk_cls_decorator = {.name = "decorator",
+const BKClass bk_cls_decorator = {.name = "decorator", .a11y_role = BK_ROLE_BUTTON,
                                   BOOL_CLASS_COMMON,
                                   .measure = decorator_measure,
                                   .draw = decorator_draw,
@@ -2395,7 +2439,7 @@ static void number_init(BKNode *n)
 }
 
 const BKClass bk_cls_number = {
-    .name = "number", NUMBER_CLASS_COMMON, .init = number_init, .draw = number_draw};
+    .name = "number", .a11y_role = BK_ROLE_SPIN_BUTTON, NUMBER_CLASS_COMMON, .init = number_init, .draw = number_draw};
 
 static void slider_init(BKNode *n)
 {
@@ -2420,7 +2464,7 @@ static void slider_draw(BKNode *n)
 }
 
 const BKClass bk_cls_slider = {
-    .name = "slider", NUMBER_CLASS_COMMON, .init = slider_init, .draw = slider_draw};
+    .name = "slider", .a11y_role = BK_ROLE_SLIDER, NUMBER_CLASS_COMMON, .init = slider_init, .draw = slider_draw};
 
 /** \} */
 
@@ -2617,7 +2661,7 @@ static void text_draw(BKNode *n)
   .to_text = text_to_text, .from_text = text_from_text, .reset = text_reset, \
   .activate = text_activate
 
-const BKClass bk_cls_text = {.name = "text", TEXT_CLASS_COMMON};
+const BKClass bk_cls_text = {.name = "text", .a11y_role = BK_ROLE_TEXT_INPUT, TEXT_CLASS_COMMON};
 
 static void search_init(BKNode *n)
 {
@@ -2626,7 +2670,7 @@ static void search_init(BKNode *n)
   bk_set_text(&n->placeholder, "Search");
 }
 
-const BKClass bk_cls_search = {.name = "search", TEXT_CLASS_COMMON, .init = search_init};
+const BKClass bk_cls_search = {.name = "search", .a11y_role = BK_ROLE_SEARCH_INPUT, TEXT_CLASS_COMMON, .init = search_init};
 
 /* Blender-style key text, e.g. "Ctrl Shift A". */
 static void key_label(BKEvent *e, char *buf, int size)
@@ -2752,7 +2796,7 @@ static void hotkey_draw(BKNode *n)
   bk_text_in(&r, v, w.text, BK_ALIGN_CENTER, false);
 }
 
-const BKClass bk_cls_hotkey = {.name = "hotkey",
+const BKClass bk_cls_hotkey = {.name = "hotkey", .a11y_role = BK_ROLE_TEXT_INPUT,
                                .flags = CLS_INTERACTIVE | CLS_VALUE,
                                .measure = hotkey_measure,
                                .draw = hotkey_draw,
@@ -2924,7 +2968,7 @@ static int dropdown_key(BKNode *n, BKEvent *e)
   return bk_value_key(n, e);
 }
 
-const BKClass bk_cls_dropdown = {.name = "dropdown",
+const BKClass bk_cls_dropdown = {.name = "dropdown", .a11y_role = BK_ROLE_COMBO_BOX,
                                  .flags = CLS_INTERACTIVE | CLS_VALUE,
                                  .init = choice_init,
                                  .measure = dropdown_measure,
@@ -3060,7 +3104,35 @@ static void enum_draw(BKNode *n)
   }
 }
 
-const BKClass bk_cls_enum = {.name = "enum",
+/* Accessibility (a11y/a11y.c): the segments as radio buttons, and a reader picking one. */
+static bool enum_a11y_item(BKNode *n, int i, BKA11yNode *r)
+{
+  if (i >= n->items.n) {
+    return false;
+  }
+  const BKRect s = enum_segment(n, i);
+  r->role = BK_ROLE_RADIO;
+  r->name = n->items.v[i];
+  r->flags = BK_A11Y_CHECKABLE | BK_A11Y_CLICKABLE | ((int)n->value == i ? BK_A11Y_CHECKED : 0);
+  r->x = (float)s.xmin;
+  r->y = (float)s.ymin;
+  r->w = (float)bk_rw(&s);
+  r->h = (float)bk_rh(&s);
+  return true;
+}
+
+static int enum_a11y_do(BKNode *n, int item, int action)
+{
+  if (item < 0 || action != BK_A11Y_CLICK) {
+    return 0;
+  }
+  bk_set_value(n, item);
+  return 1;
+}
+
+const BKClass bk_cls_enum = {.name = "enum", .a11y_role = BK_ROLE_RADIO_GROUP,
+                             .a11y_item = enum_a11y_item,
+                             .a11y_do = enum_a11y_do,
                              .flags = CLS_INTERACTIVE | CLS_VALUE,
                              .init = choice_init,
                              .measure = enum_measure,
@@ -3184,7 +3256,7 @@ static void swatch_draw(BKNode *n)
   }
 }
 
-const BKClass bk_cls_swatch = {.name = "swatch",
+const BKClass bk_cls_swatch = {.name = "swatch", .a11y_role = BK_ROLE_COLOR_WELL,
                                .flags = CLS_INTERACTIVE | CLS_VALUE,
                                .init = swatch_init,
                                .measure = swatch_measure,
@@ -3252,7 +3324,7 @@ static void popover_init(BKNode *n)
   BK_node_add(n, body, -1);
 }
 
-const BKClass bk_cls_popover = {.name = "popover",
+const BKClass bk_cls_popover = {.name = "popover", .a11y_role = BK_ROLE_BUTTON,
                                 .flags = CLS_INTERACTIVE,
                                 .init = popover_init,
                                 .measure = popover_measure,
@@ -3354,7 +3426,7 @@ static void menubutton_draw(BKNode *n)
                BK_ALIGN_CENTER, NODE_ENABLED(n));
 }
 
-const BKClass bk_cls_menubutton = {.name = "menubutton",
+const BKClass bk_cls_menubutton = {.name = "menubutton", .a11y_role = BK_ROLE_BUTTON,
                                    .flags = CLS_INTERACTIVE,
                                    .free_ext = menubutton_free,
                                    .measure = menubutton_measure,
@@ -3408,7 +3480,7 @@ static void menubar_draw(BKNode *n)
   bk_fill(n->x, n->y, n->w, n->h, bk_theme.header_bg);
 }
 
-const BKClass bk_cls_menubar = {.name = "menubar",
+const BKClass bk_cls_menubar = {.name = "menubar", .a11y_role = BK_ROLE_MENU_BAR,
                                 .measure = menubar_measure,
                                 .arrange = menubar_arrange,
                                 .draw = menubar_draw};
@@ -4294,7 +4366,7 @@ static void meter_draw(BKNode *n)
                      span > 0 ? (float)BK_CLAMP((n->value - n->vmin) / span, 0.0, 1.0) : 0.0f);
 }
 
-const BKClass bk_cls_meter = {.name = "meter",
+const BKClass bk_cls_meter = {.name = "meter", .a11y_role = BK_ROLE_METER,
                               .init = meter_init,
                               .free_ext = meter_free,
                               .measure = progress_measure,

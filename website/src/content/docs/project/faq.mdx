@@ -81,7 +81,7 @@ Not before 1.0, but it is versioned. `BUI_kit.h` has `BUI_KIT_VERSION_*` macros 
 
 ## Is BUI accessible to screen readers?
 
-Not yet. BUI draws its own widgets and doesn't talk to the platform's accessibility APIs. See [Limitations](../limitations/).
+On Windows, yes: BUI exposes its widgets and HTML elements to screen readers through UI Automation, with [AccessKit](https://accesskit.dev). Narrator and other readers see roles, names, values and states, and can press buttons, set values and move focus. macOS and Linux are next. See [Limitations](../limitations/).
 
 ## Can I use BUI in a commercial app?
 

@@ -1,0 +1,63 @@
+//! The integration tests in one binary: each test file was its own executable, every one linking
+//! the whole kit. Files that change or measure process-wide state (the theme, the UI scale, a
+//! counting allocator) stay separate.
+
+mod common;
+#[cfg(feature = "a11y")]
+mod a11y;
+mod animation;
+mod app_root;
+mod basic_css;
+mod css_redraw;
+mod css_spec;
+mod damage_drag;
+mod effects;
+mod features;
+mod font_fallback;
+mod gpu_turn;
+mod headless;
+mod hooks;
+mod images;
+mod listener_bounds;
+mod modern_css;
+mod motion;
+mod motion_builders;
+mod motion_clip_move;
+mod motion_derived;
+mod motion_drag;
+mod motion_hover_under;
+mod motion_inview_scroll;
+mod motion_layout;
+mod motion_layout_parent;
+mod motion_loop;
+mod motion_presence;
+mod motion_redraw;
+mod motion_redraw_work;
+mod motion_scroll;
+mod motion_selector;
+mod motion_stale;
+mod motion_widgets;
+mod option_child;
+mod option_props;
+mod pangui_layout;
+mod parity;
+mod perf_effects;
+mod render_target;
+mod rsx;
+mod screen;
+mod scroll_into_view;
+mod scroll_replace;
+mod selection;
+mod sound;
+mod struct_props;
+mod table;
+mod text_overflow;
+mod text_translate;
+mod textarea_grow;
+mod titlebar;
+mod vector_transforms;
+mod vlist;
+mod vlist_custom;
+mod widget_clip;
+mod widget_layers;
+mod widget_through;

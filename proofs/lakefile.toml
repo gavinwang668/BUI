@@ -1,0 +1,5 @@
+name = "bui-proofs"
+defaultTargets = ["Bui"]
+
+[[lean_lib]]
+name = "Bui"

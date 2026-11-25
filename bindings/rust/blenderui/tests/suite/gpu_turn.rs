@@ -3,7 +3,7 @@
 //! Needs a GPU (Direct3D 11 / OpenGL 3.3); without one the test has nothing
 //! to check and passes.
 
-mod common;
+use crate::common;
 
 use blenderui::effects::{transform, turn_box, turn_texture, Argb, Pixels, TURN_SHADER};
 use blenderui::{GpuTarget, Image, ShaderEffect};

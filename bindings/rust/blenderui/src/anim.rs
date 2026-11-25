@@ -1425,7 +1425,7 @@ impl Animations {
         let (now, frame) = (self.now, self.frame);
         let st = self.els.entry(key).or_default();
         st.seen = frame;
-        let u = Units { font_size: base.font_size, viewport: env.viewport };
+        let u = base.units(env.viewport);
         let mut running = false;
 
         // -- animations: keep the runs whose name stays, start new ones now
@@ -1608,7 +1608,7 @@ impl Animations {
             if !st.fields().all(|f| paint_field(f, leaf)) {
                 return None;
             }
-            let u = Units { font_size: p.base.font_size, viewport };
+            let u = p.base.units(viewport);
             let (w, h) = (n.bounds.size.width, n.bounds.size.height);
             let at = |c: &Computed| (c.translate.0.resolve(&u, w), c.translate.1.resolve(&u, h));
             let style = styles.private_mut(n.style);
@@ -1683,7 +1683,7 @@ impl Animations {
     /// Motion's values on top of the CSS animations (`out`: their result).
     fn apply_motion(&mut self, key: u64, base: &Computed, env: &Env, mut out: Option<Computed>) -> Option<Computed> {
         if env.motion.is_some() || self.motion.has(key) || crate::motion::pending() {
-            let u = Units { font_size: base.font_size, viewport: env.viewport };
+            let u = base.units(env.viewport);
             let start = out.take();
             let from = start.as_ref().unwrap_or(base);
             let mut moved = None;

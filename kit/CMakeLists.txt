@@ -76,6 +76,43 @@ else()
   target_sources(bui_kit PRIVATE intern/anim/anim_off.c)
 endif()
 
+# Accessibility (intern/a11y): each context's tree, and the adapter that serves it to screen
+# readers (bui-a11y, the Rust crate in a11y/ with AccessKit); without it, the API alone.
+if(BUI_A11Y)
+  target_sources(bui_kit PRIVATE intern/a11y/a11y.c)
+  target_include_directories(bui_kit PRIVATE ${BUI_SOURCE_DIR}/a11y/include)
+  # A Rust program links bui-a11y itself (blenderui-sys depends on the crate and turns this off);
+  # C builds get it from cargo, as a static library.
+  option(BUI_A11Y_CARGO "Build bui-a11y with cargo and link it (BUI_A11Y)" ON)
+  if(BUI_A11Y_CARGO)
+    find_program(BUI_CARGO cargo)
+    if(NOT BUI_CARGO)
+      message(FATAL_ERROR "BUI_A11Y needs cargo (Rust) to build a11y/: install it, or -DBUI_A11Y=OFF")
+    endif()
+    set(_a11y_dir ${CMAKE_CURRENT_BINARY_DIR}/a11y)
+    set(_a11y_lib ${_a11y_dir}/release/${CMAKE_STATIC_LIBRARY_PREFIX}bui_a11y${CMAKE_STATIC_LIBRARY_SUFFIX})
+    file(GLOB _a11y_src ${BUI_SOURCE_DIR}/a11y/src/*.rs)
+    add_custom_command(OUTPUT ${_a11y_lib}
+      COMMAND ${CMAKE_COMMAND} -E env CARGO_TARGET_DIR=${_a11y_dir}
+              ${BUI_CARGO} rustc --release --lib --crate-type staticlib
+              --manifest-path ${BUI_SOURCE_DIR}/a11y/Cargo.toml
+      DEPENDS ${_a11y_src} ${BUI_SOURCE_DIR}/a11y/Cargo.toml
+      COMMENT "bui-a11y (cargo)" USES_TERMINAL)
+    add_custom_target(bui_a11y_cargo DEPENDS ${_a11y_lib})
+    add_dependencies(bui_kit bui_a11y_cargo)
+    target_link_libraries(bui_kit PUBLIC ${_a11y_lib})
+    # what Rust's standard library needs (cargo rustc -- --print native-static-libs)
+    if(WIN32)
+      target_link_libraries(bui_kit PUBLIC kernel32 advapi32 ntdll userenv ws2_32 dbghelp)
+    else()
+      find_package(Threads REQUIRED)
+      target_link_libraries(bui_kit PUBLIC Threads::Threads ${CMAKE_DL_LIBS} m)
+    endif()
+  endif()
+else()
+  target_sources(bui_kit PRIVATE intern/a11y/a11y_off.c)
+endif()
+
 if(BUI_FILEBROWSER) # Blender's File Browser (editors/space_file)
   target_sources(bui_kit PRIVATE
     intern/kit_filebrowser_paths.c

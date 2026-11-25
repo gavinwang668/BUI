@@ -280,7 +280,7 @@ fn tailwind_classes() {
         assert_eq!(rect(cx, w, "b1").2, 40.0);
         assert_eq!(rect(cx, w, "b2").0, 16.0 + 40.0 + 16.0, "gap-4");
         assert_eq!(rect(cx, w, "b2").3, 48.0, "md: applies at 800px");
-        assert_eq!(rect(cx, w, "c1").2, 157.0, "col-span-2 of 3 (gap-x-2 = 8px), rounded");
+        assert!((rect(cx, w, "c1").2 - 472.0 / 3.0).abs() < 1e-3, "col-span-2 of 3 (gap-x-2 = 8px): fractional, as in a browser");
         assert_eq!(rect(cx, w, "g").3, 8.0);
         assert_eq!(rect(cx, w, "d").3, 28.0, "data-[state=open]:");
         assert_eq!(rect(cx, w, "e").3, 12.0, "hidden md:block");

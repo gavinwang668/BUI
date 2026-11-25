@@ -26,6 +26,10 @@ paste = "1"
 foldhash = { version = "0.2", default-features = false }
 smallvec = { version = "1", features = ["union", "const_generics"] }
 
+[target.'cfg(target_os = "android")'.dependencies]
+# the activity's JNI handles for crates that call into Java (android::run sets them)
+ndk-context = "0.1"
+
 [features]
 # Draw text with Windows' native GDI engine (system fonts) instead of the
 # default portable engine (embedded Inter, like Blender; Slug on the GPU).
@@ -33,7 +37,7 @@ gdi-text = ["blenderui-sys/gdi-text"]
 # GPU text with Slug by default (else the per-glyph atlas); see
 # `Application::slug` / `blenderui::set_slug` to switch at runtime.
 slug = ["blenderui-sys/slug"]
-default = ["slug", "png", "gif", "bmp", "tga", "qoi", "jpeg", "webp", "hdr", "pnm", "svg", "video", "gpu", "freetype", "filebrowser", "anim"]
+default = ["slug", "png", "gif", "bmp", "tga", "qoi", "jpeg", "webp", "hdr", "pnm", "svg", "video", "gpu", "freetype", "filebrowser", "anim", "a11y"]
 # The C kit's optional parts (features.json; see blenderui-sys): each costs
 # binary size only when on. tests/features.rs checks this list has them all.
 png = ["blenderui-sys/png"]
@@ -51,6 +55,7 @@ gpu = ["blenderui-sys/gpu"]
 freetype = ["blenderui-sys/freetype"]
 filebrowser = ["blenderui-sys/filebrowser"]
 anim = ["blenderui-sys/anim"]
+a11y = ["blenderui-sys/a11y"]
 # the Lua host builds from the repository (bindings/lua), not through cargo
 lua = ["blenderui-sys/lua"]
 # Deprecated no-op: the portable engine is the default everywhere.

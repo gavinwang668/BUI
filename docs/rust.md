@@ -471,7 +471,7 @@ autoscroll.
 On the `Window` (listeners get it): `selected_text() -> Option<String>`,
 `select_all()`, `clear_selection()`, `on_selection_change(|text, window, app| ..)`
 (fires for the user's changes) and `read_clipboard()` / `write_clipboard(text)`.
-`examples/selectable.rs` is a page of paragraphs; `tests/selection.rs` drives it
+`examples/selectable.rs` is a page of paragraphs; `tests/suite/selection.rs` drives it
 headlessly with `simulate_drag`, `simulate_click` and `simulate_key_with`.
 ## Screens, areas and regions
 
@@ -589,7 +589,7 @@ let chat = cx.new(|cx| ListState::new(ChatList::from_messages(synth::messages(0,
 // elsewhere: chat.update(cx, |s, _| s.push(message));   // follows while at the bottom
 ```
 
-For items that are not messages, build a `List` from your own `ItemSource`, `Measurer` and `ItemPainter` and show it with `variable_list(&state)`. A `Record` carries an `id`, `time` and `sender` values and `flags` bits (`FLAG_PLACEHOLDER` is the engine's, `FLAG_USER << n` is free), `text`, an image and opaque `data` bytes your look decodes (stored in the page's buffer, no allocation per item); `ItemPainter::hit` returns an item-local part id for a press, delivered by `VariableList::on_item_hit(|item, part, list| ..)` next to `on_item_click`; `on_item_hover(|item, list| ..)` reports the item under the pointer (`None` off it) and only repaints, and `on_copy(|state| ..)` returns the text Ctrl+C copies; `Measurer::estimator` has a default. Everything a look needs (`PaintSink`, `Palette`, `Rect`, `Rgba`, `Lines`, `Record`, ...) is re-exported from `blenderui::vlist`. Items are painted, not elements: no buttons or text fields inside an item. `examples/vlist_cards.rs` is a non-chat feed of task cards and `tests/vlist_custom.rs` runs a custom look headlessly. `bindings/rust/blenderui-vlist-gpui` is the same list for real gpui (outside the main workspace); its benchmark against gpui's `list` and gpui-component's `virtual_list` is in `bench/`. Measured numbers and the method are on the website page "Variable-height lists". Not built yet: selecting text across messages, a background measuring thread, damage regions, JavaScript and Python wrappers.
+For items that are not messages, build a `List` from your own `ItemSource`, `Measurer` and `ItemPainter` and show it with `variable_list(&state)`. A `Record` carries an `id`, `time` and `sender` values and `flags` bits (`FLAG_PLACEHOLDER` is the engine's, `FLAG_USER << n` is free), `text`, an image and opaque `data` bytes your look decodes (stored in the page's buffer, no allocation per item); `ItemPainter::hit` returns an item-local part id for a press, delivered by `VariableList::on_item_hit(|item, part, list| ..)` next to `on_item_click`; `on_item_hover(|item, list| ..)` reports the item under the pointer (`None` off it) and only repaints, and `on_copy(|state| ..)` returns the text Ctrl+C copies; `Measurer::estimator` has a default. Everything a look needs (`PaintSink`, `Palette`, `Rect`, `Rgba`, `Lines`, `Record`, ...) is re-exported from `blenderui::vlist`. Items are painted, not elements: no buttons or text fields inside an item. `examples/vlist_cards.rs` is a non-chat feed of task cards and `tests/suite/vlist_custom.rs` runs a custom look headlessly. `bindings/rust/blenderui-vlist-gpui` is the same list for real gpui (outside the main workspace); its benchmark against gpui's `list` and gpui-component's `virtual_list` is in `bench/`. Measured numbers and the method are on the website page "Variable-height lists". Not built yet: selecting text across messages, a background measuring thread, damage regions, JavaScript and Python wrappers.
 
 `blenderui::shadcn` also has `VirtualList` (`count` and an `item` closure that writes each item's text, so ten million rows cost a screenful) and `ChatList`, with TanStack Virtual's names: `estimate_size`, `overscan`, `get_item_key`, `on_range_change`, and `scroll_to_index` / `scroll_to_offset` / `measure_element` on the `ListHandle` that `use_virtual_list()` returns. They sit on `ListState` and `ItemSource` (the new `CountSource` and `RowStyle` in `blenderui-vlist`), so the file-backed source works under them. See the website page "Virtual list API" and `examples/site_shadcn_list.rs`.
 
@@ -615,7 +615,7 @@ The kit has global state, so one `Application` runs at a time per process
 
 ## Coverage
 
-From `cargo test --test parity -- --nocapture`:
+From `cargo test --test suite parity:: -- --nocapture`:
 
 | Area                                  | Coverage                                                                         |
 | ------------------------------------- | -------------------------------------------------------------------------------- |
@@ -629,7 +629,7 @@ From `cargo test --test parity -- --nocapture`:
 
 Beyond properties, the engine supports:
 - **Values:** every CSS math function (`calc`, `min`, `max`, `clamp`, `round`, `mod`, `rem`, trigonometry, `pow`, `hypot` ...) with mixed units, every length unit, and `var()` / `env()`.
-- **Colors:** CSS Color 4/5: `oklch`, `lab`, `color()`, `color-mix()`, relative colors and `light-dark()`.
+- **Colors:** CSS Color 4/5: `oklch`, `lab`, `color()`, `color-mix()`, relative colors and `light-dark()` (which, like the system colors and `prefers-color-scheme`, follows the theme's mode: `set_theme("light")` re-renders the windows).
 - **Selectors:** Selectors Level 4 (`:has()`, `:is()`, `:where()`, `:nth-child(of S)` ...), nesting, and `::before` / `::after` with `content`.
 - **At-rules:** `@media` (Media Queries 4 ranges), `@supports`, `@layer` and `@scope`.
 

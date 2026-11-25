@@ -380,6 +380,16 @@ Options:
 - `--console`: keep a console window for logs. By default, Windows builds open
   no console.
 - `--dev`: development builds (React's, Svelte's dev mode).
+- `--gpu d3d11|d3d12`: Windows, the Direct3D the GPU renderer starts with
+  (default `d3d11`; `BUI_GPU_API` overrides it at run time).
+- `--msix`: Windows, an MSIX package (installable, Store-ready) instead of a
+  bare `.exe`, with `--name`, `--version`, `--display-name`, `--description`,
+  `--publisher`, `--publisher-name`, `--icon`, `--include` and `--cert` /
+  `--cert-password` (unsigned without a certificate:
+  `Add-AppxPackage -AllowUnsigned` installs it).
+
+`npx bui package app.exe --msix` (or `--gpu d3d12`) releases any BUI
+executable the same way: a Rust or C app's too. The input is never changed.
 
 Framework packages add their bundler plugins: with `@blender-ui/svelte`
 installed, `.svelte` files bundle as they are.

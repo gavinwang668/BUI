@@ -377,6 +377,8 @@ pub struct Computed {
     pub color: Rgba,
     pub accent: Option<Rgba>,
     pub font_size: f32,
+    /// The root element's font size (`rem`): inherited by every element from the root.
+    pub root_font_size: f32,
     pub weight: u16,
     pub italic: bool,
     pub underline: bool,
@@ -489,6 +491,7 @@ impl Default for Computed {
             color: crate::color::rgb(0x000000), // initial: CanvasText
             accent: None,
             font_size: 13.0,
+            root_font_size: crate::geometry::ROOT_FONT_SIZE,
             weight: 400,
             italic: false,
             underline: false,
@@ -537,6 +540,11 @@ impl Default for Computed {
 
 impl Computed {
     /// A child's starting style: inherited properties from `parent`, the rest initial.
+    /// What this element's lengths resolve against in `viewport`.
+    pub(crate) const fn units(&self, viewport: (f32, f32)) -> Units {
+        Units { font_size: self.font_size, root_font_size: self.root_font_size, viewport }
+    }
+
     pub fn inherit(parent: &Computed) -> Computed {
         Computed {
             visible: parent.visible,
@@ -551,6 +559,7 @@ impl Computed {
             color: parent.color,
             accent: parent.accent,
             font_size: parent.font_size,
+            root_font_size: parent.root_font_size,
             weight: parent.weight,
             italic: parent.italic,
             text_align: parent.text_align,
@@ -671,7 +680,7 @@ pub(crate) fn supports_decl(prop: &str, value: &str) -> bool {
     }
     let parent = Computed::default();
     let mut c = Computed::default();
-    apply(&mut c, &parent, Units { font_size: 16.0, viewport: (1000.0, 800.0) }, &d)
+    apply(&mut c, &parent, Units::initial(16.0, (1000.0, 800.0)), &d)
 }
 
 /// The property index of `name` (run-time lookup for parsed CSS).
@@ -3410,7 +3419,7 @@ mod tests {
     fn computed(css: &str) -> Computed {
         let parent = Computed::default();
         let mut c = Computed::inherit(&parent);
-        let u = Units { font_size: 13.0, viewport: (800.0, 600.0) };
+        let u = Units::initial(13.0, (800.0, 600.0));
         for d in parse_declarations(css) {
             assert!(apply(&mut c, &parent, u, &d), "not applied: {}", d.prop);
         }

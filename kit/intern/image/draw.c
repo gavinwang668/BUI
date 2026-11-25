@@ -266,7 +266,7 @@ static void image_draw(BKNode *n)
   bk_image_ref_draw(&n->image, n->image_fit, n->image_frame, box, NODE_ENABLED(n) ? 1.0f : 0.5f);
 }
 
-const BKClass bk_cls_image = {.name = "image", .measure = image_measure, .draw = image_draw};
+const BKClass bk_cls_image = {.name = "image", .a11y_role = BK_ROLE_IMAGE, .measure = image_measure, .draw = image_draw};
 
 /** \} */
 

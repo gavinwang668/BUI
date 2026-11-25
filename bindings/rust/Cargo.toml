@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["blenderui-paint", "blenderui-vlist", "blenderui-table", "blenderui-sys", "blenderui-tailwind", "blenderui-macros", "blenderui", "blenderui-jsview", "blenderui-node", "blenderui-qjs", "blenderui-imgui", "blenderui-web"]
+members = ["blenderui-paint", "blenderui-vlist", "blenderui-table", "blenderui-sys", "blenderui-tailwind", "blenderui-macros", "blenderui", "blenderui-jsview", "blenderui-node", "blenderui-qjs", "blenderui-imgui", "blenderui-web", "../../a11y"]
 exclude = ["bench", "blenderui-table-gpui"]
 
 [workspace.package]
@@ -11,6 +11,14 @@ repository = "https://github.com/ppmpreetham/BUI"
 homepage = "https://bui.preetham.top"
 authors = ["BUI contributors"]
 rust-version = "1.88"
+
+# Each test and example links the whole kit: full debug info made each one's .pdb ~290 MB.
+# Line tables keep file:line in backtraces and panics.
+[profile.dev]
+debug = "line-tables-only"
+
+[profile.dev.package."*"]
+debug = false
 
 # Shipped binaries (bindings/node/scripts/build.js: the Node addon and the
 # QuickJS runtime): whole-program LTO in one codegen unit. bui-runtime.exe

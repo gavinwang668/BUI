@@ -520,7 +520,7 @@ static int video_key(BKNode *n, BKEvent *e)
   return 1;
 }
 
-const BKClass bk_cls_video = {.name = "video",
+const BKClass bk_cls_video = {.name = "video", .a11y_role = BK_ROLE_VIDEO,
                               .flags = CLS_INTERACTIVE,
                               .measure = video_measure,
                               .draw = video_draw,

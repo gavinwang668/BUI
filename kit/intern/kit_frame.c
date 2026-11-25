@@ -689,7 +689,7 @@ static int radio_to_text(BKNode *n, char *buf, int size)
   return 1;
 }
 
-const BKClass bk_cls_radio = {.name = "radio",
+const BKClass bk_cls_radio = {.name = "radio", .a11y_role = BK_ROLE_RADIO,
                               .flags = CLS_INTERACTIVE,
                               .measure = radio_measure,
                               .draw = radio_draw,

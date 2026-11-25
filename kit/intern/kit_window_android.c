@@ -27,11 +27,13 @@
 #  include <android/native_activity.h>
 #  include <android/native_window.h>
 #  include <jni.h>
+#  include <limits.h>
 #  include <math.h>
 #  include <pthread.h>
 #  include <stdatomic.h>
 #  include <stdlib.h>
 #  include <string.h>
+#  include <sys/stat.h>
 #  include <time.h>
 
 #  include "GPU_raster.h"
@@ -774,6 +776,32 @@ static void on_cmd(struct android_app *app, int32_t cmd)
   }
 }
 
+/* `name` = `path` unless the variable is set. */
+static void env_default(const char *name, const char *path)
+{
+  if (path && path[0]) {
+    setenv(name, path, 0);
+  }
+}
+
+/* The app's folders as the usual variables: HOME = files/, the cache = cache/ beside it. */
+static void app_folders(const ANativeActivity *activity)
+{
+  const char *files = activity->internalDataPath;
+  env_default("HOME", files);
+  const char *slash = files ? strrchr(files, '/') : NULL;
+  if (!slash) {
+    return;
+  }
+  char cache[PATH_MAX];
+  if (snprintf(cache, sizeof(cache), "%.*s/cache", (int)(slash - files), files) >= (int)sizeof(cache)) {
+    return;
+  }
+  mkdir(cache, 0700); /* the system makes it with the app; it may be cleared */
+  env_default("XDG_CACHE_HOME", cache);
+  env_default("TMPDIR", cache);
+}
+
 void BK_android_attach(void *android_app)
 {
   /* A new activity: the process (and these) may outlive the last one, which Back finished. */
@@ -784,6 +812,7 @@ void BK_android_attach(void *android_app)
   g_app = (struct android_app *)android_app;
   g_app->onAppCmd = on_cmd;
   g_app->onInputEvent = on_input;
+  app_folders(g_app->activity);
   pthread_mutex_lock(&g_wake_lock);
   g_looper = g_app->looper;
   pthread_mutex_unlock(&g_wake_lock);
@@ -800,6 +829,11 @@ void BK_android_detach(void)
 void *BK_android_assets(void)
 {
   return g_app ? (void *)g_app->activity->assetManager : NULL;
+}
+
+void *BK_android_activity(void)
+{
+  return g_app ? (void *)g_app->activity : NULL;
 }
 
 /* -- the loop ----------------------------------------------------------------------------------- */

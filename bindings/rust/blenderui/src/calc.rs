@@ -9,7 +9,7 @@
 //! (`tree.rs` evaluates it against the percentage basis during layout).
 
 use crate::css::Tok;
-use crate::geometry::{Units, ROOT_FONT_SIZE};
+use crate::geometry::Units;
 use crate::style::{key_hasher, KeyMap};
 use std::hash::{Hash, Hasher};
 use std::sync::{Mutex, OnceLock};
@@ -121,7 +121,7 @@ impl Calc {
             Num(v) | Px(v) => *v,
             Pct(p) => p * basis / 100.0,
             Em(v) => v * u.font_size,
-            Rem(v) => v * ROOT_FONT_SIZE,
+            Rem(v) => v * u.root_font_size,
             Vw(v) => v * u.viewport.0 / 100.0,
             Vh(v) => v * u.viewport.1 / 100.0,
             Vmin(v) => v * u.viewport.0.min(u.viewport.1) / 100.0,
@@ -300,7 +300,7 @@ impl Resolved {
     }
 
     pub fn eval(&self, basis: f32) -> f32 {
-        let u = Units { font_size: 16.0, viewport: (0.0, 0.0) };
+        let u = Units::initial(16.0, (0.0, 0.0));
         let v = self.0.eval_units(&u, basis);
         if v.is_nan() { 0.0 } else { v }
     }
@@ -480,12 +480,16 @@ pub fn leaf(v: f32, unit: &str) -> Option<Calc> {
         "px" => Calc::Px(v),
         "rem" => Calc::Rem(v),
         "em" => Calc::Em(v),
-        "ex" | "rex" => Calc::Em(v * 0.5),
-        "ch" | "rch" => Calc::Em(v * 0.55),
-        "cap" | "rcap" => Calc::Em(v * 0.7),
-        "ic" | "ric" => Calc::Em(v),
+        "ex" => Calc::Em(v * 0.5),
+        "rex" => Calc::Rem(v * 0.5),
+        "ch" => Calc::Em(v * 0.55),
+        "rch" => Calc::Rem(v * 0.55),
+        "cap" => Calc::Em(v * 0.7),
+        "rcap" => Calc::Rem(v * 0.7),
+        "ic" => Calc::Em(v),
+        "ric" => Calc::Rem(v),
         "lh" => Calc::Em(v * 1.3),
-        "rlh" => Calc::Px(v * ROOT_FONT_SIZE * 1.3),
+        "rlh" => Calc::Rem(v * 1.3),
         "vw" | "svw" | "lvw" | "dvw" | "vi" | "svi" | "lvi" | "dvi" | "cqw" | "cqi" => Calc::Vw(v),
         "vh" | "svh" | "lvh" | "dvh" | "vb" | "svb" | "lvb" | "dvb" | "cqh" | "cqb" => Calc::Vh(v),
         "vmin" | "svmin" | "lvmin" | "dvmin" | "cqmin" => Calc::Vmin(v),
@@ -519,7 +523,7 @@ mod tests {
         let t = tokenize(s);
         let Tok::Func(fx) = &t[0] else { panic!("{s}") };
         let c = Calc::parse_fn(&fx.name, &fx.args).unwrap_or_else(|| panic!("parse {s}"));
-        c.eval_units(&Units { font_size: 10.0, viewport: (1000.0, 500.0) }, basis)
+        c.eval_units(&Units::initial(10.0, (1000.0, 500.0)), basis)
     }
 
     #[test]
@@ -557,7 +561,7 @@ mod tests {
         let a = Calc::parse_fn(&fx.name, &fx.args).unwrap();
         let b = Calc::parse_fn(&fx.name, &fx.args).unwrap();
         assert!(std::ptr::eq(a, b));
-        let r = a.resolve(&Units { font_size: 20.0, viewport: (0.0, 0.0) });
+        let r = a.resolve(&Units::initial(20.0, (0.0, 0.0)));
         assert_eq!(r.eval(100.0), 80.0);
         assert_eq!(r.as_ptr() as usize % 8, 0);
     }

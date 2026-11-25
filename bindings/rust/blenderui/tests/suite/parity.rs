@@ -1,5 +1,5 @@
 //! Coverage of HTML elements and CSS properties (the numbers in the README).
-//! `cargo test --test parity -- --nocapture` prints the report.
+//! `cargo test --test suite parity:: -- --nocapture` prints the report.
 
 use blenderui::html::{tag_kind, TagKind, HTML_ELEMENT_COUNT, TAGS};
 use blenderui::style::{implemented_properties, is_implemented, is_supported, ACCEPTED};

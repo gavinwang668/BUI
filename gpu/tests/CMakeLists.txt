@@ -18,3 +18,12 @@ if(NOT MSVC)
   target_link_libraries(bui_gpu_effect PRIVATE m)
 endif()
 add_test(NAME gpu_effect COMMAND bui_gpu_effect)
+
+# Windows: the same GPU tests on Direct3D 12 (Direct3D 11 is the default). test_gpu_api.h fails a
+# run whose device fell back to Direct3D 11.
+if(WIN32)
+  foreach(t gpu_parity raster_alpha gpu_effect)
+    add_test(NAME ${t}_d3d12 COMMAND bui_${t})
+    set_tests_properties(${t}_d3d12 PROPERTIES ENVIRONMENT "BUI_GPU_API=d3d12")
+  endforeach()
+endif()

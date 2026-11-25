@@ -272,6 +272,55 @@ int BUI_gpu_default(void)
   return g_gpu_default > 0;
 }
 
+static BuiGpuApi g_gpu_api = BUI_GPU_API_DEFAULT;
+
+/* The baked default (GPU_raster.h): volatile, so the compiler neither folds it into the code nor
+ * drops it, and a patched executable is read as patched. */
+static volatile const char g_gpu_api_marker[BUI_GPU_API_MARKER_LEN] = BUI_GPU_API_MARKER;
+
+void BUI_gpu_set_api(BuiGpuApi api)
+{
+  if (api == BUI_GPU_API_DEFAULT || api == BUI_GPU_API_D3D11 || api == BUI_GPU_API_D3D12) {
+    g_gpu_api = api;
+  }
+}
+
+/* "d3d11" / "d3d12" (any case) at `s`, `n` bytes; BUI_GPU_API_DEFAULT for anything else. */
+static BuiGpuApi gpu_api_name(const char *s, size_t n)
+{
+  if (n != 5 || (s[0] | 0x20) != 'd' || s[1] != '3' || (s[2] | 0x20) != 'd' || s[3] != '1') {
+    return BUI_GPU_API_DEFAULT;
+  }
+  return s[4] == '1' ? BUI_GPU_API_D3D11 : s[4] == '2' ? BUI_GPU_API_D3D12 : BUI_GPU_API_DEFAULT;
+}
+
+BuiGpuApi BUI_gpu_api(void)
+{
+  const char *env = getenv("BUI_GPU_API");
+  if (env && env[0]) {
+    const BuiGpuApi api = gpu_api_name(env, strlen(env));
+    if (api != BUI_GPU_API_DEFAULT) {
+      return api;
+    }
+    const char *dbg = getenv("BUI_GPU_DEBUG");
+    if (dbg && dbg[0] >= '1' && dbg[0] <= '9') {
+      fprintf(stderr, "bui gpu: BUI_GPU_API=%s ignored (expected d3d11 or d3d12)\n", env);
+    }
+  }
+  if (g_gpu_api != BUI_GPU_API_DEFAULT) {
+    return g_gpu_api;
+  }
+  char baked[BUI_GPU_API_MARKER_LEN + 1];
+  size_t n = 0;
+  for (; n < BUI_GPU_API_MARKER_LEN && g_gpu_api_marker[n]; n++) {
+    baked[n] = g_gpu_api_marker[n];
+  }
+  baked[n] = 0;
+  const size_t eq = sizeof("BUIGPUAPI=") - 1;
+  const BuiGpuApi api = n > eq ? gpu_api_name(baked + eq, n - eq) : BUI_GPU_API_DEFAULT;
+  return api != BUI_GPU_API_DEFAULT ? api : BUI_GPU_API_D3D11;
+}
+
 #ifndef BUI_SLUG_DEFAULT
 #  define BUI_SLUG_DEFAULT 1
 #endif
@@ -377,6 +426,11 @@ int BUI_raster_gpu_pending(const BuiRaster *r)
 int BUI_raster_is_gpu(const BuiRaster *r)
 {
   return r->gpu != NULL;
+}
+
+BuiGpuApi BUI_raster_gpu_api(const BuiRaster *r)
+{
+  return r->gpu ? bui_gpu_api_of(r->gpu) : BUI_GPU_API_DEFAULT;
 }
 
 /* back to the software raster (device lost) */

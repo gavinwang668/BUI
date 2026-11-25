@@ -8,7 +8,7 @@ use blenderui_sys as sys;
 use super::element::{Elements, Slot, start};
 use super::spec::Layout;
 use super::value::{Key, Value};
-use crate::geometry::{Bounds, Units};
+use crate::geometry::Bounds;
 use crate::layout::{BoxNode, Frame, StyleStore};
 use taffy::style::Position;
 
@@ -80,7 +80,7 @@ impl Elements {
 /// has no parent to follow.
 fn laid_out(frame: &Frame, n: &BoxNode, styles: &StyleStore, viewport: (f32, f32)) -> Bounds<f32> {
     let st = &styles[n.style];
-    let u = Units { font_size: st.font_size, viewport };
+    let u = st.units(viewport);
     let (w, h) = (n.bounds.size.width, n.bounds.size.height);
     let (mut x, mut y) = (n.bounds.origin.x - st.translate.0.resolve(&u, w), n.bounds.origin.y - st.translate.1.resolve(&u, h));
     if let Some(p) = n.parent.filter(|_| st.layout.position != Position::Fixed).and_then(|p| frame.nodes.get(p)) {

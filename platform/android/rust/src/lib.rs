@@ -1,5 +1,6 @@
-//! A BUI app in Rust on Android: the same code as on a desktop. `bui_app_main` is what the
-//! NativeActivity shell (platform/android/bui_android.c) calls; the window is the kit's Android host
+//! A BUI app in Rust on Android: the same code as on a desktop. `bui_app_main` (written by
+//! `blenderui::android_main!`) is what the NativeActivity shell (platform/android/bui_android.c)
+//! calls; the window is the kit's Android host
 //! (kit/intern/kit_window_android.c), so `Application::run` needs nothing Android-specific.
 //!
 //! Three tabs: the widgets, a list of ten million rows and a chat of a hundred thousand messages.
@@ -110,9 +111,11 @@ impl Render for Demo {
     }
 }
 
+// the entry point the shell calls (`bui_app_main`), written by the macro
+blenderui::android_main!(run);
+
 /// The app: open the window and run until the activity ends.
-#[unsafe(no_mangle)]
-pub extern "C" fn bui_app_main() {
+fn run() {
     Application::new().run(|cx: &mut App| {
         cx.open_window(WindowOptions::default(), |_, cx| {
             let rows = cx.new(|cx| {
