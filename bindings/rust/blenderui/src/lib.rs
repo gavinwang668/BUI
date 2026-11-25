@@ -117,6 +117,8 @@ macro_rules! android_main {
     };
 }
 
+#[cfg(feature = "a11y")]
+pub mod a11y;
 pub mod anim;
 pub mod motion;
 pub mod calc;

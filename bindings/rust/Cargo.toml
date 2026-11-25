@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["blenderui-paint", "blenderui-vlist", "blenderui-table", "blenderui-sys", "blenderui-tailwind", "blenderui-macros", "blenderui", "blenderui-jsview", "blenderui-node", "blenderui-qjs", "blenderui-imgui", "blenderui-web"]
+members = ["blenderui-paint", "blenderui-vlist", "blenderui-table", "blenderui-sys", "blenderui-tailwind", "blenderui-macros", "blenderui", "blenderui-jsview", "blenderui-node", "blenderui-qjs", "blenderui-imgui", "blenderui-web", "../../a11y"]
 exclude = ["bench", "blenderui-table-gpui"]
 
 [workspace.package]

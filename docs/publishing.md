@@ -190,7 +190,8 @@ repository:
 |---|---|---|---|
 | `blenderui-tailwind` | Tailwind v4 class compiler (std only) | none | Published |
 | `blenderui-macros` | `rsx!` / `view!`, `#[component]`, `css!`, `tw!` | `blenderui-tailwind` | Published |
-| `blenderui-sys` | FFI over the C kit; builds it with CMake | none (`cmake` at build time) | Published |
+| `bui-a11y` | screen readers: the kit's accessibility trees as AccessKit trees (lives in `a11y/`, a member of this workspace) | none | Published |
+| `blenderui-sys` | FFI over the C kit; builds it with CMake | `bui-a11y` (`a11y` feature; `cmake` at build time) | Published |
 | `blenderui-paint` | shared painting types: geometry, colors, `PaintSink`, the text cache | none | Published |
 | `blenderui-table` | the data table's core | `blenderui-paint` | Published |
 | `blenderui-vlist` | the variable-height list's core | `blenderui-paint` | Published |
@@ -208,6 +209,8 @@ crate's `include`:
 python bindings/rust/scripts/vendor_c.py          # copies ~7 MB into blenderui-sys/csrc/
 cd bindings/rust
 cargo package --workspace --allow-dirty           # builds each packaged crate in isolation
+# blenderui-sys alone needs bui-a11y with it until that version is on crates.io:
+# cargo package -p bui-a11y -p blenderui-sys --allow-dirty
 ```
 
 `build.rs` looks for the C sources in three places, in order:
@@ -231,6 +234,7 @@ cd bindings/rust
 cargo publish --workspace --allow-dirty   # or, one by one:
 # cargo publish -p blenderui-tailwind
 # cargo publish -p blenderui-macros
+# cargo publish -p bui-a11y
 # cargo publish -p blenderui-sys --allow-dirty
 # cargo publish -p blenderui
 ```

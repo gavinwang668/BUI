@@ -366,6 +366,13 @@ typedef struct BKClass {
   void (*detach)(BKNode *n, BKNode *child);
   /* `child` has left: no longer among the kids, its parent cleared (the notices go here) */
   void (*detached)(BKNode *n, BKNode *child);
+  /* Accessibility (a11y/a11y.c): what the node is to a screen reader (BK_ROLE_*; 0, generic: a
+   * container the reader looks through), the items it draws itself (tabs, rows, menu entries:
+   * item i's role, name, states and bounds into *r, false past the last) and a reader's request
+   * on the node (item -1) or an item, when the class does it its own way (1 when done). */
+  int a11y_role;
+  bool (*a11y_item)(BKNode *n, int i, BKA11yNode *r);
+  int (*a11y_do)(BKNode *n, int item, int action);
 } BKClass;
 
 enum {
@@ -501,6 +508,10 @@ struct BKNode {
   void *on_change_data;
   void (*on_click)(BKNode *n, void *data);
   void *on_click_data;
+  /* accessibility (a11y/a11y.c): the host's subtree shown for this node, and the node whose
+   * subtree shows this one (a widget in it) */
+  struct BKA11ySub *a11y_sub;
+  BKNode *a11y_holder;
 };
 
 #define NODE_VISIBLE(n) (((n)->flags & NF_VISIBLE) != 0)
@@ -550,9 +561,13 @@ void bk_set_value(BKNode *n, double v);           /* clamp + notify */
 void bk_set_value_silent(BKNode *n, double v);
 double bk_clamp_value(const BKNode *n, double v);
 int bk_value_key(BKNode *n, BKEvent *e);          /* Blender value shortcuts */
+/* A key for `n` alone, as the hovered widget gets it (its class's key handler, else the value
+ * shortcuts): 1 when handled. */
+int bk_node_key(BKNode *n, BKEvent *e);
 int bk_value_wheel(BKNode *n, BKEvent *e);        /* Ctrl+Wheel */
 int bk_value_context_items(BKNode *n, BKMenuSpec *items, int max);
 void bk_begin_edit(BKNode *n, const char *text, bool select_all);
+void bk_end_edit(BKContext *ctx, bool confirm); /* the field being edited stops (confirmed or not) */
 int bk_edit_key(BKNode *n, BKEvent *e);           /* routes to TextEdit, confirms/cancels */
 
 /* -------------------------------------------------------------------- */
@@ -664,6 +679,8 @@ struct BKContext {
   double custom_timer_due; /* armed BK_TIMER_CUSTOM (bk_time), 0 = none */
   /* every live context (BK_set_theme redraws them all) */
   BKContext *next_ctx;
+  /* its accessibility tree, made when a screen reader first asks (a11y/a11y.c) */
+  struct BKA11yCtx *a11y;
 };
 
 /* Applies BUI_THEME the first time a theme is needed (unless BK_set_theme ran). */

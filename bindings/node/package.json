@@ -57,6 +57,7 @@
     "features.js",
     "features.json",
     "platform.js",
+    "windows.js",
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md"

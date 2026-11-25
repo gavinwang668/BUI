@@ -300,7 +300,7 @@ static void sidebar_draw(BKNode *n)
   }
 }
 
-const BKClass bk_cls_sidebar = {.name = "sidebar",
+const BKClass bk_cls_sidebar = {.name = "sidebar", .a11y_role = BK_ROLE_PANE,
                                 .flags = CLS_INTERACTIVE,
                                 .measure = sidebar_measure,
                                 .arrange = sidebar_arrange,
@@ -387,7 +387,7 @@ static void areaheader_draw(BKNode *n)
   bk_fill(n->x, n->y, n->w, n->h, bk_theme.area_header);
 }
 
-const BKClass bk_cls_areaheader = {.name = "areaheader",
+const BKClass bk_cls_areaheader = {.name = "areaheader", .a11y_role = BK_ROLE_TOOLBAR,
                                    .measure = areaheader_measure,
                                    .arrange = areaheader_arrange,
                                    .draw = areaheader_draw};

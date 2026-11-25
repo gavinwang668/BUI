@@ -530,7 +530,7 @@ static bool area_accept(BKNode *n, BKNode *child)
   return true;
 }
 
-const BKClass bk_cls_area = {.name = "area",
+const BKClass bk_cls_area = {.name = "area", .a11y_role = BK_ROLE_PANE,
                              .flags = CLS_INTERACTIVE,
                              .init = area_init,
                              .free_ext = area_free,

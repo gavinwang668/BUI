@@ -25,9 +25,14 @@
 #  include <dwmapi.h> /* types only: the calls go through dwm_proc */
 #  include <windowsx.h>
 
+#  include "a11y/a11y.h"
 #  include "kit_ime_win32.h"
+#  ifdef BUI_A11Y
+#    include "bui_a11y.h"
+#  endif
 
 #  define WM_BK_RENDER (WM_APP + 1)
+#  define WM_BK_A11Y (WM_APP + 2) /* a screen reader's request waits (bk_a11y_serve) */
 #  define ID_TIP 1
 #  define ID_ANIM 2
 #  define ID_WAKE 3 /* BK_TIMER_CUSTOM: custom nodes' frames */
@@ -70,6 +75,7 @@ struct BKWindow {
     int w, h;
   } layer;
   BKImeWin32 ime;                 /* the IME (GHOST_ImeWin32) */
+  BuiA11y *a11y;                  /* the UI Automation adapter (a11y/a11y.h), NULL without one */
   WPARAM last_vk;                 /* the virtual key of the last WM_KEYDOWN */
   struct WinTimer {               /* armed timers: reopen() moves them to the new window */
     UINT_PTR id;
@@ -650,6 +656,7 @@ static void do_render(BKWindow *win)
   }
   const int regions = BK_render(win->ctx, win->raster, w, h, win->full);
   ime_sync(win); /* the draw placed the caret */
+  bk_a11y_sync(win->ctx, win->a11y, regions > 0); /* a screen reader sees what changed */
   QueryPerformanceCounter(&t1);
   win->full = 0;
   if (regions || whole) {
@@ -828,6 +835,18 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_BK_RENDER:
       render_message(win, true);
       return 0;
+#  ifdef BUI_A11Y
+    case WM_GETOBJECT: { /* UI Automation asks: the adapter starts (the tree is built from now) */
+      intptr_t r;
+      if (bui_a11y_wm_getobject(win->a11y, wp, lp, &r)) {
+        return r;
+      }
+      break;
+    }
+#  endif
+    case WM_BK_A11Y:
+      bk_a11y_serve(ctx, win->a11y);
+      return 0;
     case WM_PAINT: {
       /* An exposed region has no content in the compositor's surface (it was off screen or
        * covered while dirty-rect presents went by): the frame is presented whole, before the next
@@ -930,7 +949,8 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
     case WM_NCMOUSEMOVE:
     case WM_NCLBUTTONDOWN:
     case WM_NCLBUTTONDBLCLK:
-      if (wp == HTMAXBUTTON) { /* the app's maximize button: its pointer, as the client's */
+      /* the app's maximize button: its pointer, as the client's (the system's stays the system's) */
+      if (wp == HTMAXBUTTON && win->override == 2) {
         POINT pt = {GET_X_LPARAM(lp), GET_Y_LPARAM(lp)};
         ScreenToClient(hwnd, &pt);
         if (msg == WM_NCMOUSEMOVE) {
@@ -950,7 +970,7 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       }
       break;
     case WM_SETCURSOR:
-      if (LOWORD(lp) == HTCLIENT || LOWORD(lp) == HTMAXBUTTON) {
+      if (LOWORD(lp) == HTCLIENT || (LOWORD(lp) == HTMAXBUTTON && win->override == 2)) {
         SetCursor(cursor_handle(win->cursor));
         return TRUE;
       }
@@ -1168,6 +1188,9 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       }
       return 0;
     case WM_ACTIVATE:
+#  ifdef BUI_A11Y
+      bui_a11y_window_focus(win->a11y, LOWORD(wp) != WA_INACTIVE);
+#  endif
       bk_window_focus(win->ctx, win, &win->cb, LOWORD(wp) != WA_INACTIVE);
       break;
     case WM_CLOSE:
@@ -1184,6 +1207,21 @@ static LRESULT CALLBACK wndproc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp)
       return 0;
   }
   return DefWindowProcW(hwnd, msg, wp, lp);
+}
+
+/* A request from a screen reader waits (any thread): served on the window's (WM_BK_A11Y). */
+static void a11y_wake(void *data)
+{
+  PostMessageW(((BKWindow *)data)->hwnd, WM_BK_A11Y, 0, 0);
+}
+
+/* The window's UI Automation adapter, for its HWND (made again with the window). */
+static void a11y_attach(BKWindow *win)
+{
+#  ifdef BUI_A11Y
+  bui_a11y_free(win->a11y);
+#  endif
+  win->a11y = bk_a11y_open(win->ctx, win->hwnd, a11y_wake, win);
 }
 
 BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height)
@@ -1241,6 +1279,8 @@ BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height
   BKHost host = {win,           host_request,       host_set_cursor, host_warp,
                  host_clipboard_get, host_clipboard_set, host_schedule, host_emit};
   BK_context_set_host(ctx, &host);
+  bk_a11y_title(ctx, title);
+  a11y_attach(win);
   return win;
 }
 
@@ -1249,6 +1289,9 @@ void BK_window_free(BKWindow *win)
   if (!win) {
     return;
   }
+#  ifdef BUI_A11Y
+  bui_a11y_free(win->a11y);
+#  endif
   if (win->hwnd) {
     SetWindowLongPtrW(win->hwnd, GWLP_USERDATA, 0);
     DestroyWindow(win->hwnd);
@@ -1298,6 +1341,7 @@ void BK_window_set_title(BKWindow *win, const char *title)
     SetWindowTextW(win->hwnd, w);
     free(w);
   }
+  bk_a11y_title(win->ctx, title);
 }
 
 void BK_window_set_size(BKWindow *win, int width, int height)
@@ -1427,6 +1471,7 @@ static int reopen(BKWindow *win, LONG_PTR ex)
   SetWindowLongPtrW(h, GWLP_USERDATA, (LONG_PTR)win);
   win->hwnd = h;
   timers_rearm(win);
+  a11y_attach(win);
   DestroyWindow(old);
   if (style & WS_VISIBLE) {
     ShowWindow(h, SW_SHOW);

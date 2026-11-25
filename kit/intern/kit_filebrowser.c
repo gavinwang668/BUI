@@ -659,7 +659,7 @@ static void fb_free(BKNode *n)
   n->ext = NULL;
 }
 
-const BKClass bk_cls_filebrowser = {.name = "filebrowser",
+const BKClass bk_cls_filebrowser = {.name = "filebrowser", .a11y_role = BK_ROLE_GROUP,
                                     .flags = CLS_INTERACTIVE,
                                     .init = fb_init,
                                     .free_ext = fb_free,

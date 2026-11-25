@@ -2,6 +2,7 @@
  * BUI_raster_set_alpha is premultiplied 0xAARRGGBB and BUI_raster_clear makes it transparent.
  * SPDX-License-Identifier: GPL-2.0-or-later */
 #include "GPU_raster.h"
+#include "test_gpu_api.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -42,7 +43,7 @@ static int gpu_matches_cpu(void)
   BuiRaster *cpu = BUI_raster_create(16, 16), *gpu = BUI_raster_create(16, 16);
   BUI_raster_set_alpha(cpu, 1);
   BUI_raster_set_alpha(gpu, 1);
-  if (!BUI_raster_gpu_attach(gpu, NULL, 1)) {
+  if (!test_gpu_attach(gpu)) {
     printf("raster alpha: no GPU device, GPU part skipped\n");
     BUI_raster_free(cpu);
     BUI_raster_free(gpu);

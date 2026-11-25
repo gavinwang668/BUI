@@ -8,7 +8,10 @@
 //! cargo run --release --example bench_frames -j 1 [-- static|list|text|anim|chat] [iterations]
 //! BUI_PROFILE=1 cargo run --release --example bench_frames -j 1 -- static   # per-phase times
 //! BUI_ALLOC_TRACE=1 cargo run --release --example bench_frames -j 1 -- static  # where one frame allocates
+//! BUI_BENCH_A11Y=1 cargo run --release --example bench_frames -j 1 -- static  # a screen reader attached
 //! ```
+//! `BUI_BENCH_A11Y=1`: a screen reader reads each window (the page's accessibility subtree is built
+//! every frame); `=2`: the whole tree is also read every frame, as a window host sends it.
 //! Run one scenario per process: closed off-screen windows keep rendering inside the same process, which
 //! slows the scenarios after them. Allocation sites need symbols (`CARGO_PROFILE_RELEASE_DEBUG=1`).
 
@@ -139,7 +142,29 @@ fn open<V: Render>(cx: &mut App, v: impl FnOnce(&mut App) -> V) -> WindowHandle<
         ..Default::default()
     };
     let v = v(cx);
-    cx.open_window(opts, |_, cx| cx.new(|_| v)).unwrap()
+    let win = cx.open_window(opts, |_, cx| cx.new(|_| v)).unwrap();
+    #[cfg(feature = "a11y")]
+    if reader() > 0 {
+        cx.draw(win.id);
+        let _ = cx.accessibility_tree(win.id);
+    }
+    win
+}
+
+/// `BUI_BENCH_A11Y`: 0 no screen reader, 1 one reads the windows, 2 and the tree is read every frame.
+#[cfg_attr(not(feature = "a11y"), allow(dead_code))]
+fn reader() -> u8 {
+    static READER: std::sync::OnceLock<u8> = std::sync::OnceLock::new();
+    *READER.get_or_init(|| std::env::var("BUI_BENCH_A11Y").ok().and_then(|v| v.parse().ok()).unwrap_or(0))
+}
+
+/// A frame drawn, then (`BUI_BENCH_A11Y=2`) its whole accessibility tree read, as a window host does.
+fn draw(cx: &mut App, id: WindowId) {
+    cx.draw(id);
+    #[cfg(feature = "a11y")]
+    if reader() > 1 {
+        let _ = cx.accessibility_tree(id);
+    }
 }
 
 /// Run `frame(i)` `iters` times (after a warm-up) and print the median ms and allocations per frame.
@@ -202,62 +227,62 @@ fn main() {
     Application::headless().run(move |cx| {
         if want("static") {
             let win = open(cx, |_| Static { n: 0, paras: 400 });
-            cx.draw(win.id);
+            draw(cx, win.id);
             measure("static", iters, |_| {
                 win.update(cx, |v, _, cx| {
                     v.n += 1;
                     cx.notify();
                 });
-                cx.draw(win.id);
+                draw(cx, win.id);
             });
             cx.close_window(win.id);
         }
         if want("list") {
             let win = open(cx, |_| List { hover: true });
-            cx.draw(win.id);
+            draw(cx, win.id);
             measure("list-hover", iters, |i| {
                 cx.simulate_mouse_move(win.id, 40.0 + (i % 7) as f32, 12.0 + 24.0 * (i % 30) as f32);
-                cx.draw(win.id);
+                draw(cx, win.id);
             });
             measure("list-move", iters, |i| {
                 // moves inside one row: nothing changes
                 cx.simulate_mouse_move(win.id, 40.0 + (i % 100) as f32, 100.0);
-                cx.draw(win.id);
+                draw(cx, win.id);
             });
             measure("list-scroll", iters, |i| {
                 cx.simulate_scroll(win.id, 100.0, 100.0, if i % 2 == 0 { 3 } else { -3 });
-                cx.draw(win.id);
+                draw(cx, win.id);
             });
             cx.close_window(win.id);
         }
         if want("plain") {
             let win = open(cx, |_| List { hover: false });
-            cx.draw(win.id);
+            draw(cx, win.id);
             measure("plain-scroll", iters, |i| {
                 cx.simulate_scroll(win.id, 100.0, 100.0, if i % 2 == 0 { 3 } else { -3 });
-                cx.draw(win.id);
+                draw(cx, win.id);
             });
             cx.close_window(win.id);
         }
         if want("text") {
             let win = open(cx, |_| Text { w: 600.0 });
-            cx.draw(win.id);
+            draw(cx, win.id);
             measure("text-resize", iters, |i| {
                 win.update(cx, |v, _, cx| {
                     v.w = 400.0 + i as f32 * 0.9; // a new width each frame: a drag-resize never revisits one
                     cx.notify();
                 });
-                cx.draw(win.id);
+                draw(cx, win.id);
             });
             cx.close_window(win.id);
         }
         if want("anim") {
             blenderui::motion::lag_smoothing(0.0, 0.0);
             let win = open(cx, |_| Anim);
-            cx.draw(win.id);
+            draw(cx, win.id);
             measure("anim", iters, |_| {
                 cx.advance_clock(Duration::from_millis(16));
-                cx.draw(win.id);
+                draw(cx, win.id);
             });
             cx.close_window(win.id);
         }
@@ -267,14 +292,14 @@ fn main() {
                 let list = cx.new(|cx| ListState::new(ChatList::from_messages(synth::messages(0, 20_000), theme_palette(), 1000.0, 800.0, opts), cx));
                 Chat { list }
             });
-            cx.draw(win.id);
+            draw(cx, win.id);
             measure("chat-scroll", iters, |i| {
                 cx.simulate_scroll(win.id, 500.0, 400.0, if i % 4 < 2 { 2 } else { -2 });
-                cx.draw(win.id);
+                draw(cx, win.id);
             });
             measure("chat-hover", iters, |i| {
                 cx.simulate_mouse_move(win.id, 400.0 + (i % 50) as f32, 100.0 + (i % 20) as f32 * 20.0);
-                cx.draw(win.id);
+                draw(cx, win.id);
             });
             cx.close_window(win.id);
         }

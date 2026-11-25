@@ -465,7 +465,7 @@ static void gnode_measure(BKNode *n, int *rw, int *rh)
   *rw = *rh = 0;
 }
 
-const BKClass bk_cls_graphnode = {.name = "graphnode",
+const BKClass bk_cls_graphnode = {.name = "graphnode", .a11y_role = BK_ROLE_GROUP,
                                   .init = gnode_init,
                                   .free_ext = gnode_free,
                                   .measure = gnode_measure,
@@ -1494,7 +1494,7 @@ static int editor_get_num(BKNode *e, const char *key, double *r)
   return 0;
 }
 
-const BKClass bk_cls_nodeeditor = {.name = "nodeeditor",
+const BKClass bk_cls_nodeeditor = {.name = "nodeeditor", .a11y_role = BK_ROLE_GROUP,
                                    .flags = CLS_INTERACTIVE | CLS_BUTTONS,
                                    .init = editor_init,
                                    .free_ext = editor_free,

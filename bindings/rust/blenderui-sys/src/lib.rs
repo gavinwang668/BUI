@@ -10,6 +10,13 @@ use std::os::raw::{c_char, c_double, c_float, c_int, c_uchar, c_void};
 mod anim;
 pub use anim::*;
 
+// Accessibility: the kit's C calls into bui-a11y (its adapters) resolve against this crate, and its
+// node types are the ABI of `BK_a11y_*` (`BKA11yNode` is `bui_a11y::Node`, ...).
+#[cfg(feature = "a11y")]
+pub use bui_a11y as a11y;
+#[cfg(feature = "a11y")]
+pub use bui_a11y::{Node as BKA11yNode, Request as BKA11yRequest};
+
 /// A kit node (widget, frame, canvas ...).
 #[repr(C)]
 pub struct BKNode {
@@ -58,6 +65,10 @@ pub const BK_EV_AREA: c_int = 21;
 pub const BK_EV_MOVE: c_int = 22;
 /// An area's region resized, hidden or shown: a = size, b = hidden.
 pub const BK_EV_RESIZE: c_int = 23;
+/// A screen reader reads the window now (on the root): set the accessibility subtrees.
+pub const BK_EV_A11Y_TREE: c_int = 24;
+/// A screen reader asks for an action on a subtree node: ref = `*const BKA11yRequest`.
+pub const BK_EV_A11Y_ACTION: c_int = 25;
 /// `BK_EV_AREA`'s b: a new area (on the screen), one leaving or opened in a window (on the area).
 pub const BK_AREA_NEW: c_int = 1;
 pub const BK_AREA_CLOSE: c_int = 2;
@@ -99,6 +110,11 @@ pub const BK_EFFECT_MAX_INPUTS: usize = 8;
 pub const BUI_TARGET_RGBA8: c_int = 0;
 pub const BUI_TARGET_RGBA16F: c_int = 1;
 pub const BUI_TARGET_RGBA32F: c_int = 2;
+/// GPU renderer graphics APIs (`BuiGpuApi`, `BUI_gpu_set_api`): Windows picks Direct3D 11 or 12.
+pub const BUI_GPU_API_DEFAULT: c_int = 0;
+pub const BUI_GPU_API_D3D11: c_int = 1;
+pub const BUI_GPU_API_D3D12: c_int = 2;
+pub const BUI_GPU_API_OPENGL: c_int = 3;
 pub const BK_EFFECT_MAX_FLOATS: usize = 256;
 pub const BK_EFFECT_MAX_SOURCE: usize = 65536;
 
@@ -464,6 +480,16 @@ unsafe extern "C" {
         -> c_int;
     pub fn BK_key_taken(ctx: *mut BKContext);
 
+    // accessibility (BUI_kit.h; the `a11y` feature)
+    pub fn BK_a11y_supported() -> c_int;
+    pub fn BK_a11y_wanted(node: *const BKNode) -> c_int;
+    #[cfg(feature = "a11y")]
+    pub fn BK_a11y_set_subtree(node: *mut BKNode, nodes: *const BKA11yNode, n: c_int) -> c_int;
+    #[cfg(feature = "a11y")]
+    pub fn BK_a11y_tree(ctx: *mut BKContext, title: *const c_char, r_nodes: *mut *const BKA11yNode,
+                        r_focus: *mut u64) -> c_int;
+    #[cfg(feature = "a11y")]
+    pub fn BK_a11y_action(ctx: *mut BKContext, req: *const BKA11yRequest) -> c_int;
     pub fn BK_key_release(ctx: *mut BKContext, keysym: *const c_char, mods: c_int) -> c_int;
     pub fn BK_button(ctx: *mut BKContext, x: c_int, y: c_int, button: c_int, release: c_int,
                      mods: c_int) -> c_int;
@@ -537,6 +563,12 @@ unsafe extern "C" {
     pub fn BUI_gpu_default() -> c_int;
     pub fn BUI_gpu_set_slug(on: c_int);
     pub fn BUI_gpu_slug() -> c_int;
+    /// The graphics API new GPU devices start on (`BUI_GPU_API_*`; the `BUI_GPU_API` variable overrides).
+    pub fn BUI_gpu_set_api(api: c_int);
+    /// What new devices start on: `BUI_GPU_API`, else `BUI_gpu_set_api`, else the baked default, else Direct3D 11.
+    pub fn BUI_gpu_api() -> c_int;
+    /// The API a raster's device runs on (after any fall back); `BUI_GPU_API_DEFAULT` on the CPU.
+    pub fn BUI_raster_gpu_api(r: *const BuiRaster) -> c_int;
     pub fn BK_window_set_gpu(win: *mut BKWindow, on: c_int);
     pub fn BK_window_gpu(win: *mut BKWindow) -> c_int;
     pub fn BUI_text_add_font(family: *const c_char, flags: c_int, data: *const c_void,

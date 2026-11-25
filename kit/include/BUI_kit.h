@@ -115,7 +115,10 @@ enum {
   BK_EV_KEYRELEASE, /* ref = "\tkeysym", a = mods */
   BK_EV_AREA,  /* a screen's areas: a = the area's child index, b = BK_AREA_* (see "screen") */
   BK_EV_MOVE,  /* a panel was dragged to a new place: a = old index, b = new index */
-  BK_EV_RESIZE /* an area's region was resized, hidden or shown: a = size, b = hidden */
+  BK_EV_RESIZE, /* an area's region was resized, hidden or shown: a = size, b = hidden */
+  /* Accessibility (see BK_a11y_set_subtree), on a node holding a host subtree, or the root: */
+  BK_EV_A11Y_TREE,  /* a screen reader reads this window now: set your subtrees (on the root) */
+  BK_EV_A11Y_ACTION /* a screen reader asks for an action on a subtree node: ref = BKA11yRequest * */
 };
 
 typedef struct BKHost {
@@ -890,6 +893,188 @@ void BK_menu_row_rect(BKNode *menu, int i, int r_rect[4]);
 /* Color picker popup parts: "area", "strip", "tabs", "slider0".."slider2",
  * "alpha", "hex", "dropper". */
 BKNode *BK_picker_part(BKNode *picker, const char *name);
+
+/* -- accessibility (screen readers; the "a11y" feature) ----------------------------------------
+ * Each context has one accessibility tree, built by the kit when a screen reader (or any UI
+ * Automation / AT-SPI / NSAccessibility client) asks for it, and kept up to date while one reads
+ * it: nothing is built before. The kit's own nodes describe themselves (role, name, value, states
+ * and bounds); a host that draws its own content into a node (an HTML engine on a canvas) attaches
+ * it as a subtree of flat BKA11yNodes. The native window hosts serve the tree to the platform
+ * (bui-a11y, AccessKit); headless hosts and tests read it with BK_a11y_tree.
+ *
+ * Requests from the screen reader come back as BK_a11y_action: on the kit's nodes the kit performs
+ * them; on a subtree's nodes it sends the subtree's node BK_EV_A11Y_ACTION (ref = BKA11yRequest *,
+ * valid during the call) and the host performs them. Without the feature the API stays and
+ * reports it missing (BK_a11y_supported() 0). */
+
+/* Roles: what a node is (WAI-ARIA's roles, as AccessKit has them). Hosts map their own elements
+ * (HTML tags and ARIA roles) to these. BK_ROLE_GENERIC is a container a reader skips (its children
+ * are its parent's). */
+enum {
+  BK_ROLE_GENERIC = 0,
+  BK_ROLE_WINDOW,
+  BK_ROLE_DOCUMENT,
+  BK_ROLE_GROUP,
+  BK_ROLE_PANE, /* a screen area or region */
+  BK_ROLE_LABEL, /* static text */
+  BK_ROLE_PARAGRAPH,
+  BK_ROLE_HEADING, /* level: 1..6 */
+  BK_ROLE_LINK,
+  BK_ROLE_BUTTON,
+  BK_ROLE_CHECKBOX,
+  BK_ROLE_RADIO,
+  BK_ROLE_SWITCH,
+  BK_ROLE_TEXT_INPUT,
+  BK_ROLE_MULTILINE_TEXT_INPUT,
+  BK_ROLE_SEARCH_INPUT,
+  BK_ROLE_PASSWORD_INPUT,
+  BK_ROLE_SPIN_BUTTON, /* number fields */
+  BK_ROLE_SLIDER,
+  BK_ROLE_COMBO_BOX,
+  BK_ROLE_LIST_BOX,
+  BK_ROLE_LIST_BOX_OPTION,
+  BK_ROLE_LIST,
+  BK_ROLE_LIST_ITEM,
+  BK_ROLE_TREE,
+  BK_ROLE_TREE_ITEM, /* level: depth from 1 */
+  BK_ROLE_TABLE,
+  BK_ROLE_ROW,
+  BK_ROLE_CELL,
+  BK_ROLE_COLUMN_HEADER,
+  BK_ROLE_ROW_HEADER,
+  BK_ROLE_MENU,
+  BK_ROLE_MENU_BAR,
+  BK_ROLE_MENU_ITEM,
+  BK_ROLE_MENU_ITEM_CHECKBOX,
+  BK_ROLE_MENU_ITEM_RADIO,
+  BK_ROLE_TAB_LIST,
+  BK_ROLE_TAB,
+  BK_ROLE_TAB_PANEL,
+  BK_ROLE_PROGRESS,
+  BK_ROLE_METER,
+  BK_ROLE_IMAGE,
+  BK_ROLE_COLOR_WELL,
+  BK_ROLE_SCROLL_BAR,
+  BK_ROLE_SCROLL_VIEW,
+  BK_ROLE_TOOLBAR,
+  BK_ROLE_DIALOG,
+  BK_ROLE_ALERT_DIALOG,
+  BK_ROLE_ALERT,
+  BK_ROLE_STATUS,
+  BK_ROLE_LOG,
+  BK_ROLE_NAVIGATION,
+  BK_ROLE_MAIN,
+  BK_ROLE_BANNER,
+  BK_ROLE_CONTENT_INFO,
+  BK_ROLE_COMPLEMENTARY,
+  BK_ROLE_REGION,
+  BK_ROLE_FORM,
+  BK_ROLE_SEARCH,
+  BK_ROLE_ARTICLE,
+  BK_ROLE_FIGURE,
+  BK_ROLE_DETAILS,
+  BK_ROLE_SUMMARY,
+  BK_ROLE_CANVAS,
+  BK_ROLE_VIDEO,
+  BK_ROLE_RADIO_GROUP,
+  BK_ROLE_TOOLTIP,
+  BK_ROLE_CODE,
+  BK_ROLE_BLOCKQUOTE,
+  BK_ROLE_CAPTION,
+  BK_ROLE_LEGEND,
+  BK_ROLE_TERM,
+  BK_ROLE_DEFINITION,
+  BK_ROLE_DESCRIPTION_LIST,
+  BK_ROLE_TIME,
+  BK_ROLE_COUNT
+};
+
+/* States and abilities (BKA11yNode.flags). A state needs its ability: CHECKED / MIXED need
+ * CHECKABLE (not both), EXPANDED needs EXPANDABLE, SELECTED needs SELECTABLE, FOCUSED needs
+ * FOCUSABLE; one LIVE_ at most. */
+enum {
+  BK_A11Y_FOCUSABLE = 1 << 0,
+  BK_A11Y_FOCUSED = 1 << 1, /* has the keyboard focus (one node of the tree at most) */
+  BK_A11Y_DISABLED = 1 << 2,
+  BK_A11Y_CHECKABLE = 1 << 3, /* has a checked state: checkboxes, radios, switches, toggles */
+  BK_A11Y_CHECKED = 1 << 4,
+  BK_A11Y_MIXED = 1 << 5,
+  BK_A11Y_EXPANDABLE = 1 << 6,
+  BK_A11Y_EXPANDED = 1 << 7,
+  BK_A11Y_SELECTABLE = 1 << 8,
+  BK_A11Y_SELECTED = 1 << 9,
+  BK_A11Y_CLICKABLE = 1 << 10,
+  BK_A11Y_EDITABLE = 1 << 11, /* its text value can be set */
+  BK_A11Y_NUMERIC = 1 << 12,  /* num, min, max and step hold its value */
+  BK_A11Y_READONLY = 1 << 13,
+  BK_A11Y_REQUIRED = 1 << 14,
+  BK_A11Y_MULTISELECTABLE = 1 << 15,
+  BK_A11Y_LIVE_POLITE = 1 << 16, /* its changes are announced when the reader is idle */
+  BK_A11Y_LIVE_ASSERTIVE = 1 << 17, /* ... at once */
+  BK_A11Y_POPUP = 1 << 18,    /* opens a menu */
+  BK_A11Y_MODAL = 1 << 19,
+  BK_A11Y_INVALID = 1 << 20,
+  BK_A11Y_VISITED = 1 << 21,
+  BK_A11Y_CONTEXT_MENU = 1 << 22, /* has a context menu */
+  BK_A11Y_CLIPS = 1 << 23,    /* clips its children (scroll containers) */
+  BK_A11Y_DEFAULT = 1 << 24,  /* the default button */
+  BK_A11Y_FLAGS_ALL = (1 << 25) - 1
+};
+
+/* One node of a flat accessibility tree: a parent comes before its children, and siblings come
+ * in reading order. */
+typedef struct BKA11yNode {
+  uint64_t id;      /* a subtree: the host's key, nonzero and unique in it (kept across updates) */
+  int32_t parent;   /* index of the parent node; -1: a child of the node holding the subtree */
+  uint16_t role;    /* BK_ROLE_* */
+  uint16_t level;   /* headings 1..6, tree items' depth from 1; 0: none */
+  uint32_t flags;   /* BK_A11Y_* */
+  const char *name; /* UTF-8; NULL or "": none */
+  const char *description;
+  const char *value; /* the value as text (text fields, combo boxes ...) */
+  float x, y, w, h;  /* bounds in window pixels */
+  double num, min, max, step; /* BK_A11Y_NUMERIC: the value and its range (NaN: unbounded) */
+  /* a subtree: a kit node shown here (an HTML form control that is a kit widget). Its role,
+   * value, states and actions are the kit node's; a name given here replaces its own. */
+  BKNode *widget;
+} BKA11yNode;
+
+/* What a screen reader asks for (BK_a11y_action, BK_EV_A11Y_ACTION). */
+enum {
+  BK_A11Y_CLICK = 0, /* the default action */
+  BK_A11Y_FOCUS,
+  BK_A11Y_SET_VALUE, /* text, else num */
+  BK_A11Y_INCREMENT,
+  BK_A11Y_DECREMENT,
+  BK_A11Y_EXPAND,
+  BK_A11Y_COLLAPSE,
+  BK_A11Y_SCROLL_INTO_VIEW,
+  BK_A11Y_CONTEXT_MENU_SHOW,
+  BK_A11Y_ACTION_COUNT
+};
+typedef struct BKA11yRequest {
+  uint64_t id; /* BK_a11y_action: a tree node's id; BK_EV_A11Y_ACTION: the host's key */
+  int action;  /* BK_A11Y_CLICK ... */
+  double num;
+  const char *text; /* BK_A11Y_SET_VALUE's text, NULL: num */
+} BKA11yRequest;
+
+/* 1 when the kit was built with the "a11y" feature. */
+int BK_a11y_supported(void);
+/* 1 while a screen reader reads the context `node` is in: only then does a host need to keep its
+ * subtrees. When one starts, the root gets BK_EV_A11Y_TREE. */
+int BK_a11y_wanted(const BKNode *node);
+/* The host's content of `node` as its accessibility subtree (copied), shown in place of the
+ * node's own children; n = 0 removes it. Checked here: ids nonzero and unique, parents earlier,
+ * roles, flags and strings (UTF-8) valid, widgets in the same tree and not around `node`. Returns
+ * 1, or 0 for bad input (the previous subtree stays). */
+int BK_a11y_set_subtree(BKNode *node, const BKA11yNode *nodes, int n);
+/* The context's tree, built now (and the context counts as read from then on): its root first
+ * (a BK_ROLE_WINDOW named `title`), *r_focus the id of the focused node. The array and its
+ * strings stay valid until the next call. Returns the node count (0 without the feature). */
+int BK_a11y_tree(BKContext *ctx, const char *title, const BKA11yNode **r_nodes, uint64_t *r_focus);
+/* Perform a screen reader's request on a node of the last tree (req->id). Returns 1 when done. */
+int BK_a11y_action(BKContext *ctx, const BKA11yRequest *req);
 
 /* -- native window host (Win32, X11, macOS Cocoa; BK_window_supported() is 0 elsewhere,
  * and on macOS off the main thread: AppKit is main-thread only) -----------------------

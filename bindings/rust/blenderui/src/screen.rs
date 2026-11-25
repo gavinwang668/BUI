@@ -807,6 +807,12 @@ pub(crate) struct Screens {
 }
 
 impl Screens {
+    /// The kit node of the screen element `key` shows.
+    #[cfg(feature = "a11y")]
+    pub(crate) fn node(&self, key: Key) -> Option<*mut sys::BKNode> {
+        self.map.get(&key).map(|(_, s)| s.node)
+    }
+
     /// The window goes: every screen's kit node is freed and its areas forgotten.
     pub(crate) fn free_all(&mut self) {
         for (_, (_, scr)) in self.map.drain() {
