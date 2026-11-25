@@ -96,6 +96,30 @@ All notable changes to **blenderui** (BUI). The format follows
   `muted=` and `volume=`) and Lua; the Blender-style controls get a mute button. Videos autoplay with sound now
   (they were silent): mute one with `muted`. Tested on Windows; the macOS and Linux outputs are written against
   their documented APIs and untried.
+- **Rust: `on_key_press`, `scroll` from any source, and what leaves the tree.** `keypress` follows `keydown` for a key that
+  types. `scroll` fires for every scroll container that moved (also `set_scroll_offset` or a layout change), not only the wheel.
+  When the element that holds the pointer is removed, `pointercancel` and `lostpointercapture` go out and the capture ends;
+  a removed focused element no longer keeps the focus.
+- **JavaScript: the whole set of HTML events.** `addEventListener` now takes `dblclick`, `auxclick`, `contextmenu`, `mouseover`/`mouseout`,
+  every `pointer*` event, `keypress`, `focus`/`blur`/`focusin`/`focusout`, `scroll` and Blender's `pressdrag`, with the capture
+  phase (`{ capture: true }`, `once`, `event.eventPhase`), `buttons`, `pointerId` / `pointerType`, and `el.setPointerCapture()` /
+  `releasePointerCapture()` / `hasPointerCapture()`. The native listener mask is now two words (`LISTEN` carries 62 bits), and the
+  window's own `focus` / `blur` are told from an element's by the target.
+- **Rust: Blender's press-drag.** `on_press_drag` (`PressDragEvent`, `DragDirection`, `DRAG_THRESHOLD`): once per press, from the first
+  move more than 3 pixels from where the button went down, with the direction to the nearest of eight, as Blender's
+  `KM_PRESS_DRAG` and `WM_event_drag_direction` (`wm_event_system.cc`, `wm_event_query.cc`).
+- **Rust: every HTML event, with capture and bubbling.** A listener for each `on*` event: `on_double_click`,
+  `on_aux_click`, `on_context_menu`, `on_mouse_enter` / `leave` / `over` / `out`, the pointer events
+  (`on_pointer_down` / `up` / `move` / `enter` / `leave` / `over` / `out` / `cancel` and the pointer capture pair, with a
+  `PointerEvent`), `on_focus` / `blur` / `focus_in` / `focus_out`, `on_scroll` and `on_wheel`, and a `_capture` twin of
+  each (`onClickCapture` in `rsx!`) for the pass from the root down to the target. `cx.stop_propagation()` ends the pass it
+  is in. `window.set_pointer_capture(cx)` holds the pointer for an element, so a drag keeps hearing the moves and the
+  release outside it; `on_mouse_event` / `on_key_event` / `on_window_event` hear every event of a kind in the window, in
+  both passes, as gpui's `on_mouse_event` does (`DispatchPhase::Capture` / `Bubble`). A press fires `pointerdown` before
+  `mousedown`, and a move `pointermove` before `mousemove`. One listener list per element holds them all (a frame
+  skips the walk for kinds nothing listens for). The touch and trackpad gestures (`on_pan`, `on_pinch`, `on_rotate`) go
+  through both passes too, with their `_capture` twins. Not there yet: the `touch*` events, drag-and-drop, clipboard, media
+  and CSS animation events. `App::simulate_button` clicks with the middle or secondary button in tests.
 - **Animation: GSAP and Motion on one engine** (feature `anim`, on by default; `BUI_ANIM` in CMake). One C engine
   in the kit (`kit/intern/anim`, `BUI_anim.h`) runs every animation, so Rust, JavaScript, Python, Lua and C animate
   the same way and none carries its own. Eases: every name of GSAP, Motion, CSS and Blender, `cubic-bezier()`,
@@ -127,6 +151,11 @@ All notable changes to **blenderui** (BUI). The format follows
 
 ### Changed
 - **Rust: boxes lay out at fractional positions, as in a browser.** A flex item a quarter of 190px is 47.5px wide (it was rounded to 48), and `element_bounds` reports what `getBoundingClientRect` would. Painting snaps each edge of a box's background, border and image to its nearest device pixel, so edges stay crisp and neighbouring boxes still meet; a canvas's own drawing stays anti-aliased, as a browser canvas.
+- **Rust: pointer events cost less.** The hit test keeps an index of every box's subtree and the rectangle around it
+  (built on the first hit test of a frame, dropped when a redraw or a scroll moves boxes) and skips the subtrees a point is
+  not in; an event kind nothing in the frame listens for skips the walk, window-wide listeners have a list of their own, and
+  a move that ends over the same elements stops after the hit test without allocating. 3000 boxes: a move 46 to 12 µs, a
+  click 130 to 57 µs (`examples/events_bench.rs`, headless, release, against main before the event API).
 - **Kit: a layout arranges only the nodes that changed.** A node is arranged again when it or a node under it measured again, or when its place changed; the rest keep their places. A frame where one label changes among 3300 nodes: 0.26 ms instead of 0.31 ms. A change of theme, scale or font still arranges every node.
 - **Kit: a layout change redraws only what moved.** A layout used to redraw the whole window. Now each widget's
   place on screen is compared with where the last frame drew it, and only widgets that moved, resized, appeared or
@@ -212,6 +241,12 @@ All notable changes to **blenderui** (BUI). The format follows
   - `:nth-last-child(An+B of S)` counts the following siblings that match `S` (it saw none, since they aren't built when rules match; `S` may name the element's ancestors).
   - `light-dark()`, the system colors (`Canvas`, `LinkText` ...) and `@media (prefers-color-scheme)` follow the theme's mode (they were always dark). Light mode uses a browser's light system colors. Windows re-render when the theme changes, with no `notify_all()` needed.
 - **Windows: the system's maximize button maximizes again.** The kit took every press on a maximize button as the app's, so on a window with the system's title bar the press went to the app and Windows never maximized; only a title bar the app draws (`WindowDecorations::Client`) hands its maximize button's presses to the app now.
+- **Rust: an element the layout moved under a pointer that stayed still was never entered** (`mouseenter`, `mouseover`,
+  `pointerenter`, `on_hover` and their leave twins didn't fire; only `:hover` followed): the hover update after each frame fires events now.
+- **Rust: `cx.notify()` in a listener didn't render the window it ran in** (that window is out of the list while it runs):
+  every call that lends a window out renders it again after a `notify`, not only `WindowHandle::update`.
+- **Rust: a `render` that reads `window.is_hovered(..)` or `focused_id()` follows them.** Since a hover or a press over
+  plain content renders nothing, a view that read them kept the old answer; it renders again when what it read changes.
 - **Android: the app runs again after Back.** The host's state (`g_quit`, the wake callback, keep-alive, the stop check) starts over on each `BK_android_attach`, so a relaunch in the same process is not a dead window; the activity is `singleTask`, so a second launch brings the running one back instead of attaching a second activity. `BK_android_detach` (new; `android_main` calls it before the glue frees the app) ends wakes from other threads, which used the freed looper. A Lua script that fails after opening its window shows its error (the error window came back NULL and crashed). A second finger joining a one-finger scroll no longer jumps it; `BK_window_timer` returns -1 (not 0) when the window's timers are full, as `BUI_kit.h` says; a failed window allocation returns NULL (the C demo checks it); a frame whose post fails is redrawn. `build.py` aligns the APK with `zipalign 4` (the libraries are deflated: `-P 16` aligned nothing and failed on build-tools 34) and builds a Rust app's crate with `--lib`.
 - **WebAssembly: an unstyled canvas keeps its size after a zoom.** At a pixel ratio of 1 its CSS size was not pinned, so after a zoom or a move to a retina screen it grew on every frame; every resize now sizes the backing store and pins it. `build.py --serve` serves `.wasm` and `.js` with their web types on Windows (the override was set on a `functools.partial`, where it did nothing). The wasm workflow runs on changes to the kit, the GPU raster, core and blenderui too, and the smoke test's click check compares against the hovered button, so it can fail.
 - **QuickJS (`bui run`, `bui build`, Android `--js`): timers set from promise jobs run.** A `setTimeout` made in a `.then` was missed (a headless app quit with it pending, a windowed one stalled until the next event); timers now run one task at a time with the promise jobs after each, as in HTML's event loop, and the next deadline is read after the last job. A pump that runs out of rounds with work left schedules the next one. `setTimeout(f, Infinity)` (or `NaN`, negative, past 2^31-1 ms) is a 0 ms delay, as in browsers, instead of panicking the runtime.

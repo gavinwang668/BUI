@@ -1676,6 +1676,9 @@ impl Animations {
         if faded {
             crate::layout::inherit_at(nodes, styles, (0..dirty.len()).filter(|&j| dirty[j]));
         }
+        if moved {
+            frame.moved();
+        }
         self.running = running;
         Some((std::mem::take(dirty), running))
     }

@@ -57,6 +57,9 @@ fn child_key(parent: Key, tag: &str, n: usize) -> Key {
     hash_parts(&[&parent.to_le_bytes(), tag.as_bytes(), &(n as u64).to_le_bytes()])
 }
 
+/// Boxes from the root down to one: an event's path (no allocation for a tree this deep).
+pub(crate) type Path = smallvec::SmallVec<[usize; 16]>;
+
 /// The key of the `<html>` element.
 pub(crate) const ROOT_KEY: Key = 0x68746d6c; // "html"
 
@@ -345,8 +348,47 @@ pub(crate) struct BoxNode {
 pub(crate) struct Frame {
     pub nodes: Vec<BoxNode>,
     els: Vec<ElData>,
+    /// The kinds of event something in this frame listens for (bits of `EventKind::bit`).
+    pub listen: u64,
+    /// The boxes with a listener that hears the whole window, in document order (usually none).
+    pub wide: Vec<u32>,
     pub title: Option<String>,
     by_key: std::cell::OnceCell<KeyMap<Key, usize>>,
+    /// Where each box's subtree is, for the pointer's hit test (built on the first one; dropped when
+    /// boxes move: [`moved`](Frame::moved)).
+    hit_index: std::cell::OnceCell<HitIndex>,
+}
+
+/// For every box: the end of its subtree in the arena (boxes come parents first, a subtree is the run
+/// after its root), and the rectangle holding the boxes in it. A hit test skips a whole subtree its point
+/// is not in. `None` when the arena is not laid out that way (the hit test scans every box then).
+struct HitIndex(Option<(Vec<u32>, Vec<Bounds<f32>>)>);
+
+impl HitIndex {
+    fn build(nodes: &[BoxNode]) -> Self {
+        let n = nodes.len();
+        let mut end: Vec<u32> = (1..=n as u32).collect();
+        let mut descendants = vec![0u32; n];
+        let mut area: Vec<Bounds<f32>> = nodes.iter().map(|b| b.bounds).collect();
+        for j in (0..n).rev() {
+            let Some(p) = nodes[j].parent else { continue };
+            if p >= j {
+                return Self(None);
+            }
+            end[p] = end[p].max(end[j]);
+            descendants[p] += 1 + descendants[j];
+            let (a, b) = (area[p], area[j]);
+            let (x0, y0) = (a.origin.x.min(b.origin.x), a.origin.y.min(b.origin.y));
+            let (x1, y1) = ((a.origin.x + a.size.width).max(b.origin.x + b.size.width),
+                            (a.origin.y + a.size.height).max(b.origin.y + b.size.height));
+            area[p] = rect(x0, y0, x1 - x0, y1 - y0);
+        }
+        // a subtree is the run after its root: nothing else in it
+        if (0..n).any(|i| end[i] - i as u32 - 1 != descendants[i]) {
+            return Self(None);
+        }
+        Self(Some((end, area)))
+    }
 }
 
 /// Measure contexts of taffy leaves. Compared across frames: an unchanged
@@ -2861,9 +2903,10 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         caches.shapes.clear();
         caches.styles_limit = (caches.taffy.style_count() * 2).max(STYLES_MAX);
     }
-    let Frame { mut nodes, mut els, .. } = recycle;
+    let Frame { mut nodes, mut els, mut wide, .. } = recycle;
     nodes.clear();
     els.clear();
+    wide.clear();
     if caches.matched.author != caches.author.hash || caches.matched.map.len() > 50_000 {
         caches.matched.map.clear();
         caches.matched.author = caches.author.hash;
@@ -2986,7 +3029,15 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     }
     drop(s);
     let _s = span(Phase::Place);
-    let mut frame = Frame { nodes, els, title, by_key: Default::default() };
+    let (listen, any_wide) = els.iter().filter_map(|e| e.listeners.as_deref())
+        .fold((0, false), |(m, w), l| (m | l.kinds, w || l.entries.iter().any(|en| en.wide)));
+    if any_wide {
+        wide.extend((0..nodes.len() as u32).filter(|&i| {
+            let e = nodes[i as usize].el;
+            e != NONE && els[e as usize].listeners.as_deref().is_some_and(|l| l.entries.iter().any(|en| en.wide))
+        }));
+    }
+    let mut frame = Frame { nodes, els, listen, wide, title, by_key: Default::default(), hit_index: Default::default() };
     box_of.clear();
     for (i, n) in frame.nodes.iter().enumerate() {
         if let Some(t) = n.taffy {
@@ -3060,6 +3111,7 @@ pub(crate) fn replace(frame: &mut Frame, viewport: (f32, f32), state: &UiState, 
                           port: rect(0.0, 0.0, viewport.0, viewport.1), within: rect(0.0, 0.0, viewport.0, viewport.1) };
     walk.place(&mut frame.nodes, root, 0.0, 0.0, None, (0.0, 0.0));
     finish(&mut frame.nodes, styles, acc);
+    frame.moved();
     true
 }
 
@@ -3386,15 +3438,32 @@ impl Frame {
         }
     }
 
+    /// The boxes moved (a redraw, a scroll): the hit test's index of where they are is stale.
+    pub(crate) fn moved(&mut self) {
+        self.hit_index.take();
+    }
+
     /// Element boxes from the root down to the topmost box under (x, y).
-    pub(crate) fn hit_path(&self, x: f32, y: f32, styles: &StyleStore) -> Vec<usize> {
+    pub(crate) fn hit_path(&self, x: f32, y: f32, styles: &StyleStore) -> Path {
         self.path_to(self.hit_box(x, y, styles))
     }
 
     /// The topmost box under (x, y): a word, a text run, an element ...
     pub(crate) fn hit_box(&self, x: f32, y: f32, styles: &StyleStore) -> Option<usize> {
         let mut best: Option<(i32, usize)> = None;
-        for (i, n) in self.nodes.iter().enumerate() {
+        let nodes = &self.nodes;
+        let index = self.hit_index.get_or_init(|| HitIndex::build(nodes)).0.as_ref();
+        let mut next = 0;
+        while next < nodes.len() {
+            let (i, n) = (next, &nodes[next]);
+            next += 1;
+            // a box that is hidden, clipped away or has the point outside everything under it: its whole
+            // subtree is out (a clip only narrows what is under a box; visibility is inherited)
+            if let Some((end, area)) = index
+                && (!n.visible || n.clip.is_some_and(|c| !c.contains(x, y)) || !area[i].contains(x, y)) {
+                    next = end[i] as usize;
+                    continue;
+                }
             if !n.visible || n.taffy.is_none() || !styles[n.style].pointer_events {
                 continue;
             }
@@ -3411,8 +3480,8 @@ impl Frame {
     }
 
     /// The element boxes from the root down to the element that box `hit` belongs to.
-    pub(crate) fn path_to(&self, hit: Option<usize>) -> Vec<usize> {
-        let mut path = Vec::new();
+    pub(crate) fn path_to(&self, hit: Option<usize>) -> Path {
+        let mut path = Path::new();
         let mut cur = hit.map(|b| self.nodes[b].owner);
         while let Some(i) = cur {
             if self.nodes[i].el != NONE {

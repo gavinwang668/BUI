@@ -323,7 +323,7 @@ impl Accessibility {
             | Role::Tab | Role::MenuItem | Role::MenuItemCheckBox | Role::MenuItemRadio | Role::Summary
             | Role::ListBoxOption | Role::TreeItem | Role::Slider | Role::SpinButton | Role::TextInput
             | Role::ComboBox | Role::SearchInput | Role::MultilineTextInput);
-        let clicks = f.el(i).and_then(|e| e.listeners.as_deref()).is_some_and(|l| !l.click.is_empty());
+        let clicks = f.el(i).and_then(|e| e.listeners.as_deref()).is_some_and(|l| l.hears(crate::events::EventKind::Click.bit()));
         if interactive || clicks || attr("tabindex").is_some_and(|t| t.trim() != "-1") {
             s |= flags::FOCUSABLE;
         }
