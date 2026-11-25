@@ -63,6 +63,9 @@ Any of them can be a signal.
 **Frames and measurement:** `win.requestAnimationFrame(cb)` runs `cb` before
 the next frame, paced by the display, and what it changes renders in that
 frame. `el.getBoundingClientRect()` and `win.screenshot()` return promises.
+`win.startViewTransition(() => update())` is the browser's
+`document.startViewTransition`: boxes with a `view-transition-name` move to
+where the update puts them while the page cross-fades (CSS View Transitions).
 
 **Tests:** `new App({ headless: true })` renders off-screen, and
 `win.click(x, y)` simulates input.
@@ -219,6 +222,27 @@ Vue 3.5 or newer; Node.js 22.15 or newer.
   work on the widgets), `<select multiple>`, `<style lang="scss">` (and
   `v-bind()` in `<style>`, which are compile errors), TypeScript enums on Node.js
   (it strips types only), and libraries built on the DOM (Vuetify, Element Plus).
+
+## Tray, notifications, taskbar progress, recent files
+
+The desktop shell, with Electron's names ([Desktop shell](https://bui.preetham.top/docs/concepts/desktop-shell/)):
+
+```js
+const tray = await app.createTray({ icon: 'BLENDER', tooltip: 'My app' }) // null: no tray here
+tray?.setContextMenu([
+  { label: 'Open', click: () => {} },
+  { label: 'Mute', type: 'checkbox', checked: true, click: () => {} },
+  { type: 'separator' },
+  { label: 'Quit', click: () => app.quit() }
+])
+tray?.on('click', () => {})
+await app.notify({ title: 'Done', body: 'The export finished', onClick: (id) => {} })
+win.setProgressBar(0.4)                 // { mode: 'paused' | 'error' | 'indeterminate' | 'none' }
+await app.addRecentDocument('scene.blend')
+await app.shellFeatures()               // { tray, notifications, progress, recentDocuments }
+```
+
+Node.js and Bun have it; the QuickJS runtime of `bui build` apps does not yet (the calls throw).
 
 ## Screens, areas and regions
 

@@ -1,0 +1,11 @@
+Project: zlib (inflate subset)
+URL: https://zlib.net (https://github.com/madler/zlib/releases/download/v1.4/zlib-1.4.tar.gz)
+Version: 1.4
+License: Zlib (see LICENSE)
+Used for: Deflate-compressed TIFF strips and tiles (kit/extern/libtiff, tif_zip.c).
+
+Copied unmodified: adler32.c, crc32.c, inffast.c, inflate.c, inftrees.c, zutil.c and the
+headers they include (zlib.h, zconf.h, zutil.h, gzguts.h, crc32.h, inffast.h, inffixed.h,
+inflate.h, inftrees.h). Not copied: deflate (libtiff's encoder half fails without it, see
+libtiff/bui/tif_decode_only.c), gz*, infback, contrib, tests. Built with Z_PREFIX (z_inflate,
+...), so a host that links its own zlib keeps it.

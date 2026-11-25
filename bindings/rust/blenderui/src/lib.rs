@@ -119,6 +119,8 @@ macro_rules! android_main {
 
 #[cfg(feature = "a11y")]
 pub mod a11y;
+pub mod anchor;
+pub(crate) mod transition;
 pub mod anim;
 pub mod motion;
 pub mod calc;
@@ -138,10 +140,13 @@ pub mod table;
 pub(crate) mod sink;
 pub mod vlist;
 pub(crate) mod layout;
+mod linebreak;
+mod woff;
 pub mod paint;
 pub mod shader;
 pub mod video;
 pub mod sound;
+pub mod shell;
 pub(crate) mod prof;
 mod config;
 mod selector;
@@ -173,22 +178,28 @@ pub use window::*;
 pub use window_kind::{Anchor, KeyboardInteractivity, Layer, LayerShellOptions, WindowControlArea, WindowDecorations, WindowKind};
 
 /// Whether `class` names also work as Tailwind CSS v4 utilities (`p-4`,
-/// `md:hover:bg-sky-500/50` ...), compiled on first use. On by default;
-/// turn it off when your own class names collide with Tailwind's.
+/// `md:hover:bg-sky-500/50` ...), compiled on first use. On by default; a
+/// class the page's own CSS styles (`.hidden { ... }` in a `<style>`) is the
+/// page's, not also a utility.
 pub fn set_tailwind(on: bool) {
     layout::TAILWIND.store(on, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// Registers a TrueType/OpenType font under `family` (as bold and/or italic
+/// Registers a TrueType/OpenType (or WOFF) font under `family` (as bold and/or italic
 /// when set), e.g. bundled with `include_bytes!`. Required on wasm, where
 /// there are no system fonts; elsewhere it adds to them. Returns false when
 /// the data isn't a font.
 pub fn add_font(family: &str, bold: bool, italic: bool, data: &[u8]) -> bool {
+    // a WOFF font is unwrapped to the TrueType / OpenType font it holds
+    let unwrapped = woff::sfnt(data);
+    let data = unwrapped.as_deref().unwrap_or(data);
     let fam = std::ffi::CString::new(family).unwrap_or_default();
     let flags = if bold { 1 } else { 0 } | if italic { 2 } else { 0 };
     let len = data.len().min(i32::MAX as usize) as i32;
     // SAFETY: the kit copies the bytes; both pointers are valid for the call.
-    unsafe { sys::BUI_text_add_font(fam.as_ptr(), flags, data.as_ptr().cast(), len) != 0 }
+    let ok = unsafe { sys::BUI_text_add_font(fam.as_ptr(), flags, data.as_ptr().cast(), len) != 0 };
+    text::fonts_changed();
+    ok
 }
 
 /// How the GPU renderer draws all text. `true`: Slug, glyph outlines

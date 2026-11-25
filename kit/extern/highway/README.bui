@@ -1,0 +1,9 @@
+Project: Highway (portable SIMD with run-time dispatch; C++)
+URL: https://github.com/google/highway
+Version: 1.4.0
+License: Apache-2.0 or BSD-3-Clause (see LICENSE; BUI uses it under BSD-3-Clause)
+Used for: libjxl's decoder (kit/extern/libjxl), which is written on it.
+
+Copied unmodified: the library's headers (HWY_SOURCES of CMakeLists.txt: hwy/*.h, hwy/ops/*.h)
+and its run-time sources abort.cc, aligned_allocator.cc, per_target.cc, print.cc, targets.cc,
+timer.cc. Not copied: nanobenchmark, perf_counters, profiler, stats, contrib, tests, examples.

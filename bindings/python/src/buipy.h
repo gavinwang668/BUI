@@ -22,6 +22,12 @@ BKNode *buipy_kit_node(PyObject *obj);
 void buipy_stash_error(void);
 int buipy_restore_error(void);
 
+/* Menu items (objects with text, checked, enabled, on_click, submenu; a str or None) as
+ * BKMenuSpec[] (buipy_kit.c): 0 with an exception. The texts belong to the items. */
+int buipy_menu_specs(PyObject *items, BKMenuSpec **r_specs, int *r_n);
+void buipy_menu_specs_free(BKMenuSpec *specs, int n);
+
 int buipy_kit_init(PyObject *module);   /* buipy_kit.c */
 int buipy_video_init(PyObject *module); /* buipy_video.c */
 int buipy_anim_init(PyObject *module);  /* buipy_anim.c */
+int buipy_shell_init(PyObject *module); /* buipy_shell.c */

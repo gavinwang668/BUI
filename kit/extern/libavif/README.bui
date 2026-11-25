@@ -1,0 +1,15 @@
+Project: libavif (decoder) with its bundled libyuv subset
+URL: https://github.com/AOMediaCodec/libavif
+Version: 1.4.2
+License: BSD-2-Clause (see LICENSE, which also has libyuv's BSD-3-Clause and dav1d's)
+Used for: AVIF decoding (stills, grids, alpha, image sequences) in kit/intern/image
+          (format_avif.c), like Blender's imbuf (format_avif.cc, through OpenImageIO).
+
+Copied unmodified: src/ (AVIF_SRCS of CMakeLists.txt, and codec_dav1d.c: AVIF_CODEC_DAV1D),
+include/avif/avif.h and internal.h, and third_party/libyuv (the include/ headers and the five
+sources libavif builds when no system libyuv is used: scale.c, scale_common.c, scale_any.c,
+row_common.c, planar_functions.c). write.c stays (AVIF_SRCS), unused: nothing links it in.
+Not copied: the other codecs (aom, rav1e, svt, libgav1, avm), compliance.cc, apps, tests,
+ext/, the other third_party libraries.
+
+No BUI files: kit/CMakeLists.txt defines AVIF_CODEC_DAV1D=1, as libavif's CMake does.

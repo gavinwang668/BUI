@@ -172,6 +172,10 @@ pub trait Subject: Sized + Clone {
     /// 1-based position among element siblings, and their count.
     fn position(&self) -> (usize, usize);
     fn is_empty(&self) -> bool;
+    /// HTML's auto directionality (`dir=auto`, `<bdi>`): its text's direction, `true` for rtl.
+    fn auto_dir(&self) -> Option<bool> {
+        None
+    }
     /// The `class` attribute (used to find candidate rules quickly).
     fn class_attr(&self) -> Option<&str> {
         self.attr("class")
@@ -450,8 +454,8 @@ fn pseudo_element(name: &str) -> PseudoElement {
 /// Pseudo-classes that are never true in this host (no history, no media
 /// playback, no fullscreen, no autofill ...).
 const NEVER: &[&str] = &[
-    "visited", "target", "target-within", "fullscreen", "autofill", "-webkit-autofill", "modal",
-    "popover-open", "picture-in-picture", "playing", "paused", "seeking", "buffering", "stalled",
+    "visited", "target", "target-within", "fullscreen", "autofill", "-webkit-autofill",
+    "picture-in-picture", "playing", "paused", "seeking", "buffering", "stalled",
     "muted", "volume-locked", "local-link", "current", "past", "future", "host", "user-invalid",
     "first", "left", "right", "blank", "-moz-focusring", "has-slotted", "open-in", "active-view-transition",
 ];
@@ -540,7 +544,10 @@ fn parse_compound(s: &str, mut i: usize, has: &mut Vec<HasEntry>)
                         }
                         "lang" => Simple::Lang(split_top(arg, ',').iter()
                             .map(|l| l.trim().trim_matches(['"', '\'']).to_ascii_lowercase()).collect()),
-                        "dir" => Simple::Dir(arg.eq_ignore_ascii_case("rtl")),
+                        // only `ltr` and `rtl`: anything else makes the selector invalid
+                        "dir" if arg.trim().eq_ignore_ascii_case("rtl") => Simple::Dir(true),
+                        "dir" if arg.trim().eq_ignore_ascii_case("ltr") => Simple::Dir(false),
+                        "dir" => return None,
                         "host" | "host-context" | "state" | "current" | "past" | "future" | "active-view-transition-type" => Simple::Never,
                         _ => return None,
                     });
@@ -804,7 +811,7 @@ fn match_simple<S: Subject>(s: &Simple, el: &S) -> bool {
             while let Some(e) = cur {
                 if let Some(l) = e.attr("lang") {
                     let l = l.to_ascii_lowercase();
-                    return langs.iter().any(|w| w == "*" || l == *w || l.starts_with(&format!("{w}-")));
+                    return langs.iter().any(|w| lang_matches(w, &l));
                 }
                 cur = e.parent();
             }
@@ -813,8 +820,16 @@ fn match_simple<S: Subject>(s: &Simple, el: &S) -> bool {
         Simple::Dir(rtl) => {
             let mut cur = Some(el.clone());
             while let Some(e) = cur {
-                if let Some(d) = e.attr("dir") {
-                    return d.eq_ignore_ascii_case("rtl") == *rtl;
+                // an invalid `dir` is no `dir`; `auto` without strong text is ltr
+                let own = match e.attr("dir") {
+                    Some(d) if d.eq_ignore_ascii_case("rtl") => Some(true),
+                    Some(d) if d.eq_ignore_ascii_case("ltr") => Some(false),
+                    Some(d) if d.eq_ignore_ascii_case("auto") => Some(e.auto_dir().unwrap_or(false)),
+                    None if e.tag().eq_ignore_ascii_case("bdi") => Some(e.auto_dir().unwrap_or(false)),
+                    _ => None,
+                };
+                if let Some(r) = own {
+                    return r == *rtl;
                 }
                 cur = e.parent();
             }
@@ -1245,6 +1260,8 @@ pub struct PropertyRule {
 #[derive(Default)]
 pub struct Stylesheet {
     pub rules: Vec<Rule>,
+    /// Rules for a view transition's pseudo-elements (`::view-transition-group()` ...).
+    pub(crate) transitions: Vec<crate::transition::PseudoRule>,
     pub font_faces: Vec<FontFace>,
     pub keyframes: Vec<Keyframes>,
     pub properties: Vec<PropertyRule>,
@@ -1510,6 +1527,10 @@ impl Stylesheet {
         let layer = self.layer_rank(ctx.layer.as_deref());
         let mut has = std::mem::take(&mut self.has);
         for sel in split_top(selector, ',') {
+            if let Some(t) = crate::transition::PseudoRule::parse(sel.trim(), &decls) {
+                self.transitions.push(t);
+                continue;
+            }
             if let Some((None, mut selector)) = parse_complex(sel, &mut has, false) {
                 if let Some(s) = ctx.scope {
                     selector.bind_scope(&self.scopes[s as usize].0);
@@ -1896,4 +1917,33 @@ mod tests {
         let nested = sheet.rules.iter().filter(|r| format!("{:?}", r.selector).contains("card")).count();
         assert_eq!(nested, 5);
     }
+}
+
+/// RFC 4647 extended filtering (Selectors 4 `:lang()`): language range `range` (`de-*-DE`, `*-CH`)
+/// against tag `tag`, both lower-case. The first subtags match (or the range's is `*`); each later
+/// one of the range is found in order, past any of the tag's but a single-letter one, `*` skipped.
+fn lang_matches(range: &str, tag: &str) -> bool {
+    if range == "*" {
+        return !tag.is_empty();
+    }
+    let (mut r, mut t) = (range.split('-'), tag.split('-'));
+    match (r.next(), t.next()) {
+        (Some(a), Some(b)) if a == "*" || a == b => {}
+        _ => return false,
+    }
+    let mut t = t.peekable();
+    for sub in r {
+        if sub == "*" {
+            continue;
+        }
+        loop {
+            match t.next() {
+                None => return false,
+                Some(x) if x == sub => break,
+                Some(x) if x.len() == 1 => return false,
+                Some(_) => {}
+            }
+        }
+    }
+    true
 }

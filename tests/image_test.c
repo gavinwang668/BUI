@@ -5,6 +5,7 @@
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -115,6 +116,107 @@ static void test_formats(void)
   CHECK(strcmp(BK_image_format_name(BK_IMAGE_JPEG), "jpeg") == 0);
 }
 
+/* `name`: 3 frames of 8 pixels wide, 100 ms each. */
+static void check_anim(const char *name)
+{
+  size_t n;
+  unsigned char *data = slurp(name, &n);
+  BKImageInfo info;
+  CHECK(BK_image_probe(data, n, &info) && info.frames == 3 && info.width == 8);
+  BKImBuf *ib = BK_imbuf_decode(data, n, 0, 0);
+  CHECK(ib && BK_imbuf_size(ib, NULL, NULL) == 3);
+  if (ib && BK_imbuf_size(ib, NULL, NULL) == 3) {
+    CHECK(BK_imbuf_delay(ib, 0) == 100 && BK_imbuf_delay(ib, 2) == 100);
+  }
+  BK_imbuf_free(ib);
+  free(data);
+}
+
+/* The optional formats (features.json): a build without one probes its files as no image, and
+ * the checks of that format are skipped. HEIC decodes through the OS: skipped where this
+ * system has no decoder (Windows without the HEIF and HEVC extensions, Linux without libheif).
+ * Fixtures: Pillow 13 (TIFF; HEIC through pillow-heif 1.8 and x265), OpenEXR 3's Python
+ * bindings, imagecodecs 2026.11 (AVIF through libavif + aom, JPEG XL through libjxl). */
+static bool has_format(int format)
+{
+  if (BK_image_format_name(format)) {
+    return true;
+  }
+  printf("skip: format %d is not in this build\n", format);
+  return false;
+}
+
+static bool has_heic(void)
+{
+  size_t n;
+  unsigned char *data = slurp("quad.heic", &n);
+  BKImageInfo info;
+  BKImBuf *ib = BK_image_format_name(BK_IMAGE_HEIC) && BK_image_probe(data, n, &info) ?
+                    BK_imbuf_decode(data, n, 0, 0) :
+                    NULL;
+  free(data);
+  BK_imbuf_free(ib);
+  if (!ib) {
+    /* not in this build, or no HEIF / HEVC decoder on this system (Windows: the HEIF Image
+     * and HEVC Video Extensions; a decode then fails like a broken file's) */
+    printf("skip: heic (not in this build, or no HEIF and HEVC decoder on this system)\n");
+  }
+  return ib != NULL;
+}
+
+/* `name`: the quadrants with red at alpha 128 and white at alpha 0, premultiplied. */
+static void check_alpha(const char *name, int tol)
+{
+  size_t n;
+  unsigned char *data = slurp(name, &n);
+  BKImBuf *ib = BK_imbuf_decode(data, n, 0, 0);
+  CHECK(ib != NULL);
+  if (ib) {
+    const uint32_t *px = BK_imbuf_pixels(ib, 0);
+    CHECK(abs((int)(px[0] >> 24) - 128) <= tol && near_rgb(px[0], 128, 0, 0, tol));
+    CHECK(px[4 * 8 + 6] == 0);
+    CHECK(px[4 * 8 + 1] == 0xFF0000FFu || near_rgb(px[4 * 8 + 1], 0, 0, 255, tol));
+    BK_imbuf_free(ib);
+  }
+  free(data);
+}
+
+static void test_optional_formats(void)
+{
+  if (has_format(BK_IMAGE_TIFF)) {
+    check_quad("quad.tif", BK_IMAGE_TIFF, 0);      /* LZW */
+    check_quad("quad_jpeg.tif", BK_IMAGE_TIFF, 24); /* JPEG (libjpeg-turbo) */
+    check_alpha("quad_alpha.tif", 1);              /* Deflate, unassociated alpha */
+    CHECK(strcmp(BK_image_format_name(BK_IMAGE_TIFF), "tiff") == 0);
+  }
+  if (has_format(BK_IMAGE_EXR)) {
+    check_quad("quad.exr", BK_IMAGE_EXR, 0);     /* half RGB, ZIP: linear 0 and 1 */
+    check_alpha("quad_alpha.exr", 1);            /* float RGBA, PIZ, premultiplied */
+    size_t n;
+    unsigned char *data = slurp("gray_tiled.exr", &n); /* Y only, 4 x 4 tiles, B44 */
+    BKImBuf *ib = BK_imbuf_decode(data, n, 0, 0);
+    CHECK(ib != NULL);
+    if (ib) {
+      const uint32_t *px = BK_imbuf_pixels(ib, 0);
+      CHECK(near_rgb(px[1 * 8 + 1], 127, 127, 127, 3)); /* red's luminance, 0.2126: sRGB 127 */
+      CHECK(near_rgb(px[4 * 8 + 6], 255, 255, 255, 1));
+      BK_imbuf_free(ib);
+    }
+    free(data);
+  }
+  if (has_format(BK_IMAGE_AVIF)) {
+    check_quad("quad.avif", BK_IMAGE_AVIF, 24); /* 4:4:4 */
+    check_anim("anim.avif");                    /* a sequence ('avis') */
+  }
+  if (has_format(BK_IMAGE_JXL)) {
+    check_quad("quad.jxl", BK_IMAGE_JXL, 0); /* lossless */
+    check_anim("anim.jxl");
+  }
+  if (has_heic()) {
+    check_quad("quad.heic", BK_IMAGE_HEIC, 40); /* HEVC 4:2:0 (x265) on 8 x 6 */
+  }
+}
+
 static void test_alpha_and_rgba(void)
 {
   size_t n;
@@ -188,20 +290,30 @@ static void test_exif_orientation(void)
 
 static void test_animation(void)
 {
-  const char *names[] = {"anim.gif", "anim.webp"};
-  for (int k = 0; k < 2; k++) {
-    size_t n;
-    unsigned char *data = slurp(names[k], &n);
-    BKImageInfo info;
-    CHECK(BK_image_probe(data, n, &info) && info.frames == 3 && info.width == 8);
-    BKImBuf *ib = BK_imbuf_decode(data, n, 0, 0);
-    CHECK(ib && BK_imbuf_size(ib, NULL, NULL) == 3);
-    if (ib && BK_imbuf_size(ib, NULL, NULL) == 3) {
-      CHECK(BK_imbuf_delay(ib, 0) == 100 && BK_imbuf_delay(ib, 2) == 100);
-    }
-    BK_imbuf_free(ib);
-    free(data);
+  check_anim("anim.gif");
+  check_anim("anim.webp");
+}
+
+/* Truncations and bit flips of `name`: every decode fails or succeeds, none crashes or leaks. */
+static void fuzz(const char *name, unsigned *seed)
+{
+  size_t n;
+  unsigned char *data = slurp(name, &n);
+  unsigned char *bad = (unsigned char *)malloc(n);
+  for (size_t cut = 0; cut < n; cut += 1 + n / 40) { /* truncations */
+    BK_imbuf_free(BK_imbuf_decode(data, cut, 0, 0));
   }
+  for (int it = 0; it < 300; it++) { /* bit flips past the signature */
+    memcpy(bad, data, n);
+    for (int f = 0; f < 4; f++) {
+      *seed = *seed * 1103515245u + 12345u;
+      const size_t at = 4 + (*seed >> 8) % (n > 4 ? n - 4 : 1);
+      bad[at < n ? at : n - 1] ^= (unsigned char)(1u << ((*seed >> 4) & 7));
+    }
+    BK_imbuf_free(BK_imbuf_decode(bad, n, (it & 1) ? 3 : 0, (it & 1) ? 2 : 0));
+  }
+  free(bad);
+  free(data);
 }
 
 static void test_corrupt(void)
@@ -210,23 +322,22 @@ static void test_corrupt(void)
                          "quad.qoi", "quad.hdr", "anim.webp", "halves.svg", "quad.tga"};
   unsigned seed = 1;
   for (int k = 0; k < 10; k++) {
-    size_t n;
-    unsigned char *data = slurp(names[k], &n);
-    unsigned char *bad = (unsigned char *)malloc(n);
-    for (size_t cut = 0; cut < n; cut += 1 + n / 40) { /* truncations */
-      BK_imbuf_free(BK_imbuf_decode(data, cut, 0, 0));
+    fuzz(names[k], &seed);
+  }
+  static const struct {
+    int format;
+    const char *name;
+  } optional[] = {
+      {BK_IMAGE_TIFF, "quad.tif"},  {BK_IMAGE_TIFF, "quad_alpha.tif"},
+      {BK_IMAGE_TIFF, "quad_jpeg.tif"}, {BK_IMAGE_EXR, "quad.exr"},
+      {BK_IMAGE_EXR, "quad_alpha.exr"}, {BK_IMAGE_EXR, "gray_tiled.exr"},
+      {BK_IMAGE_AVIF, "quad.avif"},    {BK_IMAGE_AVIF, "anim.avif"},
+      {BK_IMAGE_JXL, "quad.jxl"},      {BK_IMAGE_JXL, "anim.jxl"},
+  };
+  for (size_t k = 0; k < sizeof(optional) / sizeof(optional[0]); k++) {
+    if (BK_image_format_name(optional[k].format)) {
+      fuzz(optional[k].name, &seed);
     }
-    for (int it = 0; it < 300; it++) { /* bit flips past the signature */
-      memcpy(bad, data, n);
-      for (int f = 0; f < 4; f++) {
-        seed = seed * 1103515245u + 12345u;
-        const size_t at = 4 + (seed >> 8) % (n > 4 ? n - 4 : 1);
-        bad[at < n ? at : n - 1] ^= (unsigned char)(1u << ((seed >> 4) & 7));
-      }
-      BK_imbuf_free(BK_imbuf_decode(bad, n, (it & 1) ? 3 : 0, (it & 1) ? 2 : 0));
-    }
-    free(bad);
-    free(data);
   }
   CHECK(BK_imbuf_decode("not an image", 12, 0, 0) == NULL);
 }
@@ -632,6 +743,7 @@ int main(void)
   setvbuf(stdout, NULL, _IONBF, 0);
   const unsigned blocks0 = MEM_get_memory_blocks_in_use();
   test_formats();
+  test_optional_formats();
   test_alpha_and_rgba();
   test_svg();
   test_exif_orientation();

@@ -9,8 +9,8 @@ sources: ["features.json", "features.cmake", "kit/CMakeLists.txt", "gpu/CMakeLis
 
 A feature should cost binary size only if you use it. BUI's optional parts are one table, [`features.json`](https://github.com/ppmpreetham/BUI/blob/main/features.json), and three tools read it:
 
-- **CMake** (`features.cmake`): one option each, `ON` by default (`-DBUI_VIDEO=OFF`). See [CMake options](/docs/reference/cmake-options#optional-parts-featuresjson).
-- **cargo**: the same names are features of `blenderui-sys` and `blenderui`, all on by default. `blenderui-sys/build.rs` maps each to its CMake option and stops the build if `Cargo.toml` misses one; a test checks `blenderui` forwards them all.
+- **CMake** (`features.cmake`): one option each, `ON` by default unless the table says otherwise (`-DBUI_VIDEO=OFF`, `-DBUI_IMAGE_AVIF=ON`). See [CMake options](/docs/reference/cmake-options#optional-parts-featuresjson).
+- **cargo**: the same names are features of `blenderui-sys` and `blenderui`, on by default but the large image decoders (`exr`, `avif`, `jxl`) and `imgui`. `blenderui-sys/build.rs` maps each to its CMake option and stops the build if `Cargo.toml` misses one; a test checks `blenderui` forwards them all.
 - **`bui build`**: links the smallest prebuilt runtime that has what the app uses.
 
 Off, a part's sources aren't compiled at all. Its API stays, so code compiles either way: a missing format doesn't decode, a video reports an error state, `BK_file_dialog` returns -1, and windows draw with the software raster.
@@ -22,6 +22,9 @@ Off, a part's sources aren't compiled at all. Its API stays, so code compiles ei
 | `webp` | libwebp (with animations) |
 | `hdr`, `pnm` | BUI's readers |
 | `svg` | SVG images (nanosvg, which the icons need anyway) |
+| `tiff` | libtiff with zlib's inflate (on) |
+| `exr`, `avif`, `jxl` | OpenEXRCore, libavif + dav1d, libjxl (off: about 0.9, 0.9 and 1.3 MB) |
+| `heic` | HEIC through the OS decoder (on; a few KB) |
 | `video` | [Video](/docs/concepts/video) through the OS, loaded at run time |
 | `gpu` | Direct3D 11 / OpenGL renderers |
 | `freetype` | FreeType text (else stb_truetype) |

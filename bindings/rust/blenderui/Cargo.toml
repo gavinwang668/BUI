@@ -25,6 +25,10 @@ taffy = { version = "0.15", default-features = false, features = ["std", "taffy_
 paste = "1"
 foldhash = { version = "0.2", default-features = false }
 smallvec = { version = "1", features = ["union", "const_generics"] }
+# UAX #14 line break opportunities (inline layout: `linebreak.rs`)
+unicode-linebreak = "0.1.5"
+# WOFF fonts' zlib tables (`woff.rs`)
+miniz_oxide = "0.8"
 
 [target.'cfg(target_os = "android")'.dependencies]
 # the activity's JNI handles for crates that call into Java (android::run sets them)
@@ -37,7 +41,7 @@ gdi-text = ["blenderui-sys/gdi-text"]
 # GPU text with Slug by default (else the per-glyph atlas); see
 # `Application::slug` / `blenderui::set_slug` to switch at runtime.
 slug = ["blenderui-sys/slug"]
-default = ["slug", "png", "gif", "bmp", "tga", "qoi", "jpeg", "webp", "hdr", "pnm", "svg", "video", "gpu", "freetype", "filebrowser", "anim", "a11y"]
+default = ["slug", "png", "gif", "bmp", "tga", "qoi", "jpeg", "webp", "hdr", "pnm", "svg", "tiff", "heic", "video", "gpu", "freetype", "filebrowser", "anim", "a11y", "shell"]
 # The C kit's optional parts (features.json; see blenderui-sys): each costs
 # binary size only when on. tests/features.rs checks this list has them all.
 png = ["blenderui-sys/png"]
@@ -50,11 +54,17 @@ webp = ["blenderui-sys/webp"]
 hdr = ["blenderui-sys/hdr"]
 pnm = ["blenderui-sys/pnm"]
 svg = ["blenderui-sys/svg"]
+tiff = ["blenderui-sys/tiff"]
+exr = ["blenderui-sys/exr"]
+avif = ["blenderui-sys/avif"]
+jxl = ["blenderui-sys/jxl"]
+heic = ["blenderui-sys/heic"]
 video = ["blenderui-sys/video"]
 gpu = ["blenderui-sys/gpu"]
 freetype = ["blenderui-sys/freetype"]
 filebrowser = ["blenderui-sys/filebrowser"]
 anim = ["blenderui-sys/anim"]
+shell = ["blenderui-sys/shell"]
 a11y = ["blenderui-sys/a11y"]
 # the Lua host builds from the repository (bindings/lua), not through cargo
 lua = ["blenderui-sys/lua"]
@@ -65,3 +75,9 @@ portable-text = ["blenderui-sys/portable-text"]
 # Encoding only: the website-screenshot examples (examples/site) write PNGs.
 # The library decodes every format with the kit (no Rust image decoder).
 png = "0.17"
+# The WPT reftest harness (tests/wpt) only: the HTML5 tree builder browsers use
+# (html5ever), with the tree in an arena (ego-tree), to load the test files.
+scraper = { version = "0.29", default-features = false }
+ego-tree = "0.11"
+# ... and runs their scripts (the engine blenderui-qjs embeds) against a small DOM (tests/wpt/dom.js)
+rquickjs = "0.14"

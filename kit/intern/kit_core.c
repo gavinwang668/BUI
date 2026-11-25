@@ -2714,6 +2714,7 @@ static BKEvent make_event(BKContext *ctx, BKNode *target, int x, int y, int mods
   e.dragged = ctx->dragging;
   e.text = "";
   e.keysym = "";
+  e.phase = ctx->scroll_phase ? ctx->scroll_phase : BK_SCROLL_WHEEL;
   return e;
 }
 
@@ -3897,9 +3898,26 @@ int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods)
   return r;
 }
 
+void BK_scroll_phase(BKContext *ctx, int phase)
+{
+  ctx->scroll_phase = phase;
+}
+
 int BK_scroll_px(BKContext *ctx, int x, int y, float dx, float dy, int mods)
 {
   const float notch = 2.0f * (float)bk_unit();
+  if (dx == 0.0f && dy == 0.0f && ctx->scroll_phase == BK_SCROLL_END) {
+    BKNode *t = hit_all(ctx, x, y);
+    if (!t && ctx->root && y >= ctx->header_h) {
+      t = deepest(ctx->root, x, y);
+    }
+    if (!t) {
+      return 0;
+    }
+    const BKEvent e = make_event(ctx, t, x, y, mods); /* the finger lifted: nothing to scroll */
+    bk_event(t, BK_EV_WHEEL, mods, &e);
+    return 1;
+  }
   BKNode *t = BK_IS_CUSTOM(ctx->grab) ? ctx->grab : (ctx->modal ? NULL : hit_all(ctx, x, y));
   if (BK_IS_CUSTOM(t) && NODE_ENABLED(t)) {
     return BK_scroll(ctx, x, y, dx / notch, dy / notch, mods); /* custom nodes take notches */
@@ -4004,6 +4022,7 @@ static void raw_event(BKNode *n, int kind, int mods, const BKEvent *e, int butto
   }
   snprintf(buf, sizeof(buf), "%d %d", mods, button);
   if (kind == BK_EV_WHEEL && e) {
+    snprintf(buf, sizeof(buf), "%d %d %d", mods, button, e->phase); /* the third: BK_scroll_phase */
     bk_emit(n, kind, buf, e->delta, e->wheel_y); /* b: the exact pixels of BK_scroll_px, else 0 */
     return;
   }

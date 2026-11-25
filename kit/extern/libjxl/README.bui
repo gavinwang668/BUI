@@ -1,0 +1,18 @@
+Project: libjxl (the decoder, jxl_dec)
+URL: https://github.com/libjxl/libjxl
+Version: 0.13.0
+License: BSD-3-Clause (see LICENSE; PATENTS: Google's patent grant)
+Used for: JPEG XL decoding (stills and animations) in kit/intern/image (format_jxl.c).
+          Blender reads JPEG XL through OpenImageIO, which uses libjxl.
+
+Copied unmodified: lib/jxl (JPEGXL_INTERNAL_BASE_SOURCES and JPEGXL_INTERNAL_DEC_SOURCES of
+lib/jxl_lists.cmake, and the headers they include: lib/jxl/cms/*.h, enc_ans_params.h,
+jpeg/jpeg_data.h) and the public headers lib/include/jxl. Built as libjxl's jxl_dec without
+boxes and JPEG reconstruction (JPEGXL_ENABLE_BOXES=0, JPEGXL_ENABLE_TRANSCODE_JPEG=0): so no
+Brotli, which only those two need, and no CMS (skcms / lcms2): XYB images are asked for in
+sRGB, which libjxl does without one. The Highway targets are libjxl's defaults
+(HWY_DISABLED_TARGETS: what JPEGXL_HWY_TARGETS_OFF_BY_DEFAULT turns off).
+
+BUI files (bui/jxl/):
+  version.h      CMake writes it upstream from lib/jxl/version.h.in (0.13.0)
+  jxl_export.h   CMake's generate_export_header writes it upstream; static: nothing exported

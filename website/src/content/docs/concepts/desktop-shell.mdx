@@ -1,0 +1,206 @@
+---
+title: Desktop shell
+description: Tray icons with menus, notifications, a progress on the taskbar button and the system's recent documents, from every language, on Windows, Linux and macOS.
+section: Concepts
+order: 55
+languages: ["rust", "javascript", "python", "c"]
+sources: ["kit/include/BUI_kit.h", "kit/intern/shell/shell.h", "kit/intern/shell/shell.c", "kit/intern/shell/shell_win32.c", "kit/intern/shell/shell_dbus.c", "kit/intern/shell/shell_cocoa.m", "kit/intern/shell/shell_off.c", "bindings/rust/blenderui/src/shell.rs", "bindings/rust/blenderui-jsview/src/shell.rs", "bindings/node/shell.js", "bindings/python/src/buipy_shell.c", "tests/shell_test.c", "tests/shell_dbus_host.py", "features.json"]
+---
+
+Next to its windows, an app often lives in the **desktop shell**: an icon in the tray with a menu, a notification when a long job ends, a progress bar on its taskbar button, its files in the system's recent documents. BUI does all four in the C kit (`kit/intern/shell`), so every language gets the same thing.
+
+Where Blender's GHOST has the part, BUI follows it: the taskbar progress is `GHOST_IWindow::setProgressBar` / `endProgressBar` and the recent files are `GHOST_ISystemPaths::addToSystemRecentFiles`. Blender has no tray or notifications; those follow tauri's `tray-icon` and `muda` and `notify-rust`.
+
+| | Windows | Linux | macOS |
+| --- | --- | --- | --- |
+| **Tray icon** | `Shell_NotifyIconW`, the menu with `TrackPopupMenu`; icons come back when Explorer restarts | StatusNotifierItem with its menu as `com.canonical.dbusmenu` (KDE, GNOME's AppIndicator extension, waybar ...) | `NSStatusItem` + `NSMenu`; Blender's icons as template images |
+| **Notifications** | The tray icon's balloon, which Windows 10 and 11 show as a toast (an icon of its own shows while it does when the app has no tray icon) | `org.freedesktop.Notifications`; its "default" action is the click | `UNUserNotificationCenter`, else `NSUserNotificationCenter` (both need an app bundle) |
+| **Taskbar progress** | `ITaskbarList3`, per window | The app's launcher entry (`com.canonical.Unity.LauncherEntry`: KDE, Dash to Dock, Plank) | A bar drawn on the Dock icon, as Blender does |
+| **Recent documents** | `SHAddToRecentDocs` (Explorer's recent items, the jump list's Recent) | GTK's `~/.local/share/recently-used.xbel` | `NSDocumentController` (Open Recent) |
+
+Nothing new is linked: on Windows shell32 and ole32 are loaded when first used, and on Linux libdbus-1 is loaded at run time (a machine without it, or without a session bus, just has no tray and no notifications). `BK_shell_features()` says what the build and the system have; a call for a part that is missing does nothing and returns 0 (Rust `None` / `false`, JavaScript `null` / `false`). The macOS backend is written against AppKit but has not been run on a Mac yet.
+
+## A tray icon with a menu
+
+The icon is an image file in any format BUI reads, or the name of one of Blender's icons (`"BLENDER"`); none gives the app's own icon. A left click is a click event; a right click opens the menu (or is a click with button 3 when there is none). Menu items can be check items, disabled, separators or submenus.
+
+<LangTabs>
+<Tab label="Rust">
+
+```rust
+use blenderui::shell::{self, MenuItem, ShellEvent, Tray};
+
+let tray = Tray::new(Some("BLENDER"), "My app").expect("no tray on this system");
+let more = [MenuItem::action(10, "Export"), MenuItem::action(11, "Import").disabled()];
+tray.set_menu(&[
+    MenuItem::action(1, "Open"),
+    MenuItem::check(2, "Mute", false),
+    MenuItem::submenu("More", &more),
+    MenuItem::Separator,
+    MenuItem::action(3, "Quit"),
+]);
+cx.on_shell_event(|event, cx| match *event {
+    ShellEvent::MenuItem { id: 3, .. } => cx.quit(),
+    ShellEvent::TrayClicked { button: 1, .. } => { /* show the window */ }
+    _ => {}
+});
+```
+
+`examples/tray.rs` puts all four parts together: `cargo run --example tray`.
+
+</Tab>
+<Tab label="JavaScript">
+
+```js
+const { App } = require('@blender-ui/native')
+const app = new App()
+const tray = await app.createTray({ icon: 'BLENDER', tooltip: 'My app' })
+tray?.setContextMenu([
+  { label: 'Open', click: () => win.focus?.() },
+  { label: 'Mute', type: 'checkbox', checked: false, click: toggleMute },
+  { label: 'More', submenu: [{ label: 'Export', click: exportAll }] },
+  { type: 'separator' },
+  { label: 'Quit', click: () => app.quit() }
+])
+tray?.on('click', () => console.log('clicked'))
+```
+
+The names are Electron's (`Tray`, `setContextMenu`, `setToolTip`, `setImage`), so an Electron app's tray code ports as it is.
+
+</Tab>
+<Tab label="Python">
+
+```py
+import buipy
+from bui.components.menus import MenuItem
+
+if buipy.shell_features() & buipy.SHELL_TRAY:
+    tray = buipy.Tray(icon="BLENDER", tooltip="My app")
+    tray.set_menu([
+        MenuItem("Open", show_window),
+        MenuItem("Mute", toggle_mute, checked=False),
+        None,  # a separator
+        MenuItem("Quit", buipy.kit_quit),
+    ])
+    tray.on_click = lambda button: print("clicked with", button)
+```
+
+</Tab>
+<Tab label="C">
+
+```c
+static void on_shell(void *data, BKTray *tray, int kind, void *ref, double a, double b)
+{
+  if (kind == BK_EV_CALL) { /* ref: the item's BKMenuSpec.ref, a: its id */ }
+  if (kind == BK_EV_CLICK) { /* a: the button */ }
+}
+
+BKShellCallbacks cb = {NULL, on_shell};
+BK_shell_set_callbacks(&cb);
+BKTray *tray = BK_tray_new("BLENDER", "My app"); /* NULL: no tray here */
+const BKMenuSpec items[] = {
+    {.text = "Open", .checked = -1, .enabled = 1, .ref = open_ref},
+    {.text = "-"},
+    {.text = "Quit", .checked = -1, .enabled = 1, .fn = quit_fn},
+};
+BK_tray_set_menu(tray, items, 3); /* copied */
+```
+
+</Tab>
+</LangTabs>
+
+A tray-only app keeps the loop alive with no window open: `Application::keep_alive(true)` in Rust, `BK_window_set_keep_alive(1)` in C.
+
+## Notifications
+
+`notify(title, body, icon)` shows one and returns its id; a click on it comes back with that id (`ShellEvent::NotificationClicked`, the `onClick` of `app.notify`, `buipy.on_notification_click`, `BK_EV_ACTIVATE`).
+
+<LangTabs>
+<Tab label="Rust">
+
+```rust
+let id = shell::notify("Export finished", "scene.blend was saved", Some("BLENDER"));
+```
+
+</Tab>
+<Tab label="JavaScript">
+
+```js
+await app.notify({ title: 'Export finished', body: 'scene.blend was saved', onClick: () => win.focus?.() })
+```
+
+</Tab>
+<Tab label="Python">
+
+```py
+buipy.on_notification_click(lambda nid: print("clicked", nid))
+nid = buipy.notify("Export finished", "scene.blend was saved")
+```
+
+</Tab>
+<Tab label="C">
+
+```c
+int id = BK_notify("Export finished", "scene.blend was saved", NULL); /* 0: not shown */
+```
+
+</Tab>
+</LangTabs>
+
+On Windows the notification is the tray icon's balloon, which Windows 10 and 11 turn into a toast in the Action Center: it carries the app's name and icon and needs no Start menu shortcut or registry entry. (WinRT toasts with buttons and images need an app identity registered with the system; BUI does not write to the registry.) Focus Assist and "Do not disturb" hold them back as they do any app's. On Linux the icon goes as `image-data`, so no icon theme is needed. On macOS, notifications need the app to run from a bundle with an identifier.
+
+## Taskbar progress
+
+<LangTabs>
+<Tab label="Rust">
+
+```rust
+use blenderui::shell::TaskbarProgress;
+window.set_taskbar_progress(TaskbarProgress::Normal(0.4));
+window.set_taskbar_progress(TaskbarProgress::Paused(0.4));   // yellow on Windows
+window.set_taskbar_progress(TaskbarProgress::Error(1.0));    // red
+window.set_taskbar_progress(TaskbarProgress::Indeterminate); // busy, no value
+window.set_taskbar_progress(TaskbarProgress::Hidden);
+```
+
+</Tab>
+<Tab label="JavaScript">
+
+```js
+win.setProgressBar(0.4)
+win.setProgressBar(0.4, { mode: 'paused' }) // 'normal', 'indeterminate', 'paused', 'error', 'none'
+win.setProgressBar(-1) // hidden
+```
+
+</Tab>
+<Tab label="Python">
+
+```py
+window.set_progress(buipy.PROGRESS_NORMAL, 0.4)
+window.set_progress(buipy.PROGRESS_NONE)
+```
+
+</Tab>
+<Tab label="C">
+
+```c
+BK_window_set_progress(win, BK_PROGRESS_NORMAL, 0.4f);
+BK_window_set_progress(win, BK_PROGRESS_NONE, 0.0f);
+```
+
+</Tab>
+</LangTabs>
+
+On Windows it is the window's own button. On macOS the Dock icon is the app's, and on Linux the launcher entry is too: it is found by the desktop file of the app id (`set_app_id("org.example.App")` for `org.example.App.desktop`).
+
+## Recent documents
+
+`add_recent_document(path)` (JavaScript `app.addRecentDocument`, Python `buipy.add_recent_file`, C `BK_shell_add_recent`) adds an existing file to the system's list: Explorer's recent items and the app's jump list on Windows (with an app id, that app's), Open Recent on macOS, GTK's recent files on Linux (the file's old entry moves to the end, as GTK does). Windows makes no entry for files under `%TEMP%`.
+
+## Who the app is
+
+`set_app_id(id)` (`BK_shell_set_app_id`) names the app to the shell: its AppUserModelID on Windows (which groups its taskbar buttons and owns its jump list, as `GHOST_SystemWin32` sets Blender's) and its desktop file's id on Linux (the launcher entry, the tray item's id, the notifications' app name). Set it before the first tray or notification. Without it, Linux uses the executable's name.
+
+## Leaving it out
+
+The `shell` feature ([CMake](/docs/reference/cmake-options) `BUI_SHELL`, cargo `shell`, on by default) builds the backends; off, the API stays and reports nothing. On Windows the code is about 9 KB and is linked only when an app calls it; on Linux it is about 23 KB, linked whenever the window loop is (the loop waits on the D-Bus socket).

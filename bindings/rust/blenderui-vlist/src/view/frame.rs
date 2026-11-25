@@ -33,10 +33,10 @@ pub enum Budget {
 }
 
 /// A running budget.
-struct Clock {
+pub(super) struct Clock {
     budget: Budget,
     start: Instant,
-    done: usize,
+    pub(super) done: usize,
 }
 
 impl Clock {
@@ -44,7 +44,7 @@ impl Clock {
         Self { budget, start: Instant::now(), done: 0 }
     }
 
-    fn exhausted(&self) -> bool {
+    pub(super) fn exhausted(&self) -> bool {
         match self.budget {
             Budget::Unlimited => false,
             Budget::Items(n) => self.done >= n,
@@ -108,7 +108,7 @@ impl ListView {
     }
 
     /// Make `self.page` cover `range` (refetching when the source changed).
-    fn ensure_page<S: ItemSource>(&mut self, src: &S, range: &Range<usize>) {
+    pub(super) fn ensure_page<S: ItemSource>(&mut self, src: &S, range: &Range<usize>) {
         let have = self.page.range();
         if self.page_version == src.version() && have.start <= range.start && have.end >= range.end {
             return;
@@ -170,6 +170,7 @@ impl ListView {
         }
         self.more_to_measure = false;
         let mut clock = Clock::new(self.budget());
+        self.apply_relative(src, m, tw, &mut clock);
         for pass in 0..6 {
             let (item, off) = self.resolve();
             self.place(item, off);
@@ -240,6 +241,7 @@ impl ListView {
             self.index = index;
         }
         self.page_version = u64::MAX;
+        self.rel = None;
         if let Pos::Anchor { item, .. } = &mut self.pos {
             *item = (*item).min(src.len().saturating_sub(1));
         }

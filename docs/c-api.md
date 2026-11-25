@@ -83,7 +83,7 @@ int main(void)
 | **Windows** | `BK_window_new`, `show`, `close`, `set_title`, `set_size`, `wm(key, a, b)` (position, topmost, alpha, override, transparent, resizable, minsize, state; on Wayland also layer and anchor for wlr-layer-shell), callbacks `on_timer`, `on_close`, `on_frame`, `on_focus`, `hit_test` (the parts of a title bar the app draws: `"override"` 2), `move`, `timer`, `run`, `pump`, `quit` |
 | **GPU rendering** | `BUI_gpu_set_default(1)` (all new windows), `BK_window_set_gpu(win, 1)` (one window), `BK_window_gpu(win)` (1 once frames draw on the GPU). `BUI_GPU=1/0` overrides. For your own rasters: `BUI_raster_gpu_attach(r, hwnd_or_NULL, wait)`, `BUI_raster_gpu_poll`, `BUI_raster_is_gpu`. |
 | **Theme** | `BK_set_theme("dark" / "light")` (Blender's Dark or Light preset; every context relayouts and redraws), `BK_theme_name()`, `BK_theme_color(key, rgba)` (`"region_bg"`, `"text"`, `"regular.inner"`, or the plain-English and Blender keys of a theme file: `"button.background"`, `"user_interface.wcol_regular.inner"`). Your own themes: `BK_theme_load_file(path)` / `BK_theme_load_json(text)` register the themes of a JSON theme file (-1 and `BK_theme_error()` on a mistake), `BK_set_theme(name)` chooses one, `BK_theme_set_color(key, rgba)` / `BK_theme_set_num(key, v)` change one value of the active theme (colors, `roundness`, `border.width`, `corners.top_left`, ...), `BK_set_font_size(points)` sets the UI text size; see [theming.md](theming.md). Without a call, `BUI_THEME=dark\|light` picks the theme. `BK_set_scale` sets the UI scale; `BK_set_text_shadow(0)` turns off Blender's UI text shadows (on by default; Python turns them off). |
-| **Text** | `BUI_text_measure`, `BUI_raster_text`, `BUI_text_add_font(family, flags, data, len)` (register a font; needed on wasm), `BUI_text_font_dir(i, buf, cap)` (the font folders the engine reads files from) |
+| **Text** | `BUI_text_measure`, `BUI_raster_text`, `BUI_text_add_font(family, flags, data, len)` (register a font; needed on wasm), `BUI_text_font_dir(i, buf, cap)` (the font folders the engine reads files from), `BUI_text_vmetrics(family, flags, &ascent, &descent, &gap)` (a font's vertical metrics in em, for line heights and baselines); text flags `BUI_FONT_BOLD`, `BUI_FONT_ITALIC`, and `BUI_FONT_HAN_JA` / `BUI_FONT_HAN_KO` (Han in the run is drawn as Japanese / Korean, for text drawn a word at a time) |
 | **Raster alpha** | `BUI_raster_set_alpha(r, 1)` keeps premultiplied alpha in a CPU raster, `BUI_raster_clear` makes it transparent, `BUI_raster_alpha` reads the setting. An opaque raster draws the same bytes as before. |
 | **Specialised** | Canvas display list (`BK_canvas_set_item`), text area (`BK_textarea_*`), trees (`BK_tree_item_*`), menus (`BK_open_menu`, `BK_open_pie`), the hit test (`BK_hit_at`), color ramps and curves, `BK_undo` / `BK_redo` |
 | **Custom nodes** | A `custom` node draws and handles input itself: `BK_custom_set(node, &cls, data)` with `event` (pointer with all three buttons and a grab, precise wheel via `BK_scroll`, keys and text while focused, key releases, focus), `frame` (called by `BK_render` when requested with `BK_custom_request_frame(node, ms)`: immediate-mode UIs build their frame there) and `draw` (raster + rect). `BK_custom_set_cursor`, `BK_node_context`. Dear ImGui runs on it: [../bindings/imgui](../bindings/imgui/README.md). |
@@ -103,11 +103,14 @@ has a one-line comment.
 
 `kit/intern/image` decodes images for every binding (Blender's imbuf design:
 one `BKImBuf` type and a format table): PNG, GIF, BMP, TGA, QOI (Wuffs), JPEG
-(libjpeg-turbo), WebP (libwebp), Radiance HDR, PNM and SVG.
+(libjpeg-turbo), WebP (libwebp), Radiance HDR, PNM, SVG and TIFF (libtiff), HEIC
+through the OS (WIC, ImageIO, libheif; loaded at run time), and, when the build
+turns them on, OpenEXR (OpenEXRCore), AVIF (libavif + dav1d) and JPEG XL (libjxl).
+`BK_image_format_name(BK_IMAGE_EXR)` is NULL in a build without a format.
 
 ```c
 BKImageInfo info;
-BK_image_probe(data, len, &info);               /* header only: format, size, frames */
+BK_image_probe(data, len, &info);               /* header only: format, size, frames, flags */
 BKImBuf *ib = BK_imbuf_decode(data, len, 256, 256); /* any thread; fit within, never upscaled */
 int w, h, frames = BK_imbuf_size(ib, &w, &h);
 const uint32_t *px = BK_imbuf_pixels(ib, 0);    /* premultiplied 0xAARRGGBB */
@@ -203,6 +206,25 @@ hid or flipped, `BK_EV_MOVE` on a panel dragged to a new place. Region propertie
 (header, tool_header, footer, asset_shelf, channels, nav_bar, toolbar, sidebar, execute, hud),
 `"size"`, `"hidden"`, `"side"`, `"overlap"`, `"resizable"`, `"maxsize"`, `"hotkey"`. Setters
 return 0 for what they refuse. See [Screens, areas and regions](https://bui.preetham.top/docs/concepts/screens/).
+
+## Tray icons, notifications, taskbar progress, recent files
+
+The desktop shell (`BK_tray_*`, `BK_notify`, `BK_window_set_progress`, `BK_shell_add_recent`;
+[Desktop shell](https://bui.preetham.top/docs/concepts/desktop-shell/)). One listener gets every
+event: `BK_EV_CLICK` (a = button) and `BK_EV_DOUBLE` on a tray icon, `BK_EV_CALL` for a menu item
+(`ref` = its `BKMenuSpec.ref`, a = its id: items numbered from 1, a submenu's after its parent),
+`BK_EV_ACTIVATE` for a clicked notification (tray NULL, a = its id).
+
+```c
+BKShellCallbacks cb = {app, on_shell};
+BK_shell_set_callbacks(&cb);
+BKTray *tray = BK_tray_new("BLENDER", "My app");      /* NULL: no tray here */
+BK_tray_set_menu(tray, items, n);                     /* BKMenuSpec[], copied */
+int id = BK_notify("Done", "The export finished", NULL);
+BK_window_set_progress(win, BK_PROGRESS_NORMAL, 0.4f); /* NONE, INDETERMINATE, PAUSED, ERROR */
+BK_shell_add_recent("scene.blend");
+if (BK_shell_features() & BK_SHELL_TRAY) { /* ... */ }
+```
 
 ## Versioning and stability
 

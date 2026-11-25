@@ -429,7 +429,10 @@ int BK_area_close(BKNode *area); /* 0: no neighbor to take its place */
 /* -- images (kit/intern/image: Blender's imbuf design) ----------------------------------
  * One decoder per format for every binding: PNG, GIF (animated), BMP, TGA, QOI, PNM
  * (Wuffs), JPEG (libjpeg-turbo, DCT-scaled thumbnails, EXIF orientation), WebP
- * (libwebp: lossy, lossless, animated), Radiance HDR, SVG (nanosvg; BUI_IMAGE_SVG).
+ * (libwebp: lossy, lossless, animated), Radiance HDR, SVG (nanosvg; BUI_IMAGE_SVG), TIFF
+ * (libtiff), OpenEXR (OpenEXRCore), AVIF (libavif + dav1d; animated), JPEG XL (libjxl;
+ * animated) and HEIC (the OS decoder, loaded at run time). A format the build is without
+ * (features.json), or HEIC on a system without a decoder, probes as no image.
  * Pixels are premultiplied 0xAARRGGBB, decoded at the size they are drawn.
  * Synchronous decodes run on any thread; the cache and loader are UI-thread APIs. */
 typedef struct BKImBuf BKImBuf;
@@ -446,13 +449,26 @@ enum {
   BK_IMAGE_PNM,
   BK_IMAGE_SVG,
   BK_IMAGE_VIDEO, /* a frame of a BKVideo */
+  BK_IMAGE_TIFF,
+  BK_IMAGE_EXR,
+  BK_IMAGE_AVIF,
+  BK_IMAGE_JXL,
+  BK_IMAGE_HEIC,
 };
 /* CSS object-fit */
 enum { BK_FIT_FILL = 0, BK_FIT_CONTAIN, BK_FIT_COVER, BK_FIT_NONE, BK_FIT_SCALE_DOWN };
 typedef struct BKImageInfo {
   int format; /* BK_IMAGE_* */
   int width, height, frames;
+  int flags; /* BK_IMAGE_INFO_* */
 } BKImageInfo;
+/* BKImageInfo.flags. A vector image (SVG) decodes at any size, sharp. One without a natural
+ * width or height (an SVG's is a percentage, or missing) has `width` x `height` only for its
+ * ratio (its viewBox), or not even that (NO_RATIO: 300 x 150), as CSS sizes images. */
+#define BK_IMAGE_INFO_VECTOR 1
+#define BK_IMAGE_INFO_NO_WIDTH 2
+#define BK_IMAGE_INFO_NO_HEIGHT 4
+#define BK_IMAGE_INFO_NO_RATIO 8
 /* Header only (no pixels): 0 when the data is not an image BUI reads. */
 int BK_image_probe(const void *data, size_t len, BKImageInfo *r_info);
 int BK_image_probe_file(const char *path, BKImageInfo *r_info);
@@ -829,6 +845,18 @@ int BK_scroll(BKContext *ctx, int x, int y, float dx, float dy, int mods);
  * so scroll containers follow it exactly instead of stepping a notch per event. Raw wheel events
  * (BK_EV_WHEEL) carry the pixels in `b`. */
 int BK_scroll_px(BKContext *ctx, int x, int y, float dx, float dy, int mods);
+
+/* How the scrolls that follow come, for views that react to it (a list stretches past its end
+ * while a finger drags, and lets go when the finger lifts). A wheel event's raw text carries it as
+ * its third number. BK_SCROLL_END with zero deltas sends one last wheel event, with nothing to
+ * scroll, to the node under (x, y): the finger lifted. */
+enum {
+  BK_SCROLL_WHEEL = 1, /* a wheel notch or a touchpad: the default */
+  BK_SCROLL_DRAG = 2,  /* a finger is on the screen and moves the content */
+  BK_SCROLL_FLING = 3, /* the content coasts on after the finger */
+  BK_SCROLL_END = 4,   /* the finger lifted */
+};
+void BK_scroll_phase(BKContext *ctx, int phase);
 int BK_key(BKContext *ctx, const char *text, const char *keysym, int mods);
 /* Called by a binding while it handles a key's raw event (BK_EV_KEY) when it acted on the key:
  * BK_key then returns 1 and no widget or shortcut sees the key. A host acts on a key BK_key
@@ -1163,6 +1191,76 @@ void BK_window_set_stop_check(int (*stop)(void)); /* polled after each message *
 int BK_window_wake_init(void (*cb)(void));
 void BK_window_wake(void);
 void BK_window_set_keep_alive(int on);
+
+/* -- desktop shell (kit/intern/shell): tray icons, notifications, taskbar progress, recent files
+ * UI-thread API (the window loop's thread; on macOS the main thread); the loop delivers the
+ * events. Blender's GHOST is the model where it has the part: the taskbar progress is
+ * GHOST_IWindow::setProgressBar / endProgressBar and the recent files are
+ * GHOST_ISystemPaths::addToSystemRecentFiles. The tray and notifications follow tauri's
+ * tray-icon / muda and notify-rust:
+ *   Windows  Shell_NotifyIconW (menu: TrackPopupMenu); notifications are the tray icon's balloon,
+ *            which Windows 10 and 11 show as a toast; ITaskbarList3; SHAddToRecentDocs
+ *   Linux    D-Bus with libdbus-1 loaded at run time: StatusNotifierItem + com.canonical.dbusmenu,
+ *            org.freedesktop.Notifications, the launcher entry (com.canonical.Unity.LauncherEntry,
+ *            per app), ~/.local/share/recently-used.xbel
+ *   macOS    NSStatusItem + NSMenu, UNUserNotificationCenter (an app bundle; else
+ *            NSUserNotificationCenter), the Dock icon's progress, NSDocumentController
+ * BK_shell_features() has a bit for each part this build and system have; without one, its calls
+ * return 0 (NULL) and do nothing. Built without BUI_SHELL, it is 0. */
+enum {
+  BK_SHELL_TRAY = 1 << 0,     /* BK_tray_* */
+  BK_SHELL_NOTIFY = 1 << 1,   /* BK_notify */
+  BK_SHELL_PROGRESS = 1 << 2, /* BK_window_set_progress */
+  BK_SHELL_RECENT = 1 << 3,   /* BK_shell_add_recent */
+};
+int BK_shell_features(void);
+/* Who the app is to the shell (set it first): Windows' AppUserModelID
+ * (SetCurrentProcessExplicitAppUserModelID, as GHOST_SystemWin32), the desktop file's id on Linux
+ * ("org.example.App" for org.example.App.desktop: the launcher entry, the tray's id and the
+ * notifications' app name). Default: the executable's name. */
+void BK_shell_set_app_id(const char *id);
+/* One listener for every shell event (copied; NULL: none):
+ *   BK_EV_CLICK     a tray icon was clicked: a = button (1 left, 2 middle, 3 right; a right click
+ *                   on an icon with a menu opens the menu instead)
+ *   BK_EV_DOUBLE    a tray icon was double-clicked (Windows)
+ *   BK_EV_CALL      a tray menu item was chosen: ref = its BKMenuSpec.ref, a = its id (items
+ *                   numbered from 1 in order, submenus' items after their parent)
+ *   BK_EV_ACTIVATE  a notification was clicked: tray = NULL, a = its id (BK_notify) */
+typedef struct BKTray BKTray;
+typedef struct BKShellCallbacks {
+  void *data;
+  void (*emit)(void *data, BKTray *tray, int kind, void *ref, double a, double b);
+} BKShellCallbacks;
+void BK_shell_set_callbacks(const BKShellCallbacks *cb);
+/* A tray icon (Windows' notification area, the status bar). `icon`: an image file (any format
+ * BK_imbuf_load reads) or a Blender icon's name ("BLENDER", see BK_icon_id), drawn at the
+ * system's size; NULL: the app's own icon. NULL when there is no tray (see BK_shell_features). */
+BKTray *BK_tray_new(const char *icon, const char *tooltip);
+void BK_tray_free(BKTray *tray);
+int BK_tray_set_icon(BKTray *tray, const char *icon); /* 0: not an image or icon BUI reads */
+int BK_tray_set_tooltip(BKTray *tray, const char *tooltip);
+/* Its menu, copied as BK_menubutton_set_items (refs retained while set): text, `checked` (-1
+ * none, 0/1 a check mark), `enabled`, `sub` (a submenu), NULL or "-" text for a separator, `fn`
+ * called instead of BK_EV_CALL; icon and shortcut are not shown. n = 0 removes it. */
+int BK_tray_set_menu(BKTray *tray, const BKMenuSpec *items, int n);
+/* A desktop notification; `icon` as a tray icon's (NULL: the app's). Returns its id (> 0), 0
+ * when it cannot be shown. On Windows it is a tray icon's balloon: the first BKTray's, else an
+ * icon of its own that shows while the notification does. */
+int BK_notify(const char *title, const char *body, const char *icon);
+/* The window's taskbar button shows a progress (Windows: ITaskbarList3; macOS: the Dock icon, as
+ * GHOST_WindowCocoa::setProgressBar; Linux: the app's launcher entry). `value` 0..1 (clamped).
+ * Returns 1 when shown. */
+enum {
+  BK_PROGRESS_NONE = 0,      /* hidden (GHOST endProgressBar) */
+  BK_PROGRESS_NORMAL,
+  BK_PROGRESS_INDETERMINATE, /* busy, no value (Windows' marquee) */
+  BK_PROGRESS_PAUSED,
+  BK_PROGRESS_ERROR,
+};
+int BK_window_set_progress(BKWindow *win, int state, float value);
+/* Adds a file to the system's recent documents (Windows: the jump list's Recent and Explorer's
+ * recent items). Returns 1 when added. */
+int BK_shell_add_recent(const char *path);
 
 #ifdef __ANDROID__
 /* Android: the host is the activity's surface (kit_window_android.c). `android_main` passes its

@@ -3,7 +3,7 @@
 //! calls; the window is the kit's Android host
 //! (kit/intern/kit_window_android.c), so `Application::run` needs nothing Android-specific.
 //!
-//! Three tabs: the widgets, a list of ten million rows and a chat of a hundred thousand messages.
+//! Three tabs: the widgets, a list of ten million rows and a chat of a million messages.
 //! The lists are `blenderui::vlist`: only the rows in view exist (the row text is computed when it
 //! is fetched, nothing is stored per row), a frame costs O(visible rows), and a fling carries the
 //! scrollbar through the whole of it.
@@ -16,7 +16,7 @@ use blenderui::vlist::{
 };
 
 const ROWS: usize = 10_000_000;
-const MESSAGES: u64 = 100_000;
+const MESSAGES: u64 = 1_000_000;
 
 type Rows = Entity<ListState<CountSource, RowStyle>>;
 type Chat = Entity<ListState<VecSource, ChatStyle>>;
@@ -26,6 +26,11 @@ enum Tab {
     Widgets,
     Rows,
     Chat,
+}
+
+/// A touch list: it stretches like a rubber band past either end and springs back (`Options::overscroll`).
+fn touch_options() -> Options {
+    Options { overscroll: true, ..Options::default() }
 }
 
 const WORDS: [&str; 12] = ["render", "the", "visible", "rows", "only", "measure", "lazily", "and", "wrap", "text", "on", "demand"];
@@ -100,7 +105,7 @@ impl Render for Demo {
             .p_1()
             .child(self.tab_button(Tab::Widgets, "Widgets", cx))
             .child(self.tab_button(Tab::Rows, "10M rows", cx))
-            .child(self.tab_button(Tab::Chat, "Chat 100k", cx));
+            .child(self.tab_button(Tab::Chat, "Chat 1M", cx));
         let content = match self.tab {
             Tab::Widgets => self.widgets(cx),
             Tab::Rows => div().relative().flex_1().min_h_0().child(div().absolute().inset_0().child(variable_list(&self.rows))),
@@ -119,12 +124,12 @@ fn run() {
     Application::new().run(|cx: &mut App| {
         cx.open_window(WindowOptions::default(), |_, cx| {
             let rows = cx.new(|cx| {
-                let list = List::new(CountSource::new(ROWS, row_text), RowStyle::new(theme_palette()), 360.0, 640.0, Options::default())
+                let list = List::new(CountSource::new(ROWS, row_text), RowStyle::new(theme_palette()), 360.0, 640.0, touch_options())
                     .expect("the index holds ten million rows");
                 ListState::new(list, cx)
             });
             let chat = cx.new(|cx| {
-                let list = ChatList::from_messages(synth::messages(0, MESSAGES), theme_palette(), 360.0, 640.0, Options::default());
+                let list = ChatList::from_messages(synth::messages(0, MESSAGES), theme_palette(), 360.0, 640.0, touch_options());
                 ListState::new(list, cx)
             });
             cx.new(|_| Demo { tab: Tab::Widgets, taps: 0, rows, chat })

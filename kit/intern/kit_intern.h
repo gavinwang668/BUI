@@ -218,6 +218,9 @@ void bk_html_polyline(const float (*pts)[2], int n, const float c[4], float widt
 
 /* Icons (kit_icons.c). */
 int bk_icons_lookup(const char *name);
+/* A Blender SVG icon by name, rasterized at `size` px (mono icons tinted `color`): a new image,
+ * NULL for no such icon (kit/intern/shell: tray icons). */
+BKImBuf *bk_icon_image(const char *name, int size, const float color[4]);
 void bk_icons_draw(int id, float x, float y, float s, const float color[4]);
 
 /* -------------------------------------------------------------------- */
@@ -301,6 +304,7 @@ typedef struct BKEvent {
   const char *text;
   const char *keysym;
   float wheel_x, wheel_y; /* BK_scroll: precise deltas (custom nodes) */
+  int phase;              /* BK_scroll_phase: how a scroll came (BK_SCROLL_*) */
 } BKEvent;
 
 #define EV_SHIFT(e) (((e)->mods & BK_SHIFT) != 0)
@@ -601,6 +605,15 @@ void bk_node_image_draw(const BKNode *n, const BKRect *r, float alpha);
 /* The window host's cross-thread wake, created on this (the UI) thread
  * (kit_window_*.c); its handler calls BK_image_poll. 0 without a host. */
 int bk_window_wake_ready(void);
+/* The desktop shell's connection (kit/intern/shell, Linux: D-Bus): the window loop waits on
+ * bk_shell_fd() too (-1: none) and calls bk_shell_poll() on every turn. */
+int bk_shell_fd(void);
+void bk_shell_poll(void);
+#ifdef _WIN32
+#  include <wchar.h>
+/* UTF-8 to a malloc'd UTF-16 string (kit_window_win32.c); NULL text gives "". */
+wchar_t *bk_utf8_to_wide(const char *s);
+#endif
 
 /* Undo entries (BK_undo). */
 typedef struct BKUndo {
@@ -641,6 +654,7 @@ struct BKContext {
   int press_button;       /* the button that started the grab (1, 2, 3) */
   char key_held[32];      /* wmWindow.pie_event_type_last: the key down now, "" = none */
   int key_taken;          /* the host acted on the key's raw event (BK_key_taken) */
+  int scroll_phase;       /* BK_scroll_phase: carried by the wheel events that follow */
   bool has_ungrab;
   bool has_skip;
   int pointer_x, pointer_y;
@@ -743,6 +757,7 @@ int bk_parse_hex(const char *s, float out[4], float alpha);
 BKNode *bk_popover_panel_new(BKNode *owner, BKNode *body);
 void bk_menuspec_free(BKMenuSpec *items, int n);
 BKMenuSpec *bk_menuspec_copy(const BKMenuSpec *items, int n);
+bool bk_menuspec_is_sep(const BKMenuSpec *s); /* NULL or "-" text */
 int bk_tree_columns_from_icons(BKNode *n);
 
 /* Classes (kit_widgets.c, kit_views.c, kit_color.c, kit_menus.c) */

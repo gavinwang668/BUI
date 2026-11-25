@@ -76,6 +76,22 @@ pub enum TextAlign {
     Center,
     Right,
     Justify,
+    /// The line's start (left in `ltr`, right in `rtl`): the initial value.
+    Start,
+    End,
+}
+
+impl TextAlign {
+    /// Left, right, center or justify, in direction `rtl` or not.
+    pub(crate) const fn physical(self, rtl: bool) -> TextAlign {
+        match self {
+            TextAlign::Start if rtl => TextAlign::Right,
+            TextAlign::Start => TextAlign::Left,
+            TextAlign::End if rtl => TextAlign::Left,
+            TextAlign::End => TextAlign::Right,
+            a => a,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -85,6 +101,8 @@ pub enum WhiteSpace {
     Pre,
     PreWrap,
     PreLine,
+    /// `break-spaces`: as `pre-wrap`, but lines may break after every preserved space.
+    BreakSpaces,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -120,6 +138,12 @@ pub enum VAlign {
     Baseline,
     Sub,
     Super,
+    /// `top`: the top of the line box (`text-top` / `-bottom`, by the parent's text, are baseline).
+    Top,
+    /// `middle`: the middle of the line box.
+    Middle,
+    /// `bottom`: its bottom.
+    Bottom,
 }
 
 /// `border-style` / `outline-style` (`none` and `hidden` clear the width instead).
@@ -195,7 +219,52 @@ pub struct CounterOps {
 pub struct Gradient {
     pub radial: bool,
     pub angle_deg: f32,
-    pub stops: Vec<(Rgba, Option<f32>)>,
+    /// Colour stops, with their positions on the gradient line when given (`50%`, `75px`,
+    /// `calc(100% - 10px)`).
+    pub stops: Vec<(Rgba, Option<LengthPercentage>)>,
+}
+
+impl Gradient {
+    /// The stops at fractions of a gradient line `len` px long (CSS Images 3 §3.5.3: a first or
+    /// last stop without a position is at the start or end, a position before an earlier one is
+    /// moved up to it, and stops without one are spaced evenly between the ones around them).
+    pub fn resolved(&self, len: f32) -> Vec<(Rgba, f32)> {
+        let n = self.stops.len();
+        let len = len.max(1e-3);
+        let mut at: Vec<Option<f32>> = self.stops.iter()
+            // to 1/64 px: `calc(20%)` and `20px` on a 100px line are the same stop
+            .map(|(_, p)| p.map(|p| (taffy::ResolveOrZero::resolve_or_zero(p, Some(len), crate::tree::resolve_calc) * 64.0).round() / 64.0 / len))
+            .collect();
+        if let Some(f) = at.first_mut() {
+            f.get_or_insert(0.0);
+        }
+        if let Some(l) = at.last_mut() {
+            l.get_or_insert(1.0);
+        }
+        let mut high = f32::NEG_INFINITY;
+        for p in at.iter_mut().flatten() {
+            high = high.max(*p);
+            *p = high;
+        }
+        let mut out: Vec<(Rgba, f32)> = Vec::with_capacity(n);
+        let mut k = 0;
+        while k < n {
+            if let Some(p) = at[k] {
+                out.push((self.stops[k].0, p));
+                k += 1;
+                continue;
+            }
+            // a run of stops without positions, between the ones before and after
+            let start = out.last().map_or(0.0, |s| s.1);
+            let end = (k..n).find_map(|j| at[j].map(|p| (j, p))).unwrap_or((n, 1.0));
+            let steps = (end.0 - k + 1) as f32;
+            for j in k..end.0 {
+                out.push((self.stops[j].0, start + (end.1 - start) * (j - k + 1) as f32 / steps));
+            }
+            k = end.0;
+        }
+        out
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -270,8 +339,12 @@ pub struct ImageStyle {
     pub bg_position: [Pos; 2],
     /// repeat along x, y
     pub bg_repeat: (bool, bool),
+    /// How each repeating axis repeats: `REPEAT_*` (`space`, `round`, or plain).
+    pub bg_spacing: [u8; 2],
     /// `background-attachment: fixed`: positioned against the viewport.
     pub bg_fixed: bool,
+    /// `background-attachment: local`: it scrolls with a scroll container's content.
+    pub bg_local: bool,
 }
 
 impl Default for ImageStyle {
@@ -283,7 +356,9 @@ impl Default for ImageStyle {
             bg_size: BgSize::Auto,
             bg_position: [Pos::START; 2],
             bg_repeat: (true, true),
+            bg_spacing: [REPEAT_PLAIN; 2],
             bg_fixed: false,
+            bg_local: false,
         }
     }
 }
@@ -306,27 +381,53 @@ impl ImageStyle {
         (x + self.object_position[0].at(w - dw), y + self.object_position[1].at(h - dh), dw, dh)
     }
 
-    /// One background tile's size for an image of `natural` size in `area`.
-    pub fn tile(&self, area: (f32, f32), natural: (f32, f32)) -> (f32, f32) {
+    /// One background tile's size for an image of `natural` size in `area` (CSS Backgrounds 3
+    /// §3.9, with CSS Images 3 §5.3's default sizing for what `background-size` leaves `auto`).
+    pub fn tile(&self, area: (f32, f32), natural: Natural) -> (f32, f32) {
         let (w, h) = area;
-        let (nw, nh) = (natural.0.max(1.0), natural.1.max(1.0));
+        // the largest (`contain`) or smallest (`cover`) size of ratio `r` that fits the area
+        let fit = |r: f32, cover: bool| if (w / h > r) == cover { (w, w / r) } else { (h * r, h) };
+        let Natural { width: nw, height: nh, ratio } = natural;
+        let auto = || match (nw, nh, ratio) {
+            (Some(a), Some(b), _) => (a, b),
+            (Some(a), None, r) => (a, r.map_or(h, |r| a / r)),
+            (None, Some(b), r) => (r.map_or(w, |r| b * r), b),
+            (None, None, Some(r)) => fit(r, false),
+            (None, None, None) => (w, h),
+        };
         match self.bg_size {
-            BgSize::Auto => (nw, nh),
-            BgSize::Cover => {
-                let s = (w / nw).max(h / nh);
-                (nw * s, nh * s)
-            }
-            BgSize::Contain => {
-                let s = (w / nw).min(h / nh);
-                (nw * s, nh * s)
-            }
+            BgSize::Cover => ratio.map_or((w, h), |r| fit(r, true)),
+            BgSize::Contain => ratio.map_or((w, h), |r| fit(r, false)),
+            BgSize::Auto => auto(),
             BgSize::Size(sx, sy) => match (sx.map(|p| p.at(w)), sy.map(|p| p.at(h))) {
                 (Some(a), Some(b)) => (a, b),
-                (Some(a), None) => (a, a * nh / nw),
-                (None, Some(b)) => (b * nw / nh, b),
-                (None, None) => (nw, nh),
+                (Some(a), None) => (a, ratio.map_or(nh.unwrap_or(h), |r| a / r)),
+                (None, Some(b)) => (ratio.map_or(nw.unwrap_or(w), |r| b * r), b),
+                (None, None) => auto(),
             },
         }
+    }
+}
+
+/// `background-repeat` per axis (`ImageStyle::bg_spacing`): tiles side by side, as many whole tiles as
+/// fit spaced out over the area, or tiles resized so a whole number of them fills it.
+pub(crate) const REPEAT_PLAIN: u8 = 0;
+pub(crate) const REPEAT_SPACE: u8 = 1;
+pub(crate) const REPEAT_ROUND: u8 = 2;
+
+/// An image's natural size (CSS Images 3 §5.1): an SVG may lack a width, a height, or its ratio.
+#[derive(Clone, Copy, Debug, PartialEq, Default)]
+pub struct Natural {
+    pub width: Option<f32>,
+    pub height: Option<f32>,
+    pub ratio: Option<f32>,
+}
+
+impl Natural {
+    /// A raster image's: `width` x `height` (at least a pixel each).
+    pub fn of(width: f32, height: f32) -> Self {
+        let (w, h) = (width.max(1.0), height.max(1.0));
+        Self { width: Some(w), height: Some(h), ratio: Some(w / h) }
     }
 }
 
@@ -336,6 +437,52 @@ pub struct Computed {
     pub display: DisplayKind,
     pub layout: Style,
     pub order: i32,
+    /// `grid-template-columns`/`-rows: subgrid`: the axes (`tree::SUBGRID_COLUMNS`, `SUBGRID_ROWS`)
+    /// whose tracks are the parent grid's.
+    pub subgrid: u8,
+    /// `display: grid-lanes` ([`LANES_ON`]) and `grid-lanes-direction` (`tree::LANES_*` flags).
+    pub grid_lanes: u8,
+    /// `fit-tolerance` (`None`: `normal`, 1em).
+    pub fit_tolerance: Option<LengthPercentage>,
+    /// `aspect-ratio: auto <ratio>`: a replaced element's natural ratio wins over the one given.
+    pub aspect_auto: bool,
+    /// Sizing keywords on `min-width`, `min-height`, `max-width`, `max-height` (4 bits each, in that
+    /// order: `crate::tree::SIZING_*`), which taffy has no room for there: the tree resolves them.
+    pub size_kw: u16,
+    /// Size containment (`contain: size` both bits, `inline-size` the width's: `crate::tree::CONTAIN_*`)
+    /// and the content size it sizes the box as (`contain-intrinsic-width` / `-height`, 0 for `none`).
+    pub contain: (u8, [f32; 2]),
+    /// Which of `justify-content`, `align-content`, `justify-items`, `align-items` (`tree::FLOW_*`)
+    /// are `flow-start` / `flow-end`: start / end, swapped where grid lanes reverse that axis.
+    pub flow_align: u8,
+    /// Which `justify-*` properties are `left` / `right` (`PHYS_*`): physical, swapped right to left.
+    pub phys_align: u8,
+    /// `margin-trim` (`TRIM_*`): the edges whose children's margins this container drops.
+    pub margin_trim: u8,
+    /// `display: run-in` (a block box, which the block after it takes in as its first inline box).
+    pub run_in: bool,
+    /// `wrap-inside: avoid`: lines break inside this inline box only when they must.
+    pub wrap_avoid: bool,
+    /// `white-space-trim` (`TRIM_WS_*`): white space this box discards around and inside it.
+    pub ws_trim: u8,
+    /// `visibility: collapse` (inherited with `visible`): a collapsed flex item takes no room in
+    /// the main axis, only its cross size (a strut).
+    pub collapsed: bool,
+    /// `background-color` when it uses `currentcolor`: its value, resolved by [`resolve_current`].
+    pub background_current: Option<Box<Tok>>,
+    /// `word-space-transform` (inherited): what word separators U+200B and `<wbr>` become: none
+    /// (0), U+0020 (1) or U+3000 (2).
+    pub word_space: u8,
+    /// An absolutely positioned box blockified from an inline display: its static position is
+    /// an inline box's, where it would be in its line (CSS 2 10.3.7).
+    pub inline_static: bool,
+    /// `width` / `height: stretch(<length-percentage>)`: the size the margin box fills, made the
+    /// box's size once its margins are known ([`resolve_stretch`]).
+    pub stretch_fn: [Option<LengthPercentage>; 2],
+    /// Anchor positioning (`anchor-name`, `anchor()` ...: `crate::anchor`), when the box uses it.
+    pub anchor: Option<Box<crate::anchor::AnchorStyle>>,
+    /// `view-transition-name` / `-class`, when the box has a name (`crate::transition`).
+    pub view_transition: Option<Box<crate::transition::Named>>,
     // paint (not inherited)
     pub background: Rgba,
     pub gradient: Option<Gradient>,
@@ -385,6 +532,11 @@ pub struct Computed {
     pub line_through: bool,
     pub overline: bool,
     pub text_align: TextAlign,
+    /// `text-transform: full-width` / `full-size-kana` (`linebreak::TRANSFORM_*`, inherited),
+    /// with or without a case in `text_transform`.
+    pub text_transform_extra: u8,
+    /// `text-align-last` (`auto`: none, which follows `text-align`).
+    pub text_align_last: Option<TextAlign>,
     pub line_height: LineHeight,
     pub white_space: WhiteSpace,
     pub text_transform: TextTransform,
@@ -432,6 +584,9 @@ pub struct Computed {
     pub break_all: bool,
     /// `overflow-wrap: anywhere | break-word` (inherited).
     pub wrap_anywhere: bool,
+    /// `word-break: keep-all`, `line-break: anywhere`, `hyphens: none`, `overflow-wrap: break-word`
+    /// (`linebreak::WRAP_*`, inherited).
+    pub text_wrap: u8,
     /// `tab-size` in spaces (inherited).
     pub tab_size: u8,
     /// Custom properties in scope (inherited), in the style store's var arena.
@@ -462,6 +617,25 @@ impl Default for Computed {
             display: DisplayKind::Inline,
             layout: Style { display: Display::Block, ..Default::default() },
             order: 0,
+            subgrid: 0,
+            grid_lanes: 0,
+            fit_tolerance: None,
+            flow_align: 0,
+            phys_align: 0,
+            margin_trim: 0,
+            run_in: false,
+            wrap_avoid: false,
+            ws_trim: 0,
+            collapsed: false,
+            background_current: None,
+            word_space: 0,
+            inline_static: false,
+            stretch_fn: [None; 2],
+            aspect_auto: false,
+            size_kw: 0,
+            contain: (0, [0.0; 2]),
+            anchor: None,
+            view_transition: None,
             background: Rgba::TRANSPARENT,
             gradient: None,
             images: None,
@@ -497,7 +671,9 @@ impl Default for Computed {
             underline: false,
             line_through: false,
             overline: false,
-            text_align: TextAlign::Left,
+            text_align: TextAlign::Start,
+            text_align_last: None,
+            text_transform_extra: 0,
             line_height: LineHeight::Normal,
             white_space: WhiteSpace::Normal,
             text_transform: TextTransform::None,
@@ -530,6 +706,7 @@ impl Default for Computed {
             list_image: None,
             break_all: false,
             wrap_anywhere: false,
+            text_wrap: 0,
             tab_size: 8,
             vars: 0,
             content: None,
@@ -541,8 +718,9 @@ impl Default for Computed {
 impl Computed {
     /// A child's starting style: inherited properties from `parent`, the rest initial.
     /// What this element's lengths resolve against in `viewport`.
-    pub(crate) const fn units(&self, viewport: (f32, f32)) -> Units {
-        Units { font_size: self.font_size, root_font_size: self.root_font_size, viewport }
+    pub(crate) fn units(&self, viewport: (f32, f32)) -> Units {
+        Units { font_size: self.font_size, ch: crate::text::ch(self.font_id, self.font_size), lh: self.line_px(),
+                root_font_size: self.root_font_size, viewport }
     }
 
     pub fn inherit(parent: &Computed) -> Computed {
@@ -563,6 +741,10 @@ impl Computed {
             weight: parent.weight,
             italic: parent.italic,
             text_align: parent.text_align,
+            text_align_last: parent.text_align_last,
+            text_transform_extra: parent.text_transform_extra,
+            word_space: parent.word_space,
+            collapsed: parent.collapsed,
             line_height: parent.line_height,
             white_space: parent.white_space,
             text_transform: parent.text_transform,
@@ -585,6 +767,7 @@ impl Computed {
             list_image: parent.list_image.clone(),
             break_all: parent.break_all,
             wrap_anywhere: parent.wrap_anywhere,
+            text_wrap: parent.text_wrap,
             tab_size: parent.tab_size,
             border_spacing: parent.border_spacing,
             border_collapse: parent.border_collapse,
@@ -606,10 +789,19 @@ impl Computed {
         self.images.get_or_insert_with(Default::default)
     }
 
+    /// The grid-lanes settings of a `display: grid-lanes` box.
+    pub(crate) fn lanes(&self) -> Option<crate::tree::Lanes> {
+        (self.grid_lanes & LANES_ON != 0).then(|| crate::tree::Lanes {
+            flags: self.grid_lanes & !LANES_ON,
+            flow: self.flow_align,
+            tolerance: self.fit_tolerance.unwrap_or_else(|| LengthPercentage::length(self.font_size)),
+        })
+    }
+
     /// Line box height in pixels.
     pub fn line_px(&self) -> f32 {
         match self.line_height {
-            LineHeight::Normal => (self.font_size * 1.3).round(),
+            LineHeight::Normal => crate::text::normal_line(self.font_id, self.font_size),
             LineHeight::Factor(f) => (self.font_size * f).round(),
             LineHeight::Px(p) => p,
         }
@@ -702,14 +894,14 @@ pub(crate) fn prop_index(name: &str) -> Prop {
 pub const ACCEPTED: &[&str] = &[
     "writing-mode", "will-change",
     "resize", "appearance", "caret-color", "scroll-behavior",
-    "overscroll-behavior", "touch-action", "hyphens",
+    "overscroll-behavior", "touch-action",
     "font-feature-settings", "font-kerning",
     "font-stretch", "text-rendering", "-webkit-font-smoothing", "-moz-osx-font-smoothing",
     "orphans", "widows", "page-break-before", "page-break-after", "page-break-inside",
     "break-before", "break-after", "break-inside", "columns", "column-count", "column-width",
     "column-rule", "perspective", "backface-visibility",
     "box-decoration-break", "image-rendering", "shape-outside",
-    "text-justify", "line-break",
+    "text-justify",
     "all",
     // scrolling
     "scroll-margin", "scroll-margin-top", "scroll-margin-right", "scroll-margin-bottom",
@@ -728,13 +920,12 @@ pub const ACCEPTED: &[&str] = &[
     "font-synthesis-position", "font-optical-sizing", "font-size-adjust", "font-variation-settings",
     "font-palette", "font-language-override", "font-width",
     // text details
-    "text-wrap-style", "text-align-last", "text-underline-position", "text-decoration-skip-ink",
+    "text-underline-position", "text-decoration-skip-ink",
     "text-emphasis", "text-emphasis-color", "text-emphasis-style", "text-emphasis-position",
     "text-orientation", "text-combine-upright", "hanging-punctuation", "hyphenate-character",
     "line-clamp", "-webkit-line-clamp", "text-size-adjust", "-webkit-text-size-adjust",
     // sizing / containment / rendering hints
-    "contain-intrinsic-size", "contain-intrinsic-width", "contain-intrinsic-height",
-    "contain-intrinsic-block-size", "contain-intrinsic-inline-size", "content-visibility",
+    "content-visibility",
     "interpolate-size", "color-scheme", "forced-color-adjust",
     "print-color-adjust", "color-adjust", "image-orientation", "image-resolution",
     "transform-box", "transform-style", "perspective-origin", "zoom", "caret", "caret-shape",
@@ -755,6 +946,9 @@ pub fn is_supported(name: &str) -> bool {
 fn global_keyword(ctx: &mut Ctx, name: &str, keyword: &str) -> bool {
     if name == "font-family" {
         global_keyword(ctx, "-bui-font-id", keyword);
+    }
+    if name == "background-color" {
+        ctx.c.background_current = if keyword == "inherit" { ctx.parent.background_current.clone() } else { None };
     }
     let src = if keyword == "inherit" || (keyword == "unset" && is_inherited(name)) {
         ctx.parent.clone()
@@ -779,6 +973,21 @@ fn global_keyword(ctx: &mut Ctx, name: &str, keyword: &str) -> bool {
         "width" => layout.size.width, "height" => layout.size.height,
         "font-family" => font_family, "accent-color" => accent,
         "-bui-font-id" => font_id, "user-select" => user_select,
+        "align-items" => layout.align_items, "align-self" => layout.align_self,
+        "align-content" => layout.align_content, "justify-items" => layout.justify_items,
+        "justify-self" => layout.justify_self, "justify-content" => layout.justify_content,
+        "flex-grow" => layout.flex_grow, "flex-shrink" => layout.flex_shrink,
+        "flex-basis" => layout.flex_basis, "flex-direction" => layout.flex_direction,
+        "flex-wrap" => layout.flex_wrap, "min-width" => layout.min_size.width,
+        "min-height" => layout.min_size.height, "max-width" => layout.max_size.width,
+        "max-height" => layout.max_size.height, "box-sizing" => layout.box_sizing,
+        "aspect-ratio" => layout.aspect_ratio, "row-gap" => layout.gap.height,
+        "column-gap" => layout.gap.width, "margin-top" => layout.margin.top,
+        "margin-right" => layout.margin.right, "margin-bottom" => layout.margin.bottom,
+        "margin-left" => layout.margin.left, "padding-top" => layout.padding.top,
+        "padding-right" => layout.padding.right, "padding-bottom" => layout.padding.bottom,
+        "padding-left" => layout.padding.left, "top" => layout.inset.top,
+        "right" => layout.inset.right, "bottom" => layout.inset.bottom, "left" => layout.inset.left,
     }
 }
 
@@ -791,9 +1000,9 @@ const INHERITED: &[&str] = &[
     "text-shadow", "empty-cells",
     "color", "cursor", "font", "font-family", "font-size", "font-style", "font-variant",
     "font-weight", "letter-spacing", "line-height", "list-style", "list-style-type",
-    "text-align", "text-indent", "text-transform", "visibility", "white-space", "word-spacing",
+    "text-align", "text-align-last", "text-indent", "text-transform", "visibility", "white-space", "word-spacing",
     "accent-color", "caret-color", "pointer-events", "list-style-image", "word-break",
-    "overflow-wrap", "word-wrap", "tab-size", "text-underline-offset",
+    "overflow-wrap", "word-wrap", "tab-size", "text-underline-offset", "line-break", "hyphens", "text-autospace",
 ];
 
 /// The one hasher for keys, caches and maps: foldhash, a word at a time (FNV took a byte at a
@@ -836,6 +1045,8 @@ pub(crate) fn length(t: &Tok) -> Option<Length> {
         Tok::Dim(v, unit) => match leaf(*v, unit)? {
             Calc::Px(x) => Length::Px(x),
             Calc::Em(x) => Length::Em(x),
+            // the font's own: resolved with the element's units
+            ch @ (Calc::Ch(_) | Calc::Lh(_)) => Length::Calc(crate::calc::intern(ch)),
             Calc::Rem(x) => Length::Rem(x),
             Calc::Vw(x) => Length::Vw(x),
             Calc::Vh(x) => Length::Vh(x),
@@ -950,6 +1161,95 @@ fn dim_kw(ctx: &Ctx, v: &[Tok]) -> Option<Dimension> {
     }
 }
 
+/// Whether colour value `t` depends on `currentcolor` (itself, or inside a function).
+fn uses_currentcolor(t: &Tok) -> bool {
+    match t {
+        Tok::Ident(s) => s.eq_ignore_ascii_case("currentcolor"),
+        Tok::Func(fx) => fx.args.iter().flatten().any(uses_currentcolor),
+        _ => false,
+    }
+}
+
+/// A `currentcolor` background ([`Computed::background_current`]) with the element's `color`.
+pub(crate) fn resolve_current(c: &mut Computed) {
+    if let Some(col) = c.background_current.as_deref().and_then(|t| color(t, c.color)) {
+        c.background = col;
+    }
+}
+
+/// `stretch(L)` sizes (css-sizing-4 6.1) made the box's: L less its margins (auto ones 0), and
+/// less its padding and border for a `content-box` size, as a `calc()` when percentages are in it.
+pub(crate) fn resolve_stretch(c: &mut Computed, u: &Units) {
+    use taffy::CompactLength;
+    let term = |v: CompactLength| match v.tag() {
+        CompactLength::LENGTH_TAG => Some(format!("{}px", v.value())),
+        CompactLength::PERCENT_TAG => Some(format!("{}%", v.value() * 100.0)),
+        _ => None,
+    };
+    for k in 0..2 {
+        let Some(l) = c.stretch_fn[k] else { continue };
+        let s = &c.layout;
+        let (m, p, b) = if k == 0 {
+            ([s.margin.left, s.margin.right], [s.padding.left, s.padding.right], [s.border.left, s.border.right])
+        } else {
+            ([s.margin.top, s.margin.bottom], [s.padding.top, s.padding.bottom], [s.border.top, s.border.bottom])
+        };
+        let mut expr = term(l.into_raw()).unwrap_or_else(|| "0px".into());
+        let mut less = m.iter().filter_map(|v| term(v.into_raw())).collect::<Vec<_>>();
+        if s.box_sizing == BoxSizing::ContentBox {
+            less.extend(p.iter().chain(&b).filter_map(|v| term(v.into_raw())));
+        }
+        for t in less {
+            expr.push_str(" - ");
+            expr.push_str(&t);
+        }
+        let toks = crate::css::tokenize(&format!("max(0px, {expr})"));
+        let d = match toks.first().and_then(length) {
+            Some(Length::Calc(c)) if c.has_pct() => Dimension::calc(c.resolve(u).as_ptr()),
+            Some(l) => l.to_px(u).map_or(Dimension::auto(), Dimension::length),
+            None => Dimension::auto(),
+        };
+        if k == 0 { c.layout.size.width = d } else { c.layout.size.height = d }
+    }
+}
+
+/// `contain-intrinsic-*` values: each `none` (0), a length, or `auto` before either.
+fn intrinsic_sizes(ctx: &Ctx, v: &[Tok]) -> Option<Vec<f32>> {
+    v.iter().filter(|t| t.ident() != Some("auto")).map(|t| match t {
+        t if t.ident() == Some("none") => Some(0.0),
+        t => length(t).filter(|l| !matches!(l, Length::Percent(_))).map(|l| px(ctx, l).max(0.0)),
+    }).collect::<Option<Vec<f32>>>().filter(|s| (1..=2).contains(&s.len()))
+}
+
+/// A `min-width`-like value in slot `slot` of `Computed::size_kw`: a sizing keyword is recorded there
+/// (for the tree to resolve) and is `auto` to taffy.
+fn min_max(ctx: &mut Ctx, slot: u16, v: &[Tok]) -> Option<LengthPercentageAuto> {
+    // `fit-content(<length-percentage>)`: the keyword, its limit kept as the value
+    if let [Tok::Func(fx)] = v
+        && fx.name == "fit-content"
+        && let [arg] = fx.args.as_slice()
+        && let [t] = arg.as_slice()
+        && let Some(l) = length(t).filter(|l| *l != Length::Auto && !matches!(l, Length::Percent(p) if *p < 0.0))
+    {
+        let shift = slot * 4;
+        ctx.c.size_kw = (ctx.c.size_kw & !(0xf << shift)) | (crate::tree::SIZING_FIT_CONTENT << shift);
+        return Some(lpa(ctx, l));
+    }
+    let code = match kw(v) {
+        Some("min-content") => crate::tree::SIZING_MIN_CONTENT,
+        Some("max-content") => crate::tree::SIZING_MAX_CONTENT,
+        Some("fit-content") => crate::tree::SIZING_FIT_CONTENT,
+        Some("stretch" | "-webkit-fill-available" | "-moz-available" | "fill-available") => crate::tree::SIZING_STRETCH,
+        _ => 0,
+    };
+    let out = if code == 0 { lpa_kw(ctx, v) } else { Some(LengthPercentageAuto::auto()) };
+    if out.is_some() {
+        let shift = slot * 4;
+        ctx.c.size_kw = (ctx.c.size_kw & !(0xf << shift)) | (code << shift);
+    }
+    out
+}
+
 /// `min-width`-like values (taffy has no sizing keywords there yet: they act as auto).
 fn lpa_kw(ctx: &Ctx, v: &[Tok]) -> Option<LengthPercentageAuto> {
     match kw(v) {
@@ -995,6 +1295,68 @@ fn set_padding(ctx: &mut Ctx, side: usize, l: Length) {
         1 => p.right = v,
         2 => p.bottom = v,
         _ => p.left = v,
+    }
+}
+
+/// The box's anchor positioning style, made when a property first needs it.
+fn anchoring<'c>(ctx: &'c mut Ctx) -> &'c mut crate::anchor::AnchorStyle {
+    ctx.c.anchor.get_or_insert_with(Default::default)
+}
+
+/// `top`, `right`, `bottom`, `left`: a length, or `anchor()` (`auto` until resolved after layout).
+fn inset_side(ctx: &mut Ctx, side: usize, v: &[Tok]) -> bool {
+    if let Some(e) = crate::anchor::Edge::parse(v, ctx.parent.font_size) {
+        anchoring(ctx).insets[side] = Some(e);
+        set_inset(ctx, side, Length::Auto);
+        return true;
+    }
+    let Some(l) = v.first().and_then(length) else { return false };
+    if let Some(a) = ctx.c.anchor.as_deref_mut() {
+        a.insets[side] = None;
+    }
+    set_inset(ctx, side, l);
+    true
+}
+
+/// A size property (`width` .. `max-height`, in `AnchorStyle::sizes` order): `anchor-size()`, or what
+/// `rest` parses.
+fn size_prop(ctx: &mut Ctx, k: usize, v: &[Tok], rest: fn(&mut Ctx, &[Tok]) -> bool) -> bool {
+    if k < 2 {
+        // `stretch(<length-percentage>)`: auto until the cascade ends
+        let arg = match v {
+            [Tok::Func(fx)] if fx.name == "stretch" && fx.args.len() == 1 => match fx.args[0].as_slice() {
+                [t] => Some(length(t).filter(|l| *l != Length::Auto).map(|l| lp(ctx, l))),
+                _ => Some(None),
+            },
+            _ => None,
+        };
+        ctx.c.stretch_fn[k] = None;
+        if let Some(arg) = arg {
+            let Some(l) = arg else { return false };
+            ctx.c.stretch_fn[k] = Some(l);
+            if k == 0 { ctx.c.layout.size.width = Dimension::auto() } else { ctx.c.layout.size.height = Dimension::auto() }
+            return true;
+        }
+    }
+    if let Some(x) = crate::anchor::Extent::parse(v, ctx.parent.font_size) {
+        anchoring(ctx).sizes[k] = Some(x);
+        return true;
+    }
+    if !rest(ctx, v) {
+        return false;
+    }
+    if let Some(a) = ctx.c.anchor.as_deref_mut() {
+        a.sizes[k] = None;
+    }
+    true
+}
+
+/// `justify-self` (bit 1) / `align-self` (bit 2): records `anchor-center`.
+fn anchor_center(ctx: &mut Ctx, v: &[Tok], bit: u8) {
+    if kw(v) == Some("anchor-center") {
+        anchoring(ctx).center |= bit;
+    } else if let Some(a) = ctx.c.anchor.as_deref_mut() {
+        a.center &= !bit;
     }
 }
 
@@ -1070,12 +1432,12 @@ fn per_side(v: &[Tok], mut f: impl FnMut(usize, &Tok) -> bool) -> bool {
 
 fn align(v: &str) -> Option<AlignItems> {
     Some(match v {
-        "start" => AlignItems::START,
-        "end" => AlignItems::END,
+        "start" | "flow-start" => AlignItems::START,
+        "end" | "flow-end" => AlignItems::END,
         "self-start" => AlignItems::SELF_START,
         "self-end" => AlignItems::SELF_END,
-        "flex-start" | "left" => AlignItems::FLEX_START,
-        "flex-end" | "right" => AlignItems::FLEX_END,
+        "flex-start" => AlignItems::FLEX_START,
+        "flex-end" => AlignItems::FLEX_END,
         "center" | "anchor-center" => AlignItems::CENTER,
         "baseline" | "first" | "last" => AlignItems::BASELINE,
         "stretch" => AlignItems::STRETCH,
@@ -1086,17 +1448,17 @@ fn align(v: &str) -> Option<AlignItems> {
 
 fn align_content(v: &str) -> Option<AlignContent> {
     Some(match v {
-        "start" => AlignContent::START,
-        "end" => AlignContent::END,
-        "flex-start" | "left" => AlignContent::FLEX_START,
-        "flex-end" | "right" => AlignContent::FLEX_END,
+        "start" | "flow-start" => AlignContent::START,
+        "end" | "flow-end" => AlignContent::END,
+        "flex-start" => AlignContent::FLEX_START,
+        "flex-end" => AlignContent::FLEX_END,
         "center" => AlignContent::CENTER,
         "stretch" => AlignContent::STRETCH,
         "normal" => AlignContent::NORMAL,
         "space-between" => AlignContent::SPACE_BETWEEN,
         "space-around" => AlignContent::SPACE_AROUND,
         "space-evenly" => AlignContent::SPACE_EVENLY,
-        "baseline" | "first" | "last" => AlignContent::START,
+        "baseline" | "first" => AlignContent::START,
         _ => return None,
     })
 }
@@ -1111,15 +1473,92 @@ fn safety(v: &[Tok]) -> taffy::style::AlignmentSafety {
     }
 }
 
-fn kw_align(v: &[Tok]) -> Option<AlignItems> {
-    v.iter().filter_map(Tok::ident).filter(|s| *s != "safe" && *s != "unsafe").next_back()
-        .and_then(align).map(|a| a.with_safety(safety(v)))
+/// Records in `flow_align` whether alignment value `v` (of the property of `bit`) is flow-relative.
+fn flow_relative(c: &mut Ctx, v: &[Tok], bit: u8) {
+    if v.iter().filter_map(Tok::ident).next_back().is_some_and(|k| k.starts_with("flow-")) {
+        c.c.flow_align |= bit;
+    } else {
+        c.c.flow_align &= !bit;
+    }
 }
 
-fn kw_align_content(v: &[Tok]) -> Option<AlignContent> {
-    v.iter().filter_map(Tok::ident).filter(|s| *s != "safe" && *s != "unsafe").next_back()
-        .and_then(align_content).map(|a| a.with_safety(safety(v)))
+/// `left` / `right` (valid in the inline axis only, `physical`) are the physical sides: start and
+/// end left to right, recorded by [`physical`] for `base_style` to swap them right to left.
+/// `last baseline` takes its fallback alignment, `end` (taffy shares first baselines only; an
+/// overflowing item overflows at the start, as browsers place it).
+fn alignment<A>(v: &[Tok], physical: bool, start: A, end: A, keyword: fn(&str) -> Option<A>)
+    -> Option<(A, taffy::style::AlignmentSafety)> {
+    if v.iter().any(|t| t.ident() == Some("last")) {
+        return (v.iter().filter_map(Tok::ident).next_back() == Some("baseline"))
+            .then_some((end, taffy::style::AlignmentSafety::Default));
+    }
+    let a = match v.iter().filter_map(Tok::ident).filter(|s| *s != "safe" && *s != "unsafe").next_back()? {
+        "left" if physical => start,
+        "right" if physical => end,
+        k => keyword(k)?,
+    };
+    Some((a, safety(v)))
 }
+
+fn kw_align(v: &[Tok], physical: bool) -> Option<AlignItems> {
+    alignment(v, physical, AlignItems::START, AlignItems::END, align).map(|(a, s)| a.with_safety(s))
+}
+
+fn kw_align_content(v: &[Tok], physical: bool) -> Option<AlignContent> {
+    alignment(v, physical, AlignContent::START, AlignContent::END, align_content).map(|(a, s)| a.with_safety(s))
+}
+
+/// Records in `phys_align` whether alignment value `v` (of the property of `bit`) is `left` / `right`.
+fn physical(c: &mut Ctx, v: &[Tok], bit: u8) {
+    if v.iter().filter_map(Tok::ident).next_back().is_some_and(|k| k == "left" || k == "right") {
+        c.c.phys_align |= bit;
+    } else {
+        c.c.phys_align &= !bit;
+    }
+}
+
+/// `white-space-trim` bits (CSS Text 4 3.3): discard the white space before the box, after it, and at
+/// the inner edges of its content.
+pub(crate) const TRIM_WS_BEFORE: u8 = 1;
+pub(crate) const TRIM_WS_AFTER: u8 = 2;
+pub(crate) const TRIM_WS_INNER: u8 = 4;
+
+/// `margin-trim` bits (css-box-4 3): the container edges whose adjoining margins are trimmed.
+pub(crate) const TRIM_BLOCK_START: u8 = 1;
+pub(crate) const TRIM_BLOCK_END: u8 = 2;
+pub(crate) const TRIM_INLINE_START: u8 = 4;
+pub(crate) const TRIM_INLINE_END: u8 = 8;
+
+/// `margin-trim`: `none`, `block`, `inline`, or any of the four edges once each.
+fn margin_trim(v: &[Tok]) -> Option<u8> {
+    let words: Vec<&str> = v.iter().map(Tok::ident).collect::<Option<_>>()?;
+    match words.as_slice() {
+        ["none"] => return Some(0),
+        ["block"] => return Some(TRIM_BLOCK_START | TRIM_BLOCK_END),
+        ["inline"] => return Some(TRIM_INLINE_START | TRIM_INLINE_END),
+        _ => {}
+    }
+    let mut bits = 0;
+    for w in words {
+        let bit = match w {
+            "block-start" => TRIM_BLOCK_START,
+            "block-end" => TRIM_BLOCK_END,
+            "inline-start" => TRIM_INLINE_START,
+            "inline-end" => TRIM_INLINE_END,
+            _ => return None,
+        };
+        if bits & bit != 0 {
+            return None;
+        }
+        bits |= bit;
+    }
+    (bits != 0).then_some(bits)
+}
+
+/// `phys_align` bits: which `justify-*` property is `left` / `right`.
+pub(crate) const PHYS_JUSTIFY_CONTENT: u8 = 1;
+pub(crate) const PHYS_JUSTIFY_ITEMS: u8 = 2;
+pub(crate) const PHYS_JUSTIFY_SELF: u8 = 4;
 
 // -- grid ----------------------------------------------------------------------------
 
@@ -1179,6 +1618,16 @@ fn track(ctx: &Ctx, t: &Tok) -> Option<TrackSizingFunction> {
     }
 }
 
+/// Records whether a `grid-template-*` value made axis `bit` a subgrid (`subgrid`, with or without
+/// line names: [`track_list`] keeps those).
+fn subgrid_axis(c: &mut Ctx, v: &[Tok], bit: u8) {
+    if v.first().and_then(Tok::ident) == Some("subgrid") {
+        c.c.subgrid |= bit;
+    } else {
+        c.c.subgrid &= !bit;
+    }
+}
+
 type TrackList = (Vec<GridTemplateComponent<Ident>>, Vec<Vec<Ident>>);
 
 /// A track list with its line names (`[a b] 1fr [c] repeat(2, [d] 10px)`):
@@ -1186,6 +1635,23 @@ type TrackList = (Vec<GridTemplateComponent<Ident>>, Vec<Vec<Ident>>);
 fn track_list(ctx: &Ctx, v: &[Tok]) -> Option<TrackList> {
     if matches!(kw(v), Some("none") | Some("subgrid") | Some("masonry")) {
         return Some((Vec::new(), Vec::new()));
+    }
+    // `subgrid [a] [b c]`: a name set for each of its lines, from the first (no tracks: the parent's)
+    if v.first().and_then(Tok::ident) == Some("subgrid") {
+        let mut names: Vec<Vec<Ident>> = Vec::new();
+        let mut open = false;
+        for t in &v[1..] {
+            match t {
+                Tok::Delim('[') if !open => {
+                    open = true;
+                    names.push(Vec::new());
+                }
+                Tok::Delim(']') if open => open = false,
+                t if open => names.last_mut()?.push(Ident::from(t.ident()?)),
+                _ => return None,
+            }
+        }
+        return (!open).then_some((Vec::new(), names));
     }
     let mut out = Vec::new();
     let mut names: Vec<Vec<Ident>> = vec![Vec::new()];
@@ -1345,17 +1811,16 @@ pub(crate) fn gradient(ctx: &Ctx, t: &Tok) -> Option<Gradient> {
             _ => {}
         }
     }
-    let stops: Vec<(Rgba, Option<f32>)> = args[first..]
-        .iter()
-        .filter_map(|stop| {
-            let c = stop.iter().find_map(|t| color(t, ctx.c.color))?;
-            let pos = stop.iter().find_map(|t| match t {
-                Tok::Pct(p) => Some(p / 100.0),
-                _ => None,
-            });
-            Some((c, pos))
-        })
-        .collect();
+    // `red`, `red 20%`, `red 10px`, or `red 0 75px` (two stops of one colour)
+    let mut stops: Vec<(Rgba, Option<LengthPercentage>)> = Vec::new();
+    for stop in &args[first..] {
+        let Some(c) = stop.iter().find_map(|t| color(t, ctx.c.color)) else { continue };
+        let at: Vec<LengthPercentage> = stop.iter().filter_map(|t| length(t).map(|l| lp(ctx, l))).take(2).collect();
+        if at.is_empty() {
+            stops.push((c, None));
+        }
+        stops.extend(at.into_iter().map(|a| (c, Some(a))));
+    }
     (!stops.is_empty()).then_some(Gradient { radial, angle_deg: angle, stops })
 }
 
@@ -1366,7 +1831,8 @@ fn shadows(ctx: &Ctx, v: &[Tok]) -> Option<Vec<Shadow>> {
     v.split(|t| matches!(t, Tok::Comma))
         .map(|part| {
             let mut nums = Vec::new();
-            let mut c = Rgba { a: 0.35, ..Rgba::default() };
+            // no colour: currentcolor
+            let mut c = ctx.c.color;
             let mut inset = false;
             for t in part {
                 if t.ident() == Some("inset") {
@@ -1441,9 +1907,15 @@ fn line_height(t: &Tok, ctx: &Ctx) -> Option<LineHeight> {
     })
 }
 
+/// `display: grid-lanes` in [`Computed::grid_lanes`].
+const LANES_ON: u8 = 0x80;
+
 fn display(ctx: &mut Ctx, v: &[Tok]) -> bool {
     let words: Vec<&str> = v.iter().filter_map(Tok::ident).collect();
+    let lanes = matches!(words.as_slice(), ["grid-lanes" | "inline-grid-lanes"] | ["block" | "inline", "grid-lanes"]);
     let k = match words.as_slice() {
+        ["grid-lanes"] | ["block", "grid-lanes"] => DisplayKind::Grid,
+        ["inline-grid-lanes"] | ["inline", "grid-lanes"] => DisplayKind::InlineGrid,
         ["none"] => DisplayKind::None,
         ["block"] | ["block", "flow"] => DisplayKind::Block,
         ["flow-root"] | ["block", "flow-root"] => {
@@ -1459,6 +1931,7 @@ fn display(ctx: &mut Ctx, v: &[Tok]) -> bool {
         ["grid"] | ["block", "grid"] => DisplayKind::Grid,
         ["inline-grid"] | ["inline", "grid"] => DisplayKind::InlineGrid,
         ["contents"] => DisplayKind::Contents,
+        ["run-in"] | ["run-in", "flow"] => DisplayKind::Block,
         ["list-item"] | ["block", "list-item"] => DisplayKind::ListItem,
         ["table"] | ["inline-table"] => DisplayKind::Table,
         ["table-row-group"] | ["table-header-group"] | ["table-footer-group"] => {
@@ -1470,6 +1943,57 @@ fn display(ctx: &mut Ctx, v: &[Tok]) -> bool {
         _ => return false,
     };
     ctx.c.display = k;
+    ctx.c.run_in = v.first().and_then(Tok::ident) == Some("run-in");
+    ctx.c.grid_lanes = if lanes { ctx.c.grid_lanes | LANES_ON } else { ctx.c.grid_lanes & !LANES_ON };
+    true
+}
+
+/// `grid-lanes-direction: normal | [row | column] && fill-reverse? && track-reverse?`.
+fn lanes_direction(c: &mut Ctx, v: &[Tok]) -> bool {
+    use crate::tree::{FILL_REVERSE, LANES_COLUMN, LANES_ROW, TRACK_REVERSE};
+    let mut f = 0;
+    for t in v {
+        let bit = match t.ident() {
+            Some("normal") if v.len() == 1 => 0,
+            Some("row") if f & (LANES_ROW | LANES_COLUMN) == 0 => LANES_ROW,
+            Some("column") if f & (LANES_ROW | LANES_COLUMN) == 0 => LANES_COLUMN,
+            Some("fill-reverse") if f & FILL_REVERSE == 0 => FILL_REVERSE,
+            Some("track-reverse") if f & TRACK_REVERSE == 0 => TRACK_REVERSE,
+            _ => return false,
+        };
+        f |= bit;
+    }
+    if v.len() > 1 && f & (LANES_ROW | LANES_COLUMN) == 0 {
+        return false;
+    }
+    let keep = LANES_ON | crate::tree::TOLERANCE_INFINITE | crate::tree::DENSE;
+    c.c.grid_lanes = (c.c.grid_lanes & keep) | f;
+    true
+}
+
+/// `fit-tolerance: normal | infinite | <length-percentage [0,∞]>`.
+fn fit_tolerance(c: &mut Ctx, v: &[Tok]) -> bool {
+    let inf = crate::tree::TOLERANCE_INFINITE;
+    match (v, kw(v)) {
+        (_, Some("normal")) => c.c.fit_tolerance = None,
+        (_, Some("infinite")) => {
+            c.c.grid_lanes |= inf;
+            return true;
+        }
+        ([t], _) => match length(t) {
+            Some(l) => {
+                let l = lp(c, l);
+                let raw = l.into_raw();
+                if !raw.is_plain_calc() && raw.value() < 0.0 {
+                    return false;
+                }
+                c.c.fit_tolerance = Some(l);
+            }
+            None => return false,
+        },
+        _ => return false,
+    }
+    c.c.grid_lanes &= !inf;
     true
 }
 
@@ -1829,7 +2353,6 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
     // layout or rendering.
     let margin = side_handlers!(set_margin, "margin-top", "margin-right", "margin-bottom", "margin-left");
     let padding = side_handlers!(set_padding, "padding-top", "padding-right", "padding-bottom", "padding-left");
-    let inset = side_handlers!(set_inset, "top", "right", "bottom", "left");
     [
         // -- box model --------------------------------------------------------------
         h("display", display),
@@ -1868,20 +2391,40 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
         }),
         h("contain", |c, v| {
             use taffy::style::Contain;
+            use crate::tree::{CONTAIN_HEIGHT, CONTAIN_WIDTH};
             let mut bits = Contain::NONE;
+            let mut size = 0;
             for w in v.iter().filter_map(Tok::ident) {
-                bits = match w {
-                    "none" => Contain::NONE,
-                    "layout" => bits | Contain::LAYOUT,
-                    "paint" => bits | Contain::PAINT,
-                    "content" | "strict" => bits | Contain::CONTENT,
-                    "size" | "inline-size" | "style" => bits,
+                (bits, size) = match w {
+                    "none" => (Contain::NONE, 0),
+                    "layout" => (bits | Contain::LAYOUT, size),
+                    "paint" => (bits | Contain::PAINT, size),
+                    "content" => (bits | Contain::CONTENT, size),
+                    "strict" => (bits | Contain::CONTENT, CONTAIN_WIDTH | CONTAIN_HEIGHT),
+                    "size" => (bits, CONTAIN_WIDTH | CONTAIN_HEIGHT),
+                    "inline-size" => (bits, size | CONTAIN_WIDTH),
+                    "style" => (bits, size),
                     _ => return false,
                 };
             }
             c.c.layout.contain = bits;
+            c.c.contain.0 = size;
             true
         }),
+        // `none | <length> | auto <length> | auto none` (the remembered size, `auto`, is the length)
+        h("contain-intrinsic-size", |c, v| {
+            let sizes: Option<Vec<f32>> = intrinsic_sizes(c, v);
+            match sizes.as_deref() {
+                Some(&[w]) => c.c.contain.1 = [w, w],
+                Some(&[w, h]) => c.c.contain.1 = [w, h],
+                _ => return false,
+            }
+            true
+        }),
+        h("contain-intrinsic-width", |c, v| intrinsic_sizes(c, v).and_then(|s| s.first().copied()).map(|w| c.c.contain.1[0] = w).is_some()),
+        h("contain-intrinsic-height", |c, v| intrinsic_sizes(c, v).and_then(|s| s.first().copied()).map(|h| c.c.contain.1[1] = h).is_some()),
+        h("contain-intrinsic-inline-size", |c, v| delegate(c, "contain-intrinsic-width", v)),
+        h("contain-intrinsic-block-size", |c, v| delegate(c, "contain-intrinsic-height", v)),
         h("box-sizing", |c, v| {
             c.c.layout.box_sizing = match kw(v) {
                 Some("content-box") => BoxSizing::ContentBox,
@@ -1890,12 +2433,12 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             };
             true
         }),
-        h("width", |c, v| dim_kw(c, v).map(|d| c.c.layout.size.width = d).is_some()),
-        h("height", |c, v| dim_kw(c, v).map(|d| c.c.layout.size.height = d).is_some()),
-        h("min-width", |c, v| lpa_kw(c, v).map(|d| c.c.layout.min_size.width = d).is_some()),
-        h("min-height", |c, v| lpa_kw(c, v).map(|d| c.c.layout.min_size.height = d).is_some()),
-        h("max-width", |c, v| lpa_kw(c, v).map(|d| c.c.layout.max_size.width = d).is_some()),
-        h("max-height", |c, v| lpa_kw(c, v).map(|d| c.c.layout.max_size.height = d).is_some()),
+        h("width", |c, v| size_prop(c, 0, v, |c, v| dim_kw(c, v).map(|d| c.c.layout.size.width = d).is_some())),
+        h("height", |c, v| size_prop(c, 1, v, |c, v| dim_kw(c, v).map(|d| c.c.layout.size.height = d).is_some())),
+        h("min-width", |c, v| size_prop(c, 2, v, |c, v| min_max(c, 0, v).map(|d| c.c.layout.min_size.width = d).is_some())),
+        h("min-height", |c, v| size_prop(c, 3, v, |c, v| min_max(c, 1, v).map(|d| c.c.layout.min_size.height = d).is_some())),
+        h("max-width", |c, v| size_prop(c, 4, v, |c, v| min_max(c, 2, v).map(|d| c.c.layout.max_size.width = d).is_some())),
+        h("max-height", |c, v| size_prop(c, 5, v, |c, v| min_max(c, 3, v).map(|d| c.c.layout.max_size.height = d).is_some())),
         h("inline-size", |c, v| delegate(c, "width", v)),
         h("block-size", |c, v| delegate(c, "height", v)),
         h("min-inline-size", |c, v| delegate(c, "min-width", v)),
@@ -1904,10 +2447,14 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
         h("max-block-size", |c, v| delegate(c, "max-height", v)),
         h("aspect-ratio", |c, v| {
             let nums: Vec<f32> = v.iter().filter_map(number).collect();
-            c.c.layout.aspect_ratio = match (kw(v), nums.as_slice()) {
-                (Some("auto"), _) => None,
-                (_, [w, h]) if *h != 0.0 => Some(w / h),
-                (_, [r]) => Some(*r),
+            // `auto && <ratio>` uses the ratio (on the box-sizing box, as taffy does, not only the
+            // content box); a ratio with a zero term is degenerate, as `auto`
+            let auto = v.iter().any(|t| t.ident() == Some("auto"));
+            c.c.aspect_auto = auto;
+            c.c.layout.aspect_ratio = match nums.as_slice() {
+                [] if auto && v.len() == 1 => None,
+                [w, h] => (*w > 0.0 && *h > 0.0).then(|| w / h),
+                [r] => (*r > 0.0).then_some(*r),
                 _ => return false,
             };
             true
@@ -1916,21 +2463,21 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
         h("margin", |c, v| lengths(v).and_then(|l| four(&l)).map(|s| {
             (0..4).for_each(|i| set_margin(c, i, s[i]))
         }).is_some()),
-        h("margin-inline-start", |c, v| delegate(c, "margin-left", v)),
-        h("margin-inline-end", |c, v| delegate(c, "margin-right", v)),
+        h("margin-inline-start", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "margin-right" } else { "margin-left" }, v)),
+        h("margin-inline-end", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "margin-left" } else { "margin-right" }, v)),
         h("margin-block-start", |c, v| delegate(c, "margin-top", v)),
         h("margin-block-end", |c, v| delegate(c, "margin-bottom", v)),
-        h("margin-inline", |c, v| pair(c, v, "margin-left", "margin-right")),
+        h("margin-inline", |c, v| if c.c.layout.direction == taffy::style::Direction::Rtl { pair(c, v, "margin-right", "margin-left") } else { pair(c, v, "margin-left", "margin-right") }),
         h("margin-block", |c, v| pair(c, v, "margin-top", "margin-bottom")),
         padding[0], padding[1], padding[2], padding[3],
         h("padding", |c, v| lengths(v).and_then(|l| four(&l)).map(|s| {
             (0..4).for_each(|i| set_padding(c, i, s[i]))
         }).is_some()),
-        h("padding-inline-start", |c, v| delegate(c, "padding-left", v)),
-        h("padding-inline-end", |c, v| delegate(c, "padding-right", v)),
+        h("padding-inline-start", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "padding-right" } else { "padding-left" }, v)),
+        h("padding-inline-end", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "padding-left" } else { "padding-right" }, v)),
         h("padding-block-start", |c, v| delegate(c, "padding-top", v)),
         h("padding-block-end", |c, v| delegate(c, "padding-bottom", v)),
-        h("padding-inline", |c, v| pair(c, v, "padding-left", "padding-right")),
+        h("padding-inline", |c, v| if c.c.layout.direction == taffy::style::Direction::Rtl { pair(c, v, "padding-right", "padding-left") } else { pair(c, v, "padding-left", "padding-right") }),
         h("padding-block", |c, v| pair(c, v, "padding-top", "padding-bottom")),
         // -- positioning ------------------------------------------------------------
         h("position", |c, v| {
@@ -1944,15 +2491,88 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             };
             true
         }),
-        inset[0], inset[1], inset[2], inset[3],
+        h("top", |c, v| inset_side(c, 0, v)),
+        h("right", |c, v| inset_side(c, 1, v)),
+        h("bottom", |c, v| inset_side(c, 2, v)),
+        h("left", |c, v| inset_side(c, 3, v)),
+        h("anchor-name", |c, v| {
+            if kw(v) == Some("none") {
+                if let Some(a) = c.c.anchor.as_deref_mut() {
+                    a.names = Box::default();
+                }
+                return true;
+            }
+            let names: Option<Vec<Box<str>>> = v.iter().filter(|t| !matches!(t, Tok::Comma))
+                .map(|t| t.ident().filter(|s| s.starts_with("--")).map(Box::from)).collect();
+            match names {
+                Some(n) if !n.is_empty() => {
+                    anchoring(c).names = n.into();
+                    true
+                }
+                _ => false,
+            }
+        }),
+        h("position-visibility", |c, v| crate::anchor::parse_visibility(v).map(|b| anchoring(c).visibility = Some(b)).is_some()),
+        h("position-anchor", |c, v| {
+            let (default, implicit) = match kw(v) {
+                Some("auto") => (None, Some(true)),
+                Some("none") => (None, Some(false)),
+                Some("normal") => (None, None),
+                Some(n) if n.starts_with("--") => (Some(n.into()), None),
+                _ => return false,
+            };
+            let a = anchoring(c);
+            (a.default, a.implicit) = (default, implicit);
+            true
+        }),
+        h("position-area", |c, v| match crate::anchor::Area::parse(v) {
+            Some(area) => {
+                if area.is_some() || c.c.anchor.is_some() {
+                    anchoring(c).area = area;
+                }
+                true
+            }
+            None => false,
+        }),
+        h("position-try-fallbacks", |c, v| match crate::anchor::parse_fallbacks(v) {
+            Some(f) => {
+                if !f.is_empty() || c.c.anchor.is_some() {
+                    anchoring(c).fallbacks = f;
+                }
+                true
+            }
+            None => false,
+        }),
+        h("position-try", |c, v| delegate(c, "position-try-fallbacks", v)),
+        h("view-transition-name", |c, v| match crate::transition::Named::parse_name(v) {
+            Some(None) => {
+                c.c.view_transition = None;
+                true
+            }
+            Some(Some(name)) => {
+                let classes = c.c.view_transition.take().map(|n| n.classes).unwrap_or_default();
+                c.c.view_transition = Some(Box::new(crate::transition::Named { name, classes }));
+                true
+            }
+            None => false,
+        }),
+        h("view-transition-class", |c, v| match crate::transition::Named::parse_classes(v) {
+            Some(classes) => {
+                if let Some(n) = c.c.view_transition.as_deref_mut() {
+                    n.classes = classes;
+                }
+                true
+            }
+            None => false,
+        }),
         h("inset", |c, v| lengths(v).and_then(|l| four(&l)).map(|s| {
             (0..4).for_each(|i| set_inset(c, i, s[i]))
         }).is_some()),
-        h("inset-inline-start", |c, v| delegate(c, "left", v)),
-        h("inset-inline-end", |c, v| delegate(c, "right", v)),
+        h("inset-inline-start", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "right" } else { "left" }, v)),
+        h("inset-inline-end", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "left" } else { "right" }, v)),
         h("inset-block-start", |c, v| delegate(c, "top", v)),
         h("inset-block-end", |c, v| delegate(c, "bottom", v)),
-        h("inset-inline", |c, v| pair(c, v, "left", "right")),
+        h("inset-inline", |c, v| if c.c.layout.direction == taffy::style::Direction::Rtl { pair(c, v, "right", "left") } else { pair(c, v, "left", "right") }),
         h("inset-block", |c, v| pair(c, v, "top", "bottom")),
         h("z-index", |c, v| {
             c.c.z_index = match v.first() {
@@ -1973,30 +2593,51 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             };
             true
         }),
+        // `nowrap | wrap | wrap-reverse`, or `balance` with `wrap-reverse` or not, in either order
         h("flex-wrap", |c, v| {
-            c.c.layout.flex_wrap = match kw(v) {
-                Some("nowrap") => FlexWrap::NoWrap,
-                Some("wrap") => FlexWrap::Wrap,
-                Some("wrap-reverse") => FlexWrap::WrapReverse,
-                Some("balance") => FlexWrap::Balance,
+            let words: Vec<&str> = v.iter().filter_map(Tok::ident).collect();
+            if words.len() != v.len() || words.is_empty() {
+                return false;
+            }
+            let has = |w: &str| words.contains(&w);
+            c.c.layout.flex_wrap = match (words.len(), has("balance"), has("wrap-reverse")) {
+                (1, false, false) if has("nowrap") => FlexWrap::NoWrap,
+                (1, false, false) if has("wrap") => FlexWrap::Wrap,
+                (1, false, true) => FlexWrap::WrapReverse,
+                (1, true, _) => FlexWrap::Balance,
+                (2, true, true) => FlexWrap::BalanceReverse,
                 _ => return false,
             };
             true
         }),
-        h("flex-flow", |c, v| v.iter().all(|t| {
-            let one = std::slice::from_ref(t);
-            delegate(c, "flex-direction", one) || delegate(c, "flex-wrap", one)
-        })),
-        h("flex-grow", |c, v| v.first().and_then(number).map(|n| c.c.layout.flex_grow = n).is_some()),
-        h("flex-shrink", |c, v| v.first().and_then(number).map(|n| c.c.layout.flex_shrink = n).is_some()),
+        h("flex-line-count", |c, v| match v {
+            [Tok::Num(n)] if *n >= 1.0 && n.fract() == 0.0 => {
+                c.c.layout.flex_line_count = n.min(f32::from(u16::MAX)) as u16;
+                true
+            }
+            _ => false,
+        }),
+        h("flex-flow", |c, v| {
+            // the direction keyword alone; the rest is the wrap
+            let (dir, wrap): (Vec<Tok>, Vec<Tok>) = v.iter().cloned()
+                .partition(|t| t.ident().is_some_and(|w| w.starts_with("row") || w.starts_with("column")));
+            dir.len() <= 1 && (dir.is_empty() || delegate(c, "flex-direction", &dir))
+                && (wrap.is_empty() || delegate(c, "flex-wrap", &wrap))
+        }),
+        // non-negative <number>s
+        h("flex-grow", |c, v| v.first().and_then(number).filter(|n| *n >= 0.0).map(|n| c.c.layout.flex_grow = n).is_some()),
+        h("flex-shrink", |c, v| v.first().and_then(number).filter(|n| *n >= 0.0).map(|n| c.c.layout.flex_shrink = n).is_some()),
         h("flex-basis", |c, v| match kw(v) {
             Some("content") => {
-                c.c.layout.flex_basis = Dimension::auto();
+                c.c.layout.flex_basis = Dimension::content();
                 true
             }
             _ => dim_kw(c, v).map(|d| c.c.layout.flex_basis = d).is_some(),
         }),
         h("flex", |c, v| {
+            if v.iter().any(|t| matches!(t, Tok::Num(n) if *n < 0.0)) {
+                return false;
+            }
             let l = &mut c.c.layout;
             match (kw(v), v) {
                 (Some("none"), _) => (l.flex_grow, l.flex_shrink, l.flex_basis) = (0.0, 0.0, Dimension::auto()),
@@ -2026,32 +2667,95 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             }
             true
         }),
+        // `word-space-transform: none | [space | ideographic-space] && auto-phrase?` (the phrase
+        // finding, a dictionary's, is not done)
+        h("word-space-transform", |c, v| {
+            let words: Option<Vec<&str>> = v.iter().map(Tok::ident).collect();
+            let Some(words) = words else { return false };
+            let mode = match words.iter().copied().filter(|w| *w != "auto-phrase").collect::<Vec<_>>().as_slice() {
+                ["none"] if words.len() == 1 => 0,
+                ["space"] => 1,
+                ["ideographic-space"] => 2,
+                [] if words == ["auto-phrase"] => 0,
+                _ => return false,
+            };
+            c.c.word_space = mode;
+            true
+        }),
+        h("white-space-trim", |c, v| {
+            let mut bits = 0;
+            for t in v {
+                let bit = match t.ident() {
+                    Some("none") if v.len() == 1 => 0,
+                    Some("discard-before") => TRIM_WS_BEFORE,
+                    Some("discard-after") => TRIM_WS_AFTER,
+                    Some("discard-inner") => TRIM_WS_INNER,
+                    _ => return false,
+                };
+                if bits & bit != 0 {
+                    return false;
+                }
+                bits |= bit;
+            }
+            c.c.ws_trim = bits;
+            true
+        }),
+        h("wrap-inside", |c, v| match kw(v) {
+            Some(k @ ("auto" | "avoid")) => {
+                c.c.wrap_avoid = k == "avoid";
+                true
+            }
+            _ => false,
+        }),
+        h("margin-trim", |c, v| margin_trim(v).map(|t| c.c.margin_trim = t).is_some()),
         h("order", |c, v| match v.first() {
-            Some(Tok::Num(n)) => {
+            // an <integer>
+            Some(Tok::Num(n)) if n.fract() == 0.0 => {
                 c.c.order = *n as i32;
                 true
             }
             _ => false,
         }),
         // -- alignment ------------------------------------------------------------------
-        h("align-items", |c, v| kw_align(v).map(|a| c.c.layout.align_items = a).is_some()),
+        h("align-items", |c, v| kw_align(v, false).map(|a| {
+            c.c.layout.align_items = a;
+            flow_relative(c, v, crate::tree::FLOW_ALIGN_ITEMS);
+        }).is_some()),
         h("align-self", |c, v| match kw(v) {
             Some("auto") => {
                 c.c.layout.align_self = None;
                 true
             }
-            _ => kw_align(v).map(|a| c.c.layout.align_self = Some(a)).is_some(),
+            _ => {
+                anchor_center(c, v, 2);
+                kw_align(v, false).map(|a| c.c.layout.align_self = Some(a)).is_some()
+            }
         }),
-        h("justify-items", |c, v| kw_align(v).map(|a| c.c.layout.justify_items = a).is_some()),
+        h("justify-items", |c, v| kw_align(v, true).map(|a| {
+            c.c.layout.justify_items = a;
+            physical(c, v, PHYS_JUSTIFY_ITEMS);
+            flow_relative(c, v, crate::tree::FLOW_JUSTIFY_ITEMS);
+        }).is_some()),
         h("justify-self", |c, v| match kw(v) {
             Some("auto") => {
                 c.c.layout.justify_self = None;
                 true
             }
-            _ => kw_align(v).map(|a| c.c.layout.justify_self = Some(a)).is_some(),
+            _ => {
+                anchor_center(c, v, 1);
+                physical(c, v, PHYS_JUSTIFY_SELF);
+                kw_align(v, true).map(|a| c.c.layout.justify_self = Some(a)).is_some()
+            }
         }),
-        h("align-content", |c, v| kw_align_content(v).map(|a| c.c.layout.align_content = a).is_some()),
-        h("justify-content", |c, v| kw_align_content(v).map(|a| c.c.layout.justify_content = a).is_some()),
+        h("align-content", |c, v| kw_align_content(v, false).map(|a| {
+            c.c.layout.align_content = a;
+            flow_relative(c, v, crate::tree::FLOW_ALIGN_CONTENT);
+        }).is_some()),
+        h("justify-content", |c, v| kw_align_content(v, true).map(|a| {
+            c.c.layout.justify_content = a;
+            physical(c, v, PHYS_JUSTIFY_CONTENT);
+            flow_relative(c, v, crate::tree::FLOW_JUSTIFY_CONTENT);
+        }).is_some()),
         h("place-items", |c, v| two_kw(c, v, "align-items", "justify-items")),
         h("place-content", |c, v| two_kw(c, v, "align-content", "justify-content")),
         h("place-self", |c, v| two_kw(c, v, "align-self", "justify-self")),
@@ -2077,11 +2781,24 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
         h("grid-template-columns", |c, v| track_list(c, v).map(|(t, n)| {
             c.c.layout.grid_template_columns = t;
             c.c.layout.grid_template_column_names = n;
+            subgrid_axis(c, v, crate::tree::SUBGRID_COLUMNS);
         }).is_some()),
         h("grid-template-rows", |c, v| track_list(c, v).map(|(t, n)| {
             c.c.layout.grid_template_rows = t;
             c.c.layout.grid_template_row_names = n;
+            subgrid_axis(c, v, crate::tree::SUBGRID_ROWS);
         }).is_some()),
+        h("grid-lanes-direction", lanes_direction),
+        h("fit-tolerance", fit_tolerance),
+        h("grid-lanes-pack", |c, v| {
+            let dense = match kw(v) {
+                Some("normal") => false,
+                Some("dense") => true,
+                _ => return false,
+            };
+            c.c.grid_lanes = if dense { c.c.grid_lanes | crate::tree::DENSE } else { c.c.grid_lanes & !crate::tree::DENSE };
+            true
+        }),
         h("grid-template-areas", |c, v| template_areas(v).map(|a| c.c.layout.grid_template_areas = a).is_some()),
         h("grid-template", |c, v| {
             let parts: Vec<&[Tok]> = v.split(|t| matches!(t, Tok::Slash)).collect();
@@ -2200,7 +2917,14 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             true
         }),
         // -- background -------------------------------------------------------------------
-        h("background-color", |c, v| v.first().and_then(|t| color(t, c.c.color)).map(|col| c.c.background = col).is_some()),
+        h("background-color", |c, v| {
+            let Some(col) = v.first().and_then(|t| color(t, c.c.color)) else { return false };
+            c.c.background = col;
+            // a colour of `currentcolor` stays one: resolved with the element's own `color` once the
+            // cascade ends, and inherited as such (CSS Color 4 6.4)
+            c.c.background_current = v.first().filter(|t| uses_currentcolor(t)).map(|t| Box::new(t.clone()));
+            true
+        }),
         h("background-image", |c, v| match kw(v) {
             Some("none") => {
                 c.c.gradient = None;
@@ -2257,15 +2981,29 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
         h("background-position-y", |c, v| axis_pos(c, v, 1).map(|p| c.c.images_mut().bg_position[1] = p).is_some()),
         h("background-repeat", |c, v| {
             let words: Vec<&str> = v.iter().take_while(|t| !matches!(t, Tok::Comma)).filter_map(Tok::ident).collect();
-            let rep = |w: &str| matches!(w, "repeat" | "space" | "round");
-            let r = match words.as_slice() {
-                ["repeat-x"] => (true, false),
-                ["repeat-y"] => (false, true),
-                [a] => (rep(a), rep(a)),
-                [a, b] => (rep(a), rep(b)),
+            let rep = |w: &str| match w {
+                "repeat" => Some((true, REPEAT_PLAIN)),
+                "space" => Some((true, REPEAT_SPACE)),
+                "round" => Some((true, REPEAT_ROUND)),
+                "no-repeat" => Some((false, REPEAT_PLAIN)),
+                _ => None,
+            };
+            let (x, y) = match words.as_slice() {
+                ["repeat-x"] => ((true, REPEAT_PLAIN), (false, REPEAT_PLAIN)),
+                ["repeat-y"] => ((false, REPEAT_PLAIN), (true, REPEAT_PLAIN)),
+                [a] => match rep(a) {
+                    Some(r) => (r, r),
+                    None => return false,
+                },
+                [a, b] => match (rep(a), rep(b)) {
+                    (Some(a), Some(b)) => (a, b),
+                    _ => return false,
+                },
                 _ => return false,
             };
-            c.c.images_mut().bg_repeat = r;
+            let st = c.c.images_mut();
+            st.bg_repeat = (x.0, y.0);
+            st.bg_spacing = [x.1, y.1];
             true
         }),
         h("object-fit", |c, v| {
@@ -2317,7 +3055,7 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
                 delegate(c, "background-size", &size);
             }
             let pos: Vec<Tok> = layer.iter().take_while(|t| !matches!(t, Tok::Slash))
-                .filter(|t| length(t).is_some() && !matches!(t, Tok::Num(_))
+                .filter(|t| length(t).is_some() && !matches!(t, Tok::Num(n) if *n != 0.0)
                     || matches!(t.ident(), Some("left" | "right" | "top" | "bottom" | "center")))
                 .cloned().collect();
             if !pos.is_empty() {
@@ -2339,6 +3077,10 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             ok |= !boxes.is_empty();
             if layer.iter().any(|t| t.ident() == Some("fixed")) {
                 c.c.images_mut().bg_fixed = true;
+                ok = true;
+            }
+            if layer.iter().any(|t| t.ident() == Some("local")) {
+                c.c.images_mut().bg_local = true;
                 ok = true;
             }
             for t in v {
@@ -2373,8 +3115,8 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
         h("border-left", |c, v| border_sides(c, v, &[3])),
         h("border-inline", |c, v| border_sides(c, v, &[1, 3])),
         h("border-block", |c, v| border_sides(c, v, &[0, 2])),
-        h("border-inline-start", |c, v| border_sides(c, v, &[3])),
-        h("border-inline-end", |c, v| border_sides(c, v, &[1])),
+        h("border-inline-start", |c, v| border_sides(c, v, if c.c.layout.direction == taffy::style::Direction::Rtl { &[1] } else { &[3] })),
+        h("border-inline-end", |c, v| border_sides(c, v, if c.c.layout.direction == taffy::style::Direction::Rtl { &[3] } else { &[1] })),
         h("border-block-start", |c, v| border_sides(c, v, &[0])),
         h("border-block-end", |c, v| border_sides(c, v, &[2])),
         // logical longhands (horizontal-tb: block = top/bottom, inline = left/right)
@@ -2390,12 +3132,12 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
         h("border-block-end-color", |c, v| delegate(c, "border-bottom-color", v)),
         h("border-block-end-style", |c, v| delegate(c, "border-bottom-style", v)),
         h("border-block-end-width", |c, v| delegate(c, "border-bottom-width", v)),
-        h("border-inline-start-color", |c, v| delegate(c, "border-left-color", v)),
-        h("border-inline-start-style", |c, v| delegate(c, "border-left-style", v)),
-        h("border-inline-start-width", |c, v| delegate(c, "border-left-width", v)),
-        h("border-inline-end-color", |c, v| delegate(c, "border-right-color", v)),
-        h("border-inline-end-style", |c, v| delegate(c, "border-right-style", v)),
-        h("border-inline-end-width", |c, v| delegate(c, "border-right-width", v)),
+        h("border-inline-start-color", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "border-right-color" } else { "border-left-color" }, v)),
+        h("border-inline-start-style", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "border-right-style" } else { "border-left-style" }, v)),
+        h("border-inline-start-width", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "border-right-width" } else { "border-left-width" }, v)),
+        h("border-inline-end-color", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "border-left-color" } else { "border-right-color" }, v)),
+        h("border-inline-end-style", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "border-left-style" } else { "border-right-style" }, v)),
+        h("border-inline-end-width", |c, v| delegate(c, if c.c.layout.direction == taffy::style::Direction::Rtl { "border-left-width" } else { "border-right-width" }, v)),
         h("border-width", |c, v| per_side(v, |i, t| border_width_tok(c, t).map(|w| set_border_width(c, i, w)).is_some())),
         h("border-top-width", |c, v| v.first().and_then(|t| border_width_tok(c, t)).map(|w| set_border_width(c, 0, w)).is_some()),
         h("border-right-width", |c, v| v.first().and_then(|t| border_width_tok(c, t)).map(|w| set_border_width(c, 1, w)).is_some()),
@@ -2461,6 +3203,7 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
                 Some("hidden") | Some("collapse") => false,
                 _ => return false,
             };
+            c.c.collapsed = kw(v) == Some("collapse");
             true
         }),
         h("box-shadow", |c, v| shadows(c, v).map(|s| c.c.shadows = s).is_some()),
@@ -2632,7 +3375,7 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
                 delegate(c, "mask-size", &size);
             }
             let pos: Vec<Tok> = layer.iter().take_while(|t| !matches!(t, Tok::Slash))
-                .filter(|t| length(t).is_some() && !matches!(t, Tok::Num(_))
+                .filter(|t| length(t).is_some() && !matches!(t, Tok::Num(n) if *n != 0.0)
                     || matches!(t.ident(), Some("left" | "right" | "top" | "bottom" | "center")))
                 .cloned().collect();
             if !pos.is_empty() {
@@ -2790,11 +3533,35 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
         }),
         h("line-height", |c, v| v.first().and_then(|t| line_height(t, c)).map(|l| c.c.line_height = l).is_some()),
         h("text-align", |c, v| {
+            let rtl = c.parent.layout.direction == taffy::style::Direction::Rtl;
             c.c.text_align = match kw(v) {
-                Some("left") | Some("start") => TextAlign::Left,
-                Some("right") | Some("end") => TextAlign::Right,
-                Some("center") | Some("-webkit-center") => TextAlign::Center,
+                Some("left" | "-webkit-left") => TextAlign::Left,
+                Some("right" | "-webkit-right") => TextAlign::Right,
+                Some("start") => TextAlign::Start,
+                Some("end") => TextAlign::End,
+                Some("center" | "-webkit-center") => TextAlign::Center,
                 Some("justify") => TextAlign::Justify,
+                // the parent's, its start and end as its direction has them
+                Some("match-parent") => c.parent.text_align.physical(rtl),
+                Some("justify-all") => {
+                    c.c.text_align_last = Some(TextAlign::Justify);
+                    TextAlign::Justify
+                }
+                _ => return false,
+            };
+            true
+        }),
+        h("text-align-last", |c, v| {
+            c.c.text_align_last = match kw(v) {
+                Some("auto") => None,
+                Some("left") => Some(TextAlign::Left),
+                Some("right") => Some(TextAlign::Right),
+                Some("start") => Some(TextAlign::Start),
+                Some("end") => Some(TextAlign::End),
+                Some("center") => Some(TextAlign::Center),
+                Some("justify") => Some(TextAlign::Justify),
+                Some("match-parent") => Some(c.parent.text_align_last.unwrap_or(c.parent.text_align)
+                    .physical(c.parent.layout.direction == taffy::style::Direction::Rtl)),
                 _ => return false,
             };
             true
@@ -2839,16 +3606,31 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
                 Some("normal") => WhiteSpace::Normal,
                 Some("nowrap") => WhiteSpace::NoWrap,
                 Some("pre") => WhiteSpace::Pre,
-                Some("pre-wrap") | Some("break-spaces") => WhiteSpace::PreWrap,
+                Some("pre-wrap") => WhiteSpace::PreWrap,
+                Some("break-spaces") => WhiteSpace::BreakSpaces,
                 Some("pre-line") => WhiteSpace::PreLine,
                 _ => return false,
             };
             true
         }),
+        // `text-wrap-mode || text-wrap-style`
         h("text-wrap", |c, v| {
-            if kw(v) == Some("nowrap") {
-                c.c.white_space = WhiteSpace::NoWrap;
+            for t in v {
+                let one = std::slice::from_ref(t);
+                if !(delegate(c, "text-wrap-mode", one) || delegate(c, "text-wrap-style", one)) {
+                    return false;
+                }
             }
+            true
+        }),
+        h("text-wrap-style", |c, v| {
+            use crate::linebreak::WRAP_BALANCE;
+            let balance = match kw(v) {
+                Some("balance") => true,
+                Some("auto" | "pretty" | "stable") => false,
+                _ => return false,
+            };
+            c.c.text_wrap = (c.c.text_wrap & !WRAP_BALANCE) | if balance { WRAP_BALANCE } else { 0 };
             true
         }),
         // CSS Text 4 longhands of white-space: wrapping and collapsing
@@ -2859,7 +3641,7 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
                 (Some("wrap"), Pre) => PreWrap,
                 (Some("wrap"), w) => w,
                 (Some("nowrap"), Normal | PreLine) => NoWrap,
-                (Some("nowrap"), PreWrap) => Pre,
+                (Some("nowrap"), PreWrap | BreakSpaces) => Pre,
                 (Some("nowrap"), w) => w,
                 _ => return false,
             };
@@ -2870,20 +3652,31 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             let wraps = !matches!(c.c.white_space, NoWrap | Pre);
             c.c.white_space = match kw(v) {
                 Some("collapse" | "discard") => if wraps { Normal } else { NoWrap },
-                Some("preserve" | "break-spaces" | "preserve-spaces") => if wraps { PreWrap } else { Pre },
+                Some("preserve" | "preserve-spaces") => if wraps { PreWrap } else { Pre },
+                Some("break-spaces") => if wraps { BreakSpaces } else { Pre },
                 Some("preserve-breaks") => if wraps { PreLine } else { Pre },
                 _ => return false,
             };
             true
         }),
+        // `none | [capitalize | uppercase | lowercase] || full-width || full-size-kana`
         h("text-transform", |c, v| {
-            c.c.text_transform = match kw(v) {
-                Some("none") => TextTransform::None,
-                Some("uppercase") => TextTransform::Upper,
-                Some("lowercase") => TextTransform::Lower,
-                Some("capitalize") => TextTransform::Capitalize,
-                _ => return false,
-            };
+            use crate::linebreak::{TRANSFORM_FULL_SIZE_KANA, TRANSFORM_FULL_WIDTH};
+            let (mut case, mut extra) = (None, 0u8);
+            for w in v.iter().map(Tok::ident) {
+                let Some(w) = w else { return false };
+                match w {
+                    "none" if v.len() == 1 => case = Some(TextTransform::None),
+                    "uppercase" if case.is_none() => case = Some(TextTransform::Upper),
+                    "lowercase" if case.is_none() => case = Some(TextTransform::Lower),
+                    "capitalize" if case.is_none() => case = Some(TextTransform::Capitalize),
+                    "full-width" if extra & TRANSFORM_FULL_WIDTH == 0 => extra |= TRANSFORM_FULL_WIDTH,
+                    "full-size-kana" if extra & TRANSFORM_FULL_SIZE_KANA == 0 => extra |= TRANSFORM_FULL_SIZE_KANA,
+                    _ => return false,
+                }
+            }
+            c.c.text_transform = case.unwrap_or(TextTransform::None);
+            c.c.text_transform_extra = extra;
             true
         }),
         h("letter-spacing", |c, v| match kw(v) {
@@ -2905,6 +3698,9 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             c.c.vertical_align = match kw(v) {
                 Some("sub") => VAlign::Sub,
                 Some("super") => VAlign::Super,
+                Some("top") => VAlign::Top,
+                Some("middle") => VAlign::Middle,
+                Some("bottom") => VAlign::Bottom,
                 _ => VAlign::Baseline,
             };
             true
@@ -3109,8 +3905,9 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             match kw(first) {
                 Some(k @ ("scroll" | "fixed" | "local")) => {
                     let fixed = k == "fixed";
-                    if fixed || c.c.images.is_some() {
-                        c.c.images_mut().bg_fixed = fixed;
+                    if k != "scroll" || c.c.images.is_some() {
+                        let st = c.c.images_mut();
+                        (st.bg_fixed, st.bg_local) = (fixed, k == "local");
                     }
                     true
                 }
@@ -3169,6 +3966,8 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
         }),
         // -- text breaking --------------------------------------------------------------------
         h("word-break", |c, v| {
+            use crate::linebreak::WRAP_KEEP_ALL;
+            c.c.text_wrap = (c.c.text_wrap & !WRAP_KEEP_ALL) | if kw(v) == Some("keep-all") { WRAP_KEEP_ALL } else { 0 };
             c.c.break_all = match kw(v) {
                 Some("break-all") => true,
                 Some("normal" | "keep-all" | "auto-phrase") => false,
@@ -3182,6 +3981,8 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             true
         }),
         h("overflow-wrap", |c, v| {
+            use crate::linebreak::WRAP_BREAK_WORD;
+            c.c.text_wrap = (c.c.text_wrap & !WRAP_BREAK_WORD) | if kw(v) == Some("break-word") { WRAP_BREAK_WORD } else { 0 };
             c.c.wrap_anywhere = match kw(v) {
                 Some("anywhere" | "break-word") => true,
                 Some("normal") => false,
@@ -3190,6 +3991,38 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             true
         }),
         h("word-wrap", |c, v| delegate(c, "overflow-wrap", v)),
+        h("line-break", |c, v| {
+            use crate::linebreak::{WRAP_ANYWHERE, WRAP_LOOSE, WRAP_STRICT};
+            let bits = match kw(v) {
+                Some("anywhere") => WRAP_ANYWHERE,
+                Some("loose") => WRAP_LOOSE,
+                Some("strict") => WRAP_STRICT,
+                Some("auto" | "normal") => 0,
+                _ => return false,
+            };
+            c.c.text_wrap = (c.c.text_wrap & !(WRAP_ANYWHERE | WRAP_LOOSE | WRAP_STRICT)) | bits;
+            true
+        }),
+        h("text-autospace", |c, v| {
+            use crate::linebreak::WRAP_NO_AUTOSPACE;
+            let off = match kw(v) {
+                Some("no-autospace") => true,
+                Some(_) => false,
+                None => return false,
+            };
+            c.c.text_wrap = (c.c.text_wrap & !WRAP_NO_AUTOSPACE) | if off { WRAP_NO_AUTOSPACE } else { 0 };
+            true
+        }),
+        h("hyphens", |c, v| {
+            use crate::linebreak::WRAP_NO_HYPHENS;
+            let none = match kw(v) {
+                Some("none") => true,
+                Some("manual" | "auto") => false,
+                _ => return false,
+            };
+            c.c.text_wrap = (c.c.text_wrap & !WRAP_NO_HYPHENS) | if none { WRAP_NO_HYPHENS } else { 0 };
+            true
+        }),
         h("tab-size", |c, v| match v.first() {
             Some(Tok::Num(n)) if *n >= 0.0 => {
                 c.c.tab_size = n.round().min(64.0) as u8;
@@ -3325,8 +4158,9 @@ fn position(c: &Ctx, v: &[Tok]) -> Option<[Pos; 2]> {
         let t = &v[i];
         if let Some(word) = t.ident() {
             let f = kwp(word)?;
-            // `right 10px`: an offset from that edge
-            let off = v.get(i + 1).filter(|n| n.ident().is_none()).and_then(val);
+            // `right 10px top`: an offset from that edge, in the three- and four-value forms only
+            // (`left 10px` is x and y)
+            let off = v.get(i + 1).filter(|n| v.len() >= 3 && n.ident().is_none()).and_then(val);
             let p = match off {
                 Some(o) => {
                     i += 1;
@@ -3448,5 +4282,51 @@ mod tests {
         assert!(c.italic && c.bold() && c.underline && c.font_size == 20.0);
         assert_eq!(c.gradient.as_ref().unwrap().stops.len(), 2);
         assert_eq!(c.shadows.len(), 1);
+    }
+
+    /// A property is handled or accepted as having no effect, not both: the lookup takes the
+    /// later, so one in both would never apply.
+    #[test]
+    fn handled_properties_are_not_also_ignored() {
+        for name in ACCEPTED {
+            assert!(!HANDLERS.iter().any(|(n, _)| n == name), "{name} is handled and ignored");
+        }
+    }
+
+    /// Gradient stops: lengths and percentages, two positions in one stop, positions that go back
+    /// moved up, and stops without one spaced evenly between their neighbours.
+    #[test]
+    fn gradient_stops_resolve_on_the_line() {
+        let c = computed("background: linear-gradient(red 0 50px, blue 25%, green, white 80px)");
+        let at: Vec<f32> = c.gradient.as_ref().unwrap().resolved(100.0).iter().map(|s| s.1).collect();
+        assert_eq!(at, vec![0.0, 0.5, 0.5, 0.65, 0.8]);
+    }
+
+    /// `flex-wrap: balance` with `wrap-reverse` in either order, `flex-line-count`, and `flex-flow`.
+    #[test]
+    fn balanced_flex_wrapping() {
+        assert_eq!(computed("flex-wrap: wrap-reverse balance").layout.flex_wrap, FlexWrap::BalanceReverse);
+        assert_eq!(computed("flex-flow: column balance").layout.flex_wrap, FlexWrap::Balance);
+        assert_eq!(computed("flex-line-count: 3").layout.flex_line_count, 3);
+    }
+
+    /// Sizing keywords on min / max sizes are kept for the tree (taffy has them as `auto`), and
+    /// size containment with the size it sizes the box as.
+    #[test]
+    fn background_shorthand_sizes_a_gradient() {
+        let c = computed("background: linear-gradient(red, red) 0 0/2ch 2ch no-repeat");
+        let st = c.images.as_deref().expect("image style");
+        assert!(c.gradient.is_some());
+        assert_eq!(st.bg_repeat, (false, false));
+        assert!(matches!(st.bg_size, BgSize::Size(Some(_), Some(_))), "{:?}", st.bg_size);
+    }
+
+    #[test]
+    fn min_max_keywords_and_containment() {
+        let c = computed("min-width: min-content; max-height: fit-content");
+        assert_eq!(c.size_kw, crate::tree::SIZING_MIN_CONTENT | crate::tree::SIZING_FIT_CONTENT << 12);
+        assert_eq!(c.layout.min_size.width, LengthPercentageAuto::auto());
+        let c = computed("contain: inline-size; contain-intrinsic-size: auto 40px none");
+        assert_eq!(c.contain, (crate::tree::CONTAIN_WIDTH, [40.0, 0.0]));
     }
 }

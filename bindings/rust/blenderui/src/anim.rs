@@ -1113,7 +1113,7 @@ fn lerp(a: &Val, b: &Val, t: f32, u: &Units) -> Option<Val> {
             // the shorter list is padded with transparent zero shadows
             let n = x.len().max(y.len());
             let pad = |l: &Vec<Shadow>, o: &Vec<Shadow>, i: usize| {
-                l.get(i).copied().unwrap_or(Shadow { inset: o[i].inset, ..NO_SHADOW })
+                l.get(i).copied().unwrap_or_else(|| Shadow { inset: o[i].inset, ..NO_SHADOW })
             };
             Val::Shadows((0..n).map(|i| mix_shadow(&pad(x, y, i), &pad(y, x, i), t)).collect::<Option<_>>()?)
         }

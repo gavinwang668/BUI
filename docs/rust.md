@@ -444,7 +444,7 @@ gets `on_click`.
 | `on_mouse_up(button, ..)`                  | `MouseUpEvent`                                          | yes     |
 | `on_mouse_move`                            | `MouseMoveEvent { position, pressed_button, modifiers }` | yes    |
 | `on_hover`                                 | `bool`: entered / left                                  | no      |
-| `on_scroll_wheel`                          | `ScrollWheelEvent { position, delta, modifiers }`       | yes     |
+| `on_scroll_wheel`                          | `ScrollWheelEvent { position, delta, pixels, phase, modifiers }` | yes     |
 | `on_key_down`, `on_key_up`                 | `KeyDownEvent { keystroke: Keystroke { key, key_char, modifiers } }` | yes (from the focused element) |
 | `on_change`, `on_input`                    | `ChangeEvent { value, checked, number }`                | yes     |
 
@@ -593,6 +593,26 @@ For items that are not messages, build a `List` from your own `ItemSource`, `Mea
 
 `blenderui::shadcn` also has `VirtualList` (`count` and an `item` closure that writes each item's text, so ten million rows cost a screenful) and `ChatList`, with TanStack Virtual's names: `estimate_size`, `overscan`, `get_item_key`, `on_range_change`, and `scroll_to_index` / `scroll_to_offset` / `measure_element` on the `ListHandle` that `use_virtual_list()` returns. They sit on `ListState` and `ItemSource` (the new `CountSource` and `RowStyle` in `blenderui-vlist`), so the file-backed source works under them. See the website page "Virtual list API" and `examples/site_shadcn_list.rs`.
 
+## Tray, notifications, taskbar progress, recent files
+
+`blenderui::shell` is the C kit's desktop shell ([Desktop shell](https://bui.preetham.top/docs/concepts/desktop-shell/)):
+
+```rust
+use blenderui::shell::{self, MenuItem, ShellEvent, TaskbarProgress, Tray};
+
+let tray = Tray::new(Some("BLENDER"), "My app");          // None where there is no tray
+if let Some(tray) = &tray {
+    tray.set_menu(&[MenuItem::action(1, "Open"), MenuItem::Separator, MenuItem::action(2, "Quit")]);
+}
+cx.on_shell_event(|event, cx| if let ShellEvent::MenuItem { id: 2, .. } = event { cx.quit() });
+shell::notify("Done", "The export finished", None);      // Some(id); a click: NotificationClicked(id)
+window.set_taskbar_progress(TaskbarProgress::Normal(0.4));
+shell::add_recent_document("scene.blend");
+```
+
+Keep the `Tray` alive (dropping it removes the icon). `shell::features()` says what this
+build (the `shell` feature, on by default) and system have. `cargo run --example tray`.
+
 ## Headless rendering and tests
 
 `Application::headless()` runs the same code without a native window (and is
@@ -613,6 +633,39 @@ Also `simulate_mouse_move`, `simulate_scroll`, `simulate_key(text, keysym)`, `si
 The kit has global state, so one `Application` runs at a time per process
 (`run` takes a lock; parallel tests queue up).
 
+### Web-platform-tests (CSS reftests)
+
+The engine's CSS is measured against the CSS reftests of
+[web-platform-tests](https://github.com/web-platform-tests/wpt): each test and its
+reference render off-screen at 800 x 600, and their pixels must match (or, for
+`rel="mismatch"`, differ), within the test's `<meta name="fuzzy">`.
+
+```sh
+py -3 tools/wpt_fetch.py          # pinned commit, sparse: ~15,000 files in .wpt/
+cd bindings/rust
+cargo test -p blenderui --test wpt -- --ignored --nocapture wpt_run
+```
+
+| Variable           | Effect                                                                    |
+| ------------------ | ------------------------------------------------------------------------- |
+| `WPT_FILTER=text`  | Only the tests whose path contains `text` (`css-grid/`, `aspect-ratio`)   |
+| `WPT_JOBS=n`       | Worker processes (default: half the cores)                                |
+| `WPT_DIR=path`     | The checkout (default `.wpt/`; `wpt_fetch.py --dir path` fetches there)   |
+| `WPT_DUMP=dir`     | Write each failing test's pixels and its reference's as PNGs              |
+| `WPT_UPDATE=1`     | On a full run, rewrite `tests/wpt/expectations.txt` and `results.md`      |
+
+A test in `tests/wpt/expectations.txt` that no longer passes fails the run; the
+per-directory numbers are in `tests/wpt/results.md`, and every test's result in
+`target/tmp/wpt/results.tsv`. A page with scripts runs them in QuickJS (the
+engine `blenderui-qjs` embeds) against a small DOM (`tests/wpt/dom.js`): its
+tree, selector queries, inline style, class lists, `innerHTML`, timers and
+animation frames on a virtual clock (a `reftest-wait` page is done when none is
+left), named access to ids, `focus()`, scrolling and a canvas's `fillRect`.
+Layout reads (`offsetWidth`, `getBoundingClientRect`) answer from a render of
+the page before its scripts ran. Tests that need frames or paged media are
+skipped and counted by reason. The Ahem font WPT uses is
+registered from the checkout. A full run takes about a minute and a half (8 worker processes).
+
 ## Coverage
 
 From `cargo test --test suite parity:: -- --nocapture`:
@@ -625,7 +678,8 @@ From `cargo test --test suite parity:: -- --nocapture`:
 | CSS 2.1, screen properties            | **90 / 90** rendered, 90 / 90 parsed                                              |
 | Flexbox                               | **12 / 12**                                                                       |
 | Grid                                  | **23 / 23** (including `grid-template-areas` and named lines)                     |
-| Tailwind CSS v4                       | Classes compile on first use (v4 theme, variants, arbitrary values); `tw!` checks them at compile time |
+| WPT CSS reftests (14 directories)     | **4,860 of 7,135** that run pass (68.1%); see [Web-platform-tests](#web-platform-tests-css-reftests) |
+| Tailwind CSS v4                       | Classes compile on first use (v4 theme, variants, arbitrary values); `tw!` checks them at compile time; a class the page's own CSS styles isn't also a utility |
 
 Beyond properties, the engine supports:
 - **Values:** every CSS math function (`calc`, `min`, `max`, `clamp`, `round`, `mod`, `rem`, trigonometry, `pow`, `hypot` ...) with mixed units, every length unit, and `var()` / `env()`.
@@ -656,6 +710,16 @@ the result is cached, so a page that doesn't change costs nothing.
 Also rendered: every `border-style` and `outline-style` (`dashed`, `dotted`, `double`, `groove`, `ridge`, `inset`, `outset`, following rounded corners with Blender's corner tessellation), `text-decoration-style` (including `wavy`), `-thickness` and `text-underline-offset`, `background-clip` / `background-origin` (`border-box`, `padding-box`, `content-box`), `background-attachment: fixed`, `clip: rect()` on absolutely positioned boxes, counters (`counter-reset` / `-increment` / `-set` with `counter()` and `counters()` in `content`), `empty-cells`, `list-style-image`, `word-break: break-all`, `overflow-wrap: anywhere | break-word` and `tab-size`.
 
 Also supported: `background-image: url()` (every image format) with `background-size` / `-position` (`-x` / `-y`) / `-repeat`, `object-fit` / `object-position`, logical border longhands (`border-inline-width` ...), `text-wrap-mode`, `white-space-collapse`, `scale`, `@container` size queries (`container-type`, `container-name`), `@font-face` (local font files) and `@property` initial values.
+
+**Subgrids, anchor positioning and view transitions.** `grid-template-rows: subgrid` / `grid-template-columns: subgrid` share the parent grid's tracks (cards line up their headers and bodies). `anchor-name`, `position-anchor`, `anchor()` in `top` / `right` / `bottom` / `left` (with a fallback, or inside `calc(anchor() ± length)`), `anchor-size()` in the sizes, `position-area`, `anchor-center` and `position-try-fallbacks` (`flip-block`, `flip-inline`, `<position-area>` options) place a positioned box against another. `Window::start_view_transition()` animates the next render: boxes with a `view-transition-name` move and resize from their old place, their old pictures fade out, and the page cross-fades; `::view-transition-group()` / `-old()` / `-new()` rules (by name, `*` or `.class`) set the timing.
+
+**Grid lanes (masonry).** `display: grid-lanes` / `inline-grid-lanes` (CSS Grid 3): `grid-template-columns` are the lanes (rows with `grid-lanes-direction: row`), and each item goes into the lane where it ends up highest, the first from the lane after the previous item's among those within `fit-tolerance` (`normal` is 1em, `infinite` fills the lanes in order). `grid-lanes-direction` takes `fill-reverse` (stack from the end) and `track-reverse` (fill the lanes from the last), `grid-lanes-pack: dense` fills the gaps higher up the lanes, items can be placed in a lane (`grid-column: 2`) or span several, and the last item of a lane aligns in the rest of it (`align-items: stretch | center | end`). `justify-` / `align-content` / `-items: flow-start | flow-end` follow the reversed axes. Every auto-placed item counts towards the size of every lane it could go in (an item the width of one lane widens the others it might have taken), the lanes keep those sizes when the items are placed, and `repeat(auto-fill, auto)` (intrinsic lanes) is counted from them. A subgrid item shares the lanes it spans.
+
+**Text, baselines, ratios and SVG backgrounds.** `line-height: normal` and the baseline come from the font's own ascent, descent and line gap (an `@font-face` or `add_font` font; the UI font keeps Blender's 1.3 em). Words of different sizes, inline blocks and flex and grid items with `align-items: baseline` line up on their baselines; an inline block that clips its overflow sits on its bottom margin edge. `white-space: pre-wrap` keeps every space, `break-spaces` may break after each one (a tab stays whole), and `<br><br>` makes an empty line. A box with an `aspect-ratio` is at least as tall as its content, and `aspect-ratio: auto <ratio>` lets an image's own ratio win. An SVG `background-image` without a width or height of its own takes its `viewBox` ratio (`auto` sizes it as `contain`) or fills the area, and SVGs are drawn sharp at the size they're shown, stretched or letterboxed as their `preserveAspectRatio` says.
+
+**Inline layout.** A block's text and inline boxes are laid out in lines the way browsers do (`tree/inline.rs`): line-break opportunities come from UAX #14 over the whole paragraph (CJK breaks between characters, a hyphen or slash allows one, a no-break space doesn't), tailored by `word-break`, `line-break`, `hyphens` (a soft hyphen shows a hyphen where a line breaks at it) and `overflow-wrap`; spaces at the end of a line hang or go; `text-align` takes `start` / `end` (by `direction`), `justify`, `justify-all` and `match-parent`, and `text-align-last` the last line's; tabs stop at `tab-size` multiples from the line's start; `text-wrap: balance` evens short paragraphs; `text-autospace` spaces ideographs from Latin letters; `text-transform: full-width | full-size-kana`. A line box holds its strut (the block's font and `line-height`) and its items on the baseline, or at its `top` / `middle` / `bottom`; an inline-block sits on its last line's baseline; an inline element with padding, border or margin takes room at its start and end and paints each line's fragment. A block whose only content is plain ASCII text in collapsing white space keeps the fast one-box path (its lines come out the same).
+
+**Sizing.** `min-width` / `min-height` / `max-width` / `max-height` take `min-content`, `max-content`, `fit-content` and `stretch` (the container measures the item: `tree/sizing.rs`). `contain: size | inline-size | strict` sizes a box as if empty, with `contain-intrinsic-size` (`-width`, `-height`, `auto <length>`) as its content. Images, videos and canvases are measured at their natural size, or the other side through their ratio when one is given, which is also their automatic minimum as flex and grid items; a `<canvas>`'s `width` / `height` attributes are its natural size (300 x 150 by default), and one nothing draws on is transparent. A subgrid in one axis keeps tracks of its own in the other (its items stack in its own rows, say), and its own `gap` takes half of the difference out of the tracks either side. `flex-wrap: balance` (with `wrap-reverse`) and `flex-line-count`; `vertical-align: top | middle | bottom`; floats and absolutely positioned boxes are blockified; gradient stops take lengths, `calc()` and two positions (`red 0 50%`), with hard edges drawn hard.
 
 How much is left, against all 745 properties in the
 [W3C index](https://www.w3.org/Style/CSS/all-properties.en.html):
@@ -703,6 +767,11 @@ Not done yet:
 - **3D transforms:** `perspective`, `rotateX` / `rotateY`, `matrix3d` have no effect; 2D transforms don't change hit testing (clicks use the untransformed box).
 - **Animations:** no `animationend` / `transitionend` events, no animations on `::before` / `::after`, and an element starts transitions only when it already had a `transition` in the previous frame (e.g. not when `transition` appears only under `:hover` on the first hover). Lengths mixing units that resolve differently (`50%` to `100px`, `auto`) flip at 50% instead of going through `calc()`.
 - **`@container` timing:** queries use the container's size from the previous layout; when it changes, the window renders once more.
+- **Anchor positioning:** an anchored box reads its anchor's place from the previous layout (when it moved, the window lays out once more), so the first frame uses the `anchor()` fallbacks. Not supported: `@position-try` rules, `flip-start`, `position-visibility`, `position-try-order` and implicit anchors (a popover's invoker).
+- **Subgrid:** line names after `subgrid` aren't used, nor the `gap` of a subgrid in both axes.
+- **Grid lanes:** items aren't baseline-aligned across lanes, the static position of an absolutely positioned item doesn't follow `fill-reverse` / `track-reverse`, and a grid-lanes container that is itself a subgrid lays out as a grid.
+- **Text:** vertical writing modes (`writing-mode: vertical-rl` ...) aren't laid out; text is shaped word by word (no ligatures or kerning across a break opportunity); `hyphens: auto` doesn't hyphenate (no dictionaries; soft hyphens do), and `hanging-punctuation`, `text-justify` and `white-space-collapse: discard` aren't used.
+- **View transitions:** same-document only; the pseudo-elements' own `@keyframes` aren't run (each part animates as the spec's defaults do), `:active-view-transition` never matches, and form controls (kit widgets) and layer effects (filters, blend modes) aren't in the pictures.
 - **Effects:** `filter: url(#svg)`, `clip-path: path()`, and `mix-blend-mode` across stacking contexts (it blends with what was painted before it).
 - **The rest of the W3C property index:** 355 entries this engine doesn't know, mostly drafts, speech, paged media and SVG.
 - **`all`:** counted as parsed-only. Its CSS-wide keywords (`all: initial`, `inherit`, `unset`, `revert`) reset an element's computed style; there's nothing else it can take.
@@ -755,7 +824,8 @@ Text uses Blender's UI font, Inter, embedded in the library, so it looks
 the same on every platform. The default family (and `sans-serif`,
 `system-ui` or an unknown family) is Inter. Named families such as
 `"Segoe UI"` or `monospace` load from the platform's fonts. `BUI_FONT=path.ttf`
-overrides the default face, and you can register more faces:
+overrides the default face, and you can register more faces (TrueType, OpenType or WOFF;
+`@font-face` takes the same):
 
 ```rust
 blenderui::add_font("Brand", false, false, include_bytes!("Brand-Regular.ttf"));

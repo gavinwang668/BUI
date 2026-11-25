@@ -35,6 +35,10 @@ enum {
   BUI_FONT_BOLD = 1 << 0,
   BUI_FONT_ITALIC = 1 << 1,
   BUI_FONT_UNDERLINE = 1 << 2,
+  /* Han characters are drawn as Japanese / Korean (their run's language), not by what the run
+   * itself holds: a line broken into words keeps its paragraph's faces. */
+  BUI_FONT_HAN_JA = 1 << 4,
+  BUI_FONT_HAN_KO = 1 << 5,
 };
 
 BuiRaster *BUI_raster_create(int width, int height);
@@ -301,6 +305,10 @@ const uint8_t *BUI_text_run_mask(const BuiTextRun *run, int *r_w, int *r_h, int 
  * `flags` (BUI_FONT_BOLD | BUI_FONT_ITALIC). Needed where the platform has no
  * font folders (wasm); elsewhere it adds to them. Returns 0 on bad data. */
 int BUI_text_add_font(const char *family, int flags, const void *data, int len);
+/* The vertical metrics, in em, of the face `family` (a CSS list: its first found
+ * family) draws with: ascent and descent (both positive) and line gap, as the
+ * glyphs are placed (the OS/2 Windows metrics when present). 0 without one. */
+int BUI_text_vmetrics(const char *family, int flags, float *r_ascent, float *r_descent, float *r_gap);
 /* The embedded default UI face (Inter, Blender's UI font: the variable
  * TrueType, read-only, static). NULL when the build left it out. */
 const void *BUI_text_default_font(int *r_len);

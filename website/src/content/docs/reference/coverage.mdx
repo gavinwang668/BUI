@@ -5,7 +5,7 @@ description: How much of each API BUI implements, in one place. tkinter, Qt, HTM
 section: Reference
 order: 40
 languages: ["python", "rust", "javascript", "c", "cpp", "imgui"]
-sources: ["SYNTAX_COVERAGE.md", "docs/rust.md", "docs/qt.md", "docs/qt-coverage.md", "tools/qt_coverage.py", "docs/imgui.md", "docs/tkinter.md", "docs/components.md", "README.md", "CHANGELOG.md"]
+sources: ["SYNTAX_COVERAGE.md", "docs/rust.md", "docs/qt.md", "docs/qt-coverage.md", "tools/qt_coverage.py", "docs/imgui.md", "docs/tkinter.md", "docs/components.md", "README.md", "CHANGELOG.md", "bindings/rust/blenderui/tests/wpt/results.md"]
 ---
 
 "Does BUI support X?" usually comes down to a number. This page collects every coverage figure in the repository, with how it was counted, so you can decide quickly and know exactly what you're getting.
@@ -21,9 +21,10 @@ sources: ["SYNTAX_COVERAGE.md", "docs/rust.md", "docs/qt.md", "docs/qt-coverage.
 | CSS properties (Rust, JavaScript) | **261 of 745** W3C properties render, **129** more parse | Partial |
 | CSS 2.1 screen properties | **90 of 90** | Complete |
 | Flexbox / Grid | **12 of 12** / **23 of 23** | Complete |
+| CSS rendering, web-platform-tests reftests (Rust, JavaScript) | **4,860 of 7,135** that run pass (68.1%) | Partial |
 | Dear ImGui, C | **399 of 399** functions | Complete |
 | Dear ImGui, Python and safe Rust | **366 of 399** functions | Partial |
-| Image formats (every language) | PNG, JPEG, WebP (animated), GIF (animated), BMP, TGA, QOI, Radiance HDR, PNM, SVG; not yet AVIF, EXR, TIFF, JPEG XL, HEIC ([Images](/docs/concepts/images)) | Partial |
+| Image formats (every language) | PNG, JPEG, WebP (animated), GIF (animated), BMP, TGA, QOI, Radiance HDR, PNM, SVG, TIFF, HEIC (through the OS); OpenEXR, AVIF (animated) and JPEG XL (animated) as opt-in features ([Images](/docs/concepts/images)) | Complete |
 | `<video>` (every language) | Play, pause, seek, rate, loop, poster, sound (muted and audio effects in every language; volume in C, Python, Lua and the Rust player, not on the JavaScript or Rust `<video>` element), state events, Blender-style controls (C, Python); what the OS decodes; sound tested on Windows only, no controls or events on Rust/JS elements yet ([Video](/docs/concepts/video)) | Partial |
 
 ## tkinter
@@ -84,6 +85,30 @@ The two property counts use different lists: the first counts every property the
 **The biggest gaps among common properties:** 3D transforms, OpenType font features and multi-column layout. Also, 2D transforms draw but don't change hit testing.
 
 **Beyond properties:** every CSS math function with mixed units, every length unit, `var()` and `env()`; CSS Color 4 and 5 (`oklch`, `lab`, `color-mix()`, relative colors, `light-dark()`); Selectors Level 4 (`:has()`, `:is()`, `:where()` …), nesting, `::before` and `::after`; `@media` ranges, `@supports`, `@layer`, `@scope`, `@container`, `@font-face`, `@property`; `@keyframes` animations and transitions.
+
+## CSS against web-platform-tests
+
+The property counts say what the engine handles; the [web-platform-tests](https://github.com/web-platform-tests/wpt) reftests say how closely it renders it. Each reftest is a page and a reference page that must look identical; both render off-screen at 800 x 600 and their pixels are compared, within the test's `<meta name="fuzzy">` tolerance. Measured by `cargo test -p blenderui --test wpt -- --ignored wpt_run` after `py -3 tools/wpt_fetch.py` (a pinned WPT commit); per-directory numbers are in `bindings/rust/blenderui/tests/wpt/results.md`.
+
+| Directory | Pass | Of those that run | Pass rate |
+| --- | ---: | ---: | ---: |
+| css-color | 277 | 321 | 86.3% |
+| selectors | 178 | 228 | 78.1% |
+| css-flexbox | 792 | 1,021 | 77.6% |
+| css-backgrounds | 426 | 576 | 74.0% |
+| css-grid | 1,257 | 1,773 | 70.9% |
+| css-text | 1,037 | 1,563 | 66.3% |
+| css-display | 144 | 221 | 65.2% |
+| css-sizing | 351 | 585 | 60.0% |
+| css-cascade | 28 | 51 | 54.9% |
+| css-box | 23 | 42 | 54.8% |
+| css-position | 133 | 250 | 53.2% |
+| css-align | 33 | 66 | 50.0% |
+| css-values | 85 | 197 | 43.1% |
+| css-anchor-position | 96 | 241 | 39.8% |
+| **Total** | **4,860** | **7,135** | **68.1%** |
+
+Pages with scripts run them in QuickJS against a small DOM (`tests/wpt/dom.js`), so the 987 tests that need script or wait for it (`reftest-wait`) now run too. 71 are skipped: 50 embed another document, and the rest need files outside the checkout. css-grid includes the draft `grid-lanes` (masonry) layout; css-box is the new `margin-trim`.
 
 ## Tailwind CSS
 

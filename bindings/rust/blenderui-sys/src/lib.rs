@@ -9,6 +9,8 @@ use std::os::raw::{c_char, c_double, c_float, c_int, c_uchar, c_void};
 
 mod anim;
 pub use anim::*;
+mod shell;
+pub use shell::*;
 
 // Accessibility: the kit's C calls into bui-a11y (its adapters) resolve against this crate, and its
 // node types are the ABI of `BK_a11y_*` (`BKA11yNode` is `bui_a11y::Node`, ...).
@@ -54,6 +56,11 @@ pub const BK_EV_ENTER: c_int = 12;
 pub const BK_EV_LEAVE: c_int = 13;
 pub const BK_EV_KEY: c_int = 14;
 pub const BK_EV_WHEEL: c_int = 15;
+/// How a scroll came (`BK_scroll_phase`): the third number of a wheel event's text.
+pub const BK_SCROLL_WHEEL: c_int = 1;
+pub const BK_SCROLL_DRAG: c_int = 2;
+pub const BK_SCROLL_FLING: c_int = 3;
+pub const BK_SCROLL_END: c_int = 4;
 pub const BK_EV_SUBMIT: c_int = 16;
 pub const BK_EV_VIEW: c_int = 17;
 pub const BK_EV_SCROLL: c_int = 18;
@@ -122,6 +129,10 @@ pub const BK_EFFECT_MAX_SOURCE: usize = 65536;
 pub const BUI_FONT_BOLD: c_int = 1;
 pub const BUI_FONT_ITALIC: c_int = 2;
 pub const BUI_FONT_UNDERLINE: c_int = 4;
+/// Han characters draw as Japanese (their paragraph's language), not by what the drawn run holds.
+pub const BUI_FONT_HAN_JA: c_int = 1 << 4;
+/// Han characters draw as Korean.
+pub const BUI_FONT_HAN_KO: c_int = 1 << 5;
 
 /// One item of a canvas display list (`BKCanvasItem`).
 #[repr(C)]
@@ -220,7 +231,18 @@ pub struct BKImageInfo {
     pub width: c_int,
     pub height: c_int,
     pub frames: c_int,
+    /// `BK_IMAGE_INFO_*`.
+    pub flags: c_int,
 }
+
+/// `BKImageInfo::flags`: a vector image (SVG), drawn sharp at any size.
+pub const BK_IMAGE_INFO_VECTOR: c_int = 1;
+/// No natural width: `width` only gives the ratio (or stands in, with `BK_IMAGE_INFO_NO_RATIO`).
+pub const BK_IMAGE_INFO_NO_WIDTH: c_int = 2;
+/// No natural height (as `BK_IMAGE_INFO_NO_WIDTH`).
+pub const BK_IMAGE_INFO_NO_HEIGHT: c_int = 4;
+/// No natural ratio either: 300 x 150 stands in.
+pub const BK_IMAGE_INFO_NO_RATIO: c_int = 8;
 
 /// `BKImageStats`: the shared image cache.
 #[repr(C)]
@@ -573,6 +595,9 @@ unsafe extern "C" {
     pub fn BK_window_gpu(win: *mut BKWindow) -> c_int;
     pub fn BUI_text_add_font(family: *const c_char, flags: c_int, data: *const c_void,
                              len: c_int) -> c_int;
+    /// The ascent, descent and line gap (em) of the face `family` draws with; 0 without one.
+    pub fn BUI_text_vmetrics(family: *const c_char, flags: c_int, r_ascent: *mut c_float,
+                             r_descent: *mut c_float, r_gap: *mut c_float) -> c_int;
     /// Font folder `i` the text engine reads font files from (BUI_FONT_DIR, then the
     /// platform's), written to `r_dir` (`cap` bytes); its length, 0 past the last.
     pub fn BUI_text_font_dir(i: c_int, r_dir: *mut c_char, cap: c_int) -> c_int;

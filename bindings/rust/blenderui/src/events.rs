@@ -1,6 +1,7 @@
 //! Event types passed to listeners (named as in gpui).
 
 use crate::geometry::{Pixels, Point};
+use blenderui_sys as sys;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum MouseButton {
@@ -58,6 +59,30 @@ impl ClickEvent {
     }
 }
 
+/// How a scroll came: a wheel notch or touchpad, a finger dragging the content, the content coasting
+/// on after the finger, or the finger lifting (`delta` 0, nothing to scroll).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ScrollPhase {
+    #[default]
+    Wheel,
+    Drag,
+    Fling,
+    End,
+}
+
+impl ScrollPhase {
+    /// From the kit's `BK_SCROLL_*` (a wheel event's third number); anything else is a wheel.
+    #[must_use]
+    pub fn from_kit(n: i32) -> Self {
+        match n {
+            sys::BK_SCROLL_DRAG => Self::Drag,
+            sys::BK_SCROLL_FLING => Self::Fling,
+            sys::BK_SCROLL_END => Self::End,
+            _ => Self::Wheel,
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct ScrollWheelEvent {
     pub position: Point<Pixels>,
@@ -66,6 +91,7 @@ pub struct ScrollWheelEvent {
     /// The exact distance in logical pixels (same sign as `delta`) when the host knows it, as for
     /// a touch drag; `None` for a wheel notch. A view that scrolls itself follows it 1:1.
     pub pixels: Option<f32>,
+    pub phase: ScrollPhase,
     pub modifiers: Modifiers,
 }
 

@@ -92,11 +92,13 @@ static inline Paint paint_from(uint32_t alpha, const float c[4])
 SHAPE_INLINE uint32_t blend(uint32_t d, uint32_t s, uint32_t f, const int keep)
 {
   const uint32_t nf = 256 - f;
-  const uint32_t rb = (((s & 0xFF00FFu) * f + (d & 0xFF00FFu) * nf) >> 8) & 0xFF00FFu;
+  /* rounded to the nearest (+ half of 256 in each lane): 60% black over white is 102, as a
+   * browser makes it, not 101 */
+  const uint32_t rb = (((s & 0xFF00FFu) * f + (d & 0xFF00FFu) * nf + 0x800080u) >> 8) & 0xFF00FFu;
   if (!keep) {
-    return rb | ((((s & 0x00FF00u) * f + (d & 0x00FF00u) * nf) >> 8) & 0x00FF00u);
+    return rb | ((((s & 0x00FF00u) * f + (d & 0x00FF00u) * nf + 0x008000u) >> 8) & 0x00FF00u);
   }
-  return rb | ((((s >> 8) & 0xFF00FFu) * f + ((d >> 8) & 0xFF00FFu) * nf) & 0xFF00FF00u);
+  return rb | ((((s >> 8) & 0xFF00FFu) * f + ((d >> 8) & 0xFF00FFu) * nf + 0x800080u) & 0xFF00FF00u);
 }
 
 /* Write with coverage cov (0..1) scaled by paint alpha. */
@@ -2891,6 +2893,7 @@ static void be_font_close(FontSlot *s);
 static float be_measure(const FontSlot *s, const char *utf8, int len);
 static void be_build(TextRun *e, const FontSlot *s);
 static void be_flush_glyphs(void);
+static void be_vmetrics(const FontSlot *s, float *r_ascent, float *r_descent, float *r_gap);
 
 static void runs_flush(void)
 {
@@ -2971,6 +2974,17 @@ static int font_open(const char *family, int own_face, int flags, float size, in
 static int font_get(const char *family, int flags, float size)
 {
   return font_open(family, -1, flags, size, 1);
+}
+
+int BUI_text_vmetrics(const char *family, int flags, float *r_ascent, float *r_descent, float *r_gap)
+{
+  *r_ascent = *r_descent = *r_gap = 0.0f;
+  const int f = font_get(family, flags, 64.0f); /* in em: any size, one big enough for GDI's integers */
+  if (f < 0) {
+    return 0;
+  }
+  be_vmetrics(&g_fonts[f], r_ascent, r_descent, r_gap);
+  return 1;
 }
 
 static uint64_t run_hash(int font, const char *s, int len)
@@ -3395,6 +3409,19 @@ static void be_font_close(FontSlot *s)
 }
 
 static void be_flush_glyphs(void) {}
+
+static void be_vmetrics(const FontSlot *s, float *r_ascent, float *r_descent, float *r_gap)
+{
+  HDC dc = text_dc();
+  HGDIOBJ old = SelectObject(dc, s->font);
+  TEXTMETRICW tm;
+  GetTextMetricsW(dc, &tm);
+  SelectObject(dc, old);
+  const float em = (float)s->px;
+  *r_ascent = (float)tm.tmAscent / em;
+  *r_descent = (float)tm.tmDescent / em;
+  *r_gap = (float)tm.tmExternalLeading / em;
+}
 
 static int run_glyphs(TextRun *e)
 {
@@ -4282,6 +4309,15 @@ typedef struct GlyphBmp {
 static GlyphBmp *g_glyphs = NULL;
 static int g_glyph_count = 0;
 
+static void be_vmetrics(const FontSlot *s, float *r_ascent, float *r_descent, float *r_gap)
+{
+  const Face *f = &g_faces[s->face];
+  const float em = stbtt_ScaleForMappingEmToPixels(&f->info, 1.0f);
+  *r_ascent = (float)f->ascent * em;
+  *r_descent = (float)-f->descent * em;
+  *r_gap = (float)f->line_gap * em;
+}
+
 static void be_flush_glyphs(void)
 {
   g_text_gen++; /* glyph bitmaps are GPU atlas keys */
@@ -4412,7 +4448,7 @@ typedef void (*GlyphFn)(void *user, int slot, int glyph, float pen);
 /* The system's fallback faces of each group (gpu_fonts.c), regular [0] and
  * bold [1], one per file of the group's list: face + 1, -1 when it isn't
  * installed, 0 until looked for. Faces are never freed, so these stay valid. */
-#  define GROUP_FILES 8
+#  define GROUP_FILES 16 /* the longest list: Indic, a font per script */
 static int g_fallback_face[2][GPU_FALLBACK_GROUPS][GROUP_FILES];
 
 /* What a run's Han characters are drawn as: Han is shared by Chinese, Japanese
@@ -4581,7 +4617,10 @@ static float glyph_walk(int font, const char *utf8, int len, GlyphFn fn, void *u
 {
   float pen = 0.0f;
   int prev = 0, prev_slot = -1, last = -1;
-  RunScript rs = {utf8, len, -1};
+  /* a language the caller gives decides the run's Han faces; else its own text does */
+  const int hint = g_fonts[font].flags;
+  RunScript rs = {utf8, len, (hint & BUI_FONT_HAN_JA) ? GPU_FALLBACK_KANA :
+                             (hint & BUI_FONT_HAN_KO) ? GPU_FALLBACK_HANGUL : -1};
 #  if TEXT_FT
   FT_Face ft = NULL;
 #  endif

@@ -172,6 +172,16 @@ if(BUI_BUILD_TESTS)
   endif()
   add_test(NAME bui_anim_test COMMAND bui_anim_test)
   set_tests_properties(bui_anim_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
+  # the desktop shell: a tray icon and its menu, notifications, taskbar progress, a recent file
+  # (exits 77, skipped, without BUI_SHELL or a desktop session with a tray)
+  add_executable(bui_shell_test tests/shell_test.c)
+  target_link_libraries(bui_shell_test PRIVATE bui::kit)
+  target_include_directories(bui_shell_test PRIVATE kit/intern/shell)
+  target_compile_definitions(bui_shell_test PRIVATE
+    BUI_TEST_IMAGES="${CMAKE_CURRENT_SOURCE_DIR}/tests/images"
+    BUI_TEST_TMP="${CMAKE_CURRENT_BINARY_DIR}")
+  add_test(NAME bui_shell_test COMMAND bui_shell_test)
+  set_tests_properties(bui_shell_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 60)
   if(WIN32) # the thumbnail-grid benchmark (bench/images/image_grid.c; not a test)
     add_executable(bui_image_bench bench/images/image_grid.c)
     target_link_libraries(bui_image_bench PRIVATE bui::kit psapi)

@@ -341,6 +341,14 @@ export class Window {
   /** Run `cb` before the next frame, paced by the display. */
   requestAnimationFrame (cb: (time: number) => void): number
   cancelAnimationFrame (id: number): void
+  /**
+   * A view transition (the browser's `document.startViewTransition`): the window is pictured,
+   * `update` changes the DOM, and boxes with a `view-transition-name` move to their new place while
+   * the page cross-fades. The promises resolve once the update is committed.
+   */
+  startViewTransition (update?: (() => void | Promise<void>) | { update?: () => void | Promise<void> }): {
+    updateCallbackDone: Promise<void>, ready: Promise<void>, finished: Promise<void>, skipTransition (): void
+  }
   screenshot (): Promise<{ width: number, height: number, data: Buffer }>
   click (x: number, y: number): void
   /** Move the pointer (tests): hover, drag and mouse events follow. */
@@ -352,6 +360,42 @@ export class Window {
   close (): void
   /** `focus` / `blur`: the window got or lost the keyboard focus. */
   on (event: 'close' | 'focus' | 'blur', listener: () => void): this
+  /** The taskbar button's progress, 0..1 (Windows; macOS: the Dock icon; Linux: the launcher
+   *  entry); below 0 hides it, above 1 is indeterminate (Electron's `setProgressBar`). */
+  setProgressBar (progress: number, options?: { mode?: ProgressBarMode }): void
+}
+
+export type ProgressBarMode = 'normal' | 'indeterminate' | 'paused' | 'error' | 'none'
+
+/** A tray menu item: Electron's menu template. */
+export interface TrayMenuItem {
+  label?: string
+  type?: 'normal' | 'checkbox' | 'separator' | 'submenu'
+  checked?: boolean
+  enabled?: boolean
+  click?: (tray: Tray) => void
+  submenu?: (TrayMenuItem | '-' | null)[]
+}
+
+/** A tray icon (`app.createTray`): the notification area, the menu bar, a panel's tray. */
+export class Tray {
+  readonly id: number
+  /** An image file or a Blender icon's name ('BLENDER'); null: the app's own icon. */
+  setImage (icon: string | null): void
+  setToolTip (text: string): void
+  /** Opened by a right click; null removes it. */
+  setContextMenu (template: (TrayMenuItem | '-' | null)[] | null): void
+  /** `right-click` comes for an icon without a menu; `double-click` on Windows. */
+  on (event: 'click' | 'right-click' | 'middle-click' | 'double-click', listener: (tray: Tray) => void): this
+  destroy (): void
+  isDestroyed (): boolean
+}
+
+export interface ShellFeatures {
+  tray: boolean
+  notifications: boolean
+  progress: boolean
+  recentDocuments: boolean
 }
 
 export class App {
@@ -376,6 +420,16 @@ export class App {
    *  frame (tests step animations frame-exactly). Resolves once the step's
    *  callbacks have run. */
   advanceClock (ms: number): Promise<void>
+  /** A tray icon; null where the system has none (see `shellFeatures`). */
+  createTray (options?: { icon?: string | null, tooltip?: string, menu?: (TrayMenuItem | '-' | null)[] }): Promise<Tray | null>
+  /** A desktop notification: its id, or null when it can't show. `icon`: an image file or a Blender icon's name. */
+  notify (options: { title: string, body?: string, icon?: string | null, onClick?: (id: number) => void }): Promise<number | null>
+  /** Adds a file to the system's recent documents (Windows' jump list, macOS' Open Recent, GTK's recent files). */
+  addRecentDocument (path: string): Promise<boolean>
+  /** Windows' AppUserModelID, the desktop file's id on Linux ('org.example.App'). */
+  setAppId (id: string): void
+  /** What this build and system have of the desktop shell. */
+  shellFeatures (): Promise<ShellFeatures>
   quit (): void
 }
 

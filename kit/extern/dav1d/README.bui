@@ -1,0 +1,15 @@
+Project: dav1d (AV1 decoder; C only)
+URL: https://code.videolan.org/videolan/dav1d (https://downloads.videolan.org/pub/videolan/dav1d/1.5.5/)
+Version: 1.5.5
+License: BSD-2-Clause (see COPYING)
+Used for: the AV1 pictures of AVIF images (kit/extern/libavif, codec_dav1d.c).
+
+Copied unmodified: src/*.c and src/*.h, src/win32/thread.c (pthreads on Windows), include/
+(common, compat, dav1d). The *_tmpl.c files are compiled twice, with BITDEPTH=8 and
+BITDEPTH=16 (meson.build: libdav1d_bitdepth_objs), for 8- and 10/12-bit images. Not copied:
+the assembly (x86, arm, ppc, riscv, loongarch: x86's needs NASM), tools, tests, examples.
+
+BUI files (bui/):
+  config.h        what meson.build writes to config.h: no assembly (HAVE_ASM 0, every ARCH_*
+                  0: the C DSP functions everywhere), 8 and 16 bpc, no logging, no dlsym
+  vcs_version.h   what meson writes from include/vcs_version.h.in ("1.5.5")

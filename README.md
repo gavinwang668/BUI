@@ -228,7 +228,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 ### Rust: HTML and CSS, without a browser
 
 - **All 113 HTML elements**, drawn like a browser draws them; `styled` gives any subtree Blender's look, and **Blender components** (`<NumberSlider>`, `<Button>`, `<ColorSwatch>` ...) are real Blender widgets.
-- **Modern CSS**: flexbox, grid with named areas, tables, `calc()` and every math function, `var()`, `oklch()` and `color-mix()`, `:has()`, nesting, `@layer`, `@media` ranges, `@container`, `::before`/`::after`, counters.
+- **Modern CSS**: flexbox, grid with named areas, tables, `calc()` and every math function, `var()`, `oklch()` and `color-mix()`, `:has()`, nesting, `@layer`, `@media` ranges, `@container`, `subgrid`, grid lanes (masonry), anchor positioning, view transitions, baseline alignment, `::before`/`::after`, counters.
 - **Effects and motion**: `@keyframes` animations and transitions, filters, `backdrop-filter`, blend modes, `clip-path`, masks, 2D transforms, `border-image`.
 - **Tailwind CSS v4**: `class="md:hover:bg-sky-500/50"` or bare attributes (`<div p-4 bg-[#4772b3]>`), with **"did you mean" compile errors**.
 - **`rsx!` / `view!`** HTML-like markup, **`#[component]`**, and **hooks** in zopra, React or Leptos style (`use_state`, `signal`, `Memo`, `Effect`, context).
@@ -256,7 +256,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 
 ### Images
 
-- **One decoder set for every language**, in C: PNG, GIF, BMP, TGA, QOI ([Wuffs](https://github.com/google/wuffs), memory-safe), JPEG (libjpeg-turbo), WebP including animated (libwebp), Radiance HDR, PNM and SVG. The design is Blender's imbuf: one image type and a format table.
+- **One decoder set for every language**, in C: PNG, GIF, BMP, TGA, QOI ([Wuffs](https://github.com/google/wuffs), memory-safe), JPEG (libjpeg-turbo), WebP including animated (libwebp), Radiance HDR, PNM, SVG, TIFF (libtiff) and HEIC (the OS decoder, loaded at run time), and opt-in OpenEXR (OpenEXRCore), AVIF (libavif + dav1d) and JPEG XL (libjxl), animated AVIF and JPEG XL included. The design is Blender's imbuf: one image type and a format table.
 - **Decoded at the size it is drawn, off the UI thread**: JPEG thumbnails use DCT scaling (a 4K photo becomes a 256 px thumbnail in ~12 ms), visible images first, scrolled-away requests cancelled, and only the image's rectangle redraws when it arrives. The page never jumps: sizes come from the file header.
 - **One memory-budgeted cache** (256 MiB by default). Scrolling 1,000 photo thumbnails: **2.9 ms p99 frames and 100 MB**, against 96 ms and 2.5 GB when decoding on the UI thread; **0 allocations** in a settled frame, every block freed at exit. [Images](https://bui.preetham.top/docs/concepts/images/).
 - **Animated GIF and WebP play** everywhere an image shows, decoded one frame at a time at the size drawn (two frames held per animation), each frame for its own delay, only the image's rectangle repainting. Off screen, scrolled away or in a hidden window they pause: 200 animations at once take **0.76 ms p50 / 1.5 ms p99** render frames, and **nothing at all** once off screen. `frame` holds one frame; reduced motion holds them all.
@@ -292,6 +292,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 
 - **Native windows** on Windows (Win32) and Linux (X11, and an experimental native Wayland host), and a Cocoa host for macOS, ported from Blender's GHOST.
 - **HiDPI**: per-monitor DPI on Windows, `Xft.dpi` on Linux, Retina on macOS.
+- **The desktop shell**: tray icons with menus, notifications, a progress on the taskbar button (or the Dock icon) and the system's recent documents, from every language ([Desktop shell](https://bui.preetham.top/docs/concepts/desktop-shell/)).
 - **Headless mode** for tests and screenshots, with a virtual clock that steps animations exactly.
 - On Linux, libX11 and libGL are loaded at run time, so BUI imports on servers without them.
 
@@ -1308,6 +1309,15 @@ A **window host** puts a kit context in a top-level window and feeds it input.
 Blender's default, 20 px widgets). More:
 [Window hosts](https://bui.preetham.top/docs/concepts/window-hosts/).
 
+Next to its windows, a host talks to the desktop shell (`kit/intern/shell`): a **tray icon** with
+a menu (`Shell_NotifyIconW` on Windows, StatusNotifierItem and dbusmenu over D-Bus on Linux,
+`NSStatusItem` on macOS), **notifications** (the tray balloon that Windows 10 and 11 show as a
+toast, org.freedesktop.Notifications, `UNUserNotificationCenter`), the **taskbar progress**
+(`ITaskbarList3`, the Unity launcher entry, the Dock icon, as Blender's GHOST) and **recent
+documents** (`SHAddToRecentDocs`, GTK's `recently-used.xbel`, `NSDocumentController`). What a
+system lacks, `BK_shell_features()` leaves out; libdbus-1 is loaded at run time. More:
+[Desktop shell](https://bui.preetham.top/docs/concepts/desktop-shell/).
+
 ## 22. Text and fonts
 
 Your app's text looks the same on Windows, Linux and macOS, and it looks like
@@ -1326,7 +1336,7 @@ Blender's:
 - **Other fonts**: `BUI_FONT=path.ttf` replaces Inter, `BUI_FONT_DIR` adds a
   folder to search first, `blenderui::add_font` (Rust) and
   `BUI_text_add_font` (C) register faces from memory, and CSS `@font-face`
-  loads local files.
+  loads local files (WOFF too, from Rust; WOFF 2 not yet).
 - **Windows' GDI text** is opt-in (`-DBUI_TEXT_GDI=ON`, Rust feature
   `gdi-text`): ClearType-style hinting and system fonts, without Slug.
 
@@ -2091,9 +2101,10 @@ website's dark and light shots with `--site`). More:
 | CSS properties (Rust, JavaScript) | **261 of 745** W3C properties render, **129** more parse, **355** not recognized (mostly drafts, speech, paged media and SVG) | Partial  |
 | CSS 2.1 screen properties         | **90 of 90**                                                                                                                  | Complete |
 | Flexbox / Grid                    | **12 of 12** / **23 of 23**                                                                                                   | Complete |
+| CSS rendering (WPT reftests)      | **4,860 of 7,135** web-platform-tests CSS reftests that run pass (68.1%)                                                      | Partial  |
 | Dear ImGui, C                     | **399 of 399** functions                                                                                                      | Complete |
 | Dear ImGui, Python and safe Rust  | **366 of 399** functions (Rust FFI: 385)                                                                                      | Partial  |
-| Image formats (every language)    | PNG, JPEG, WebP, GIF, BMP, TGA, QOI, HDR, PNM, SVG; not yet AVIF, EXR, TIFF, JPEG XL, HEIC                                    | Partial  |
+| Image formats (every language)    | PNG, JPEG, WebP, GIF, BMP, TGA, QOI, HDR, PNM, SVG, TIFF, HEIC (the OS); EXR, AVIF, JPEG XL as opt-in features               | Complete |
 
 How each was counted: [Coverage](https://bui.preetham.top/docs/reference/coverage/),
 [SYNTAX_COVERAGE.md](SYNTAX_COVERAGE.md), [docs/rust.md](docs/rust.md#coverage),
@@ -2194,7 +2205,8 @@ ship. The tables below have the details.
   There is no automated sync with Blender's releases.
 - **Partial areas:** Qt syntax (57% of the core classes' methods), CSS (261 of 745 properties render),
   video sound is tested on Windows only (macOS and Linux are written but untried),
-  and image formats such as AVIF, EXR, TIFF, JPEG XL and HEIC aren't supported.
+  and HEIC decodes through the OS (tested on Windows only; it needs the HEIF and HEVC
+  extensions there), while EXR, AVIF and JPEG XL are off by default (cargo / CMake features).
 - **License.** GPL: a program that includes BUI is distributed under the GPL too
   ([why](#42-faq)).
 
@@ -2424,6 +2436,10 @@ keep their own licenses:
 | [Wuffs](https://github.com/google/wuffs) by Google                                     | Decoding PNG, GIF, BMP, TGA and QOI images                                                                      | MIT or Apache-2.0 (used as MIT)           |
 | [libjpeg-turbo](https://libjpeg-turbo.org) 3.1.2                                       | Decoding JPEG images                                                                                            | IJG, BSD-3-Clause and zlib                |
 | [libwebp](https://chromium.googlesource.com/webm/libwebp) 1.6.0                        | Decoding WebP images, including animation                                                                       | BSD-3-Clause                              |
+| [libtiff](https://libtiff.gitlab.io/libtiff/) 4.7.2 and [zlib](https://zlib.net) 1.4   | Decoding TIFF images (zlib: its Deflate)                                                                        | libtiff (BSD-like) and zlib               |
+| [OpenEXR](https://openexr.com) 3.5.5 (OpenEXRCore) and libdeflate 1.26                 | Decoding OpenEXR images (the `exr` feature)                                                                     | BSD-3-Clause and MIT                      |
+| [libavif](https://github.com/AOMediaCodec/libavif) 1.4.2 and [dav1d](https://code.videolan.org/videolan/dav1d) 1.5.5 | Decoding AVIF images, including sequences (the `avif` feature)                                                  | BSD-2-Clause (its libyuv copy: BSD-3-Clause) |
+| [libjxl](https://github.com/libjxl/libjxl) 0.13.0 and [Highway](https://github.com/google/highway) 1.4.0 | Decoding JPEG XL images, including animation (the `jxl` feature)                                                | BSD-3-Clause (Highway: or Apache-2.0)     |
 | [Slug](https://github.com/EricLengyel/Slug) by Eric Lengyel                            | The GPU glyph coverage algorithm (shader code "Copyright 2017 by Eric Lengyel")                                 | MIT                                       |
 | [Tailwind CSS](https://tailwindcss.com)                                                | The v4 default theme values behind the Tailwind support                                                         | MIT                                       |
 

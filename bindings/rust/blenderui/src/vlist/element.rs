@@ -14,7 +14,7 @@ use super::state::{ListState, ViewInfo};
 use crate::css::Decl;
 use crate::element::{canvas_with, Div};
 use crate::html::div;
-use crate::{px, AnyElement, App, Entity, IntoElement, MouseButton, ParentElement, Styled, Window};
+use crate::{px, AnyElement, App, Entity, IntoElement, MouseButton, ParentElement, ScrollPhase, Styled, Window};
 
 type Listener<S, P> = Rc<dyn Fn(usize, &mut List<S, P>)>;
 type HitListener<S, P> = Rc<dyn Fn(usize, u32, &mut List<S, P>)>;
@@ -182,9 +182,19 @@ impl<S: ItemSource, P: Measurer + ItemPainter> IntoElement for VariableList<S, P
                 .on_scroll_wheel(move |e, w, cx| {
                     wh.update(cx, |s, _| {
                         // Blender's wheel scrolls at once, a notch or a touchpad fraction alike: no easing
-                        // a touch drag moves the list exactly as far as the finger went
+                        // (unless `Options::smooth_wheel`, which eases a notch in, as macOS does).
+                        // A touch drag moves the list exactly as far as the finger went, and past an end it
+                        // stretches (`Options::overscroll`) until the finger lifts.
                         let by = e.pixels.map_or(f64::from(e.delta) * WHEEL_NOTCH_PX, f64::from);
-                        s.view.wheel(-by, true);
+                        match e.phase {
+                            ScrollPhase::Drag => s.view.drag(-by),
+                            ScrollPhase::Fling => s.view.fling(-by),
+                            ScrollPhase::End => s.view.release(),
+                            ScrollPhase::Wheel => {
+                                let eased = e.pixels.is_none() && s.view.options().smooth_wheel;
+                                s.view.wheel(-by, !eased);
+                            }
+                        }
                     });
                     w.request_animation_frame();
                 })

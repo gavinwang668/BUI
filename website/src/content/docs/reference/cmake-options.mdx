@@ -51,10 +51,16 @@ Every sizeable optional part of the C kit is one row of `features.json`, the sin
 | `BUI_IMAGE_WEBP` | `webp` | `ON` | libwebp's decoder and demuxer (animated WebP). |
 | `BUI_IMAGE_HDR`, `BUI_IMAGE_PNM` | `hdr`, `pnm` | `ON` | BUI's own readers. |
 | `BUI_IMAGE_SVG` | `svg` | `ON` | SVG files, through the nanosvg the icons use anyway (about 1 KB). |
+| `BUI_IMAGE_TIFF` | `tiff` | `ON` | libtiff's decoders, with zlib's inflate (and libjpeg-turbo for JPEG-in-TIFF). |
+| `BUI_IMAGE_EXR` | `exr` | `OFF` | OpenEXRCore with libdeflate (C). |
+| `BUI_IMAGE_AVIF` | `avif` | `OFF` | libavif and dav1d (C, no assembly; 8- and 16-bit pixel code). |
+| `BUI_IMAGE_JXL` | `jxl` | `OFF` | libjxl's decoder on Highway (C++17). |
+| `BUI_IMAGE_HEIC` | `heic` | `ON` | HEIC through the OS decoder (WIC, ImageIO, libheif), loaded at run time: nothing vendored. |
 | `BUI_VIDEO` | `video` | `ON` | [Video](/docs/concepts/video) through the OS: Media Foundation, AVFoundation or GStreamer, loaded at run time. |
 | `BUI_GPU` | `gpu` | `ON` | The Direct3D 11 / OpenGL renderers. Off: every window draws with the software raster. |
 | `BUI_TEXT_FREETYPE` | `freetype` | `ON` | Text through FreeType like Blender (else stb_truetype). |
 | `BUI_FILEBROWSER` | `filebrowser` | `ON` | Blender's File Browser: the `filebrowser` node and `BK_file_dialog`. |
+| `BUI_SHELL` | `shell` | `ON` | The [desktop shell](/docs/concepts/desktop-shell): tray icons, notifications, taskbar progress, recent files (shell32 / libdbus-1 loaded at run time). |
 | `BUI_BUILD_IMGUI` | `imgui` | `ON` (CMake, with a C++ compiler), off in cargo | Dear ImGui on BUI. |
 
 See [Text and fonts](../../concepts/text-and-fonts/) for what these change on screen.

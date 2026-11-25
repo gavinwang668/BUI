@@ -1,0 +1,20 @@
+Project: libtiff (decoder subset)
+URL: https://libtiff.gitlab.io/libtiff/ (https://download.osgeo.org/libtiff/tiff-4.7.2.tar.xz)
+Version: 4.7.2
+License: libtiff (BSD-like; see LICENSE.md)
+Used for: TIFF decoding in kit/intern/image (format_tiff.c). Blender's imbuf reads TIFF through
+          OpenImageIO, which reads it through libtiff.
+
+Copied unmodified (libtiff/): the core (open, directory reading, strips and tiles, the RGBA
+interface tif_getimage.c), and the codecs none, LZW, PackBits, Deflate (tif_zip.c, with the
+kit's zlib), CCITT fax 3/4, NeXT, ThunderScan, LogLuv, the predictor, and JPEG (tif_jpeg.c, built
+only with BUI_IMAGE_JPEG, on the kit's libjpeg-turbo). The writing side stays (tif_dirwrite.c,
+tif_write.c, tif_flush.c: tif_close.c and tif_dir.c call it), unused. Not copied: tif_unix.c,
+tif_win32.c (files: the kit reads from memory), tif_stream.cxx, the codecs that need other
+libraries (JBIG, LERC, LZMA, ZSTD, WebP, Old JPEG, PixarLog), tools, tests, contrib.
+
+BUI files (bui/):
+  tiffconf.h, tif_config.h  configuration (CMake generates these upstream)
+  tif_bui.c                 the platform layer: memory on MEM_guardedalloc, no error printing
+  tif_decode_only.c         the encoder entry points of zlib and libjpeg that tif_zip.c and
+                            tif_jpeg.c name, failing (the kit vendors only the decoders)

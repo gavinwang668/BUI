@@ -117,21 +117,9 @@ static size_t read_scanline(const uint8_t *mem, size_t size, uint8_t *scan, int 
   return p;
 }
 
-/* Linear 0..1 in 4096 steps -> sRGB 8-bit (the "Standard" view transform);
- * built per decode (~4k powf, nothing next to the pixels). */
-static void srgb_lut(uint8_t lut[4097])
-{
-  for (int i = 0; i <= 4096; i++) {
-    const float v = (float)i / 4096.0f;
-    const float s = v <= 0.0031308f ? v * 12.92f : 1.055f * powf(v, 1.0f / 2.4f) - 0.055f;
-    lut[i] = (uint8_t)(s * 255.0f + 0.5f);
-  }
-}
-
 static inline uint32_t channel(const uint8_t *lut, unsigned m, float f)
 {
-  const float v = ((float)m + 0.5f) * f;
-  return lut[v >= 1.0f ? 4096 : (int)(v * 4096.0f)];
+  return imb_srgb(lut, ((float)m + 0.5f) * f);
 }
 
 BKImBuf *imb_load_hdr(const uint8_t *mem, size_t size, int want_w, int want_h)
@@ -146,8 +134,8 @@ BKImBuf *imb_load_hdr(const uint8_t *mem, size_t size, int want_w, int want_h)
     BK_imbuf_free(ib);
     return NULL;
   }
-  uint8_t lut[4097];
-  srgb_lut(lut);
+  uint8_t lut[IMB_SRGB_STEPS + 1];
+  imb_srgb_table(lut);
   for (int y = 0; y < h; y++) {
     const size_t n = read_scanline(mem + p, size - p, scan, w);
     if (n == 0) {

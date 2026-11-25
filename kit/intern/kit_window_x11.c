@@ -1233,6 +1233,11 @@ static void turn(double block_ms)
     FD_SET(g_wake_pipe[0], &set);
     maxfd = BK_MAX(maxfd, g_wake_pipe[0]);
   }
+  const int shell = bk_shell_fd(); /* the desktop shell's D-Bus (kit/intern/shell) */
+  if (shell >= 0) {
+    FD_SET(shell, &set);
+    maxfd = BK_MAX(maxfd, shell);
+  }
   struct timeval tv = {0, 0}, *ptv = &tv;
   if (!XPending(g_dpy) && block_ms != 0.0) {
     if (block_ms > 0.0) {
@@ -1248,6 +1253,7 @@ static void turn(double block_ms)
   {
     drain_wake();
   }
+  bk_shell_poll();
   while (XPending(g_dpy)) {
     XEvent ev;
     XNextEvent(g_dpy, &ev);

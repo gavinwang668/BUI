@@ -21,6 +21,7 @@
 
 mod edit;
 mod frame;
+mod relative;
 
 use std::time::Duration;
 
@@ -87,6 +88,12 @@ pub struct Options {
     /// The height assumed, in px, for an item of one line before it is
     /// measured (TanStack Virtual's `estimateSize`); `None`: the style's own.
     pub estimate_size: Option<f32>,
+    /// A drag or a fling past either end stretches the content like a rubber band (UIScrollView's
+    /// curve) and springs back when the finger lets go. Off by default, as in Blender.
+    pub overscroll: bool,
+    /// A wheel notch eases in over a few frames, as on macOS, instead of scrolling at once as
+    /// Blender's wheel does. Off by default.
+    pub smooth_wheel: bool,
 }
 
 impl Default for Options {
@@ -99,9 +106,22 @@ impl Default for Options {
             max_measured: 1 << 20,
             overscan: 8,
             estimate_size: None,
+            overscroll: false,
+            smooth_wheel: false,
         }
     }
 }
+
+/// UIScrollView's rubber band: the shown stretch is `range * (1 - 1 / (x * RUBBER / range + 1))`.
+const RUBBER: f64 = 0.55;
+/// How long a stretch takes to relax (the time constant, s).
+const RELAX: f64 = 0.09;
+/// The most a stretch is asked for, in viewports (what a fling past an end can pile up).
+const OVER_MAX: f64 = 2.0;
+/// A fling that reaches an end stretches it by what that frame's step could not move, times this
+/// (Android's EdgeEffect.onAbsorb: the stretch follows the speed it arrived at), at most half a viewport.
+const FLING_ABSORB: f64 = 3.0;
+const FLING_ABSORB_MAX: f64 = 0.5;
 
 /// See the module docs.
 pub struct ListView {
@@ -120,6 +140,14 @@ pub struct ListView {
     pub(crate) samples: Vec<(u64, f64)>,
     /// Smooth-scroll distance still to go, px.
     pub(crate) pending: f64,
+    /// Scrolling since the last layout, to be walked exactly there (see `relative.rs`).
+    pub(crate) rel: Option<relative::Relative>,
+    /// Scrolling asked for past an end that is still stretched, px (+: past the end, -: past the top).
+    pub(crate) over: f64,
+    /// A finger is on the content: the stretch stays until it lifts.
+    pub(crate) held: bool,
+    /// A fling reached an end and gave its momentum to the stretch: the rest of it is dropped.
+    pub(crate) absorbed: bool,
     /// Recent scroll speed, px per frame (decays): above a few screens per frame the user is flinging.
     pub(crate) fling: f64,
     pub(crate) last_dir: i8,
@@ -147,6 +175,10 @@ impl ListView {
             updates: Vec::new(),
             samples: Vec::new(),
             pending: 0.0,
+            rel: None,
+            over: 0.0,
+            held: false,
+            absorbed: false,
             fling: 0.0,
             last_dir: 1,
             frames: 0,
@@ -170,6 +202,11 @@ impl ListView {
             v.scroll_to_end();
         }
         Ok(v)
+    }
+
+    #[must_use]
+    pub const fn options(&self) -> &Options {
+        &self.opts
     }
 
     #[must_use]
@@ -238,16 +275,96 @@ impl ListView {
 
     /// Scroll by `dy` px (positive: towards the end). NaN is ignored.
     pub fn scroll_by(&mut self, dy: f64) {
+        self.scroll_edge(dy);
+    }
+
+    /// Scrolls by `dy` px and returns how much of it the ends refused (positive past the end).
+    fn scroll_edge(&mut self, dy: f64) -> f64 {
         if !dy.is_finite() || dy == 0.0 {
-            return;
+            return 0.0;
         }
         self.goal = None;
         self.last_dir = if dy > 0.0 { 1 } else { -1 };
         self.fling = self.fling.mul_add(0.85, dy.abs());
         let (top, total) = self.scroll_extent();
-        let target = (top + dy).clamp(0.0, total);
+        let max_top = (total - f64::from(self.height)).max(0.0);
+        let wanted = top + dy;
+        let target = wanted.clamp(0.0, total);
+        self.note_move(target - top);
         // stay exactly at the end when the end was reached (no estimate wobble)
         self.set_scroll_units(px_to_units(target));
+        wanted - wanted.clamp(0.0, max_top)
+    }
+
+    /// A finger moves the content by `dy` px (positive: towards the end): 1:1, and past an end it
+    /// stretches when [`Options::overscroll`] is on. The stretch stays until [`ListView::release`].
+    pub fn drag(&mut self, dy: f64) {
+        self.held = true;
+        self.absorbed = false;
+        let refused = self.gesture(dy);
+        self.stretch_by(refused, 1.0);
+    }
+
+    /// The content coasts on after the finger by `dy` px. At an end its momentum is spent once, on a
+    /// stretch that follows the speed it arrived at, and the rest of the fling is dropped (it does not
+    /// hold the band out while it runs down): the band springs back at once.
+    pub fn fling(&mut self, dy: f64) {
+        self.held = false;
+        if self.absorbed {
+            return;
+        }
+        let refused = self.gesture(dy);
+        if refused != 0.0 && self.opts.overscroll {
+            self.absorbed = true;
+            let most = f64::from(self.height) * FLING_ABSORB_MAX;
+            self.over = (self.over + refused * FLING_ABSORB).clamp(-most, most);
+        }
+    }
+
+    /// The finger lifted: a stretch springs back ([`ListView::tick`]).
+    pub fn release(&mut self) {
+        self.held = false;
+    }
+
+    /// Moves the content by `dy`: first back out of a stretch, as far as the finger went on screen
+    /// (the content under it follows 1:1 even though the band is not linear), then through the
+    /// list. Returns what the ends refused (positive past the end).
+    fn gesture(&mut self, dy: f64) -> f64 {
+        let mut dy = dy;
+        if self.over * dy < 0.0 {
+            let shown = self.shown(self.over.abs());
+            let back = dy.abs().min(shown);
+            self.over = self.raw_of(shown - back).copysign(self.over);
+            dy -= back.copysign(dy);
+        }
+        self.scroll_edge(dy)
+    }
+
+    /// A finger's pull that the ends refused, `weight` of it added to the stretch.
+    fn stretch_by(&mut self, refused: f64, weight: f64) {
+        if self.opts.overscroll && refused != 0.0 {
+            let max = f64::from(self.height) * OVER_MAX;
+            self.over = (self.over + refused * weight).clamp(-max, max);
+        }
+    }
+
+    /// What a pull of `raw` px shows, px: UIScrollView's curve, stiffer the further it goes.
+    fn shown(&self, raw: f64) -> f64 {
+        let range = f64::from(self.height).max(1.0);
+        range * (1.0 - 1.0 / (raw * RUBBER / range + 1.0))
+    }
+
+    /// The pull that shows `shown` px ([`ListView::shown`] the other way).
+    fn raw_of(&self, shown: f64) -> f64 {
+        let range = f64::from(self.height).max(1.0);
+        range / RUBBER * (1.0 / (1.0 - (shown / range).min(0.999)) - 1.0)
+    }
+
+    /// How far the content is shifted by a stretch, px: positive moves it down (stretched past the
+    /// top), negative up (past the end).
+    #[must_use]
+    pub fn stretch(&self) -> f64 {
+        -self.shown(self.over.abs()).copysign(self.over)
     }
 
     /// Scroll to `offset` px from the top of the content (TanStack
@@ -258,6 +375,7 @@ impl ListView {
             return;
         }
         self.goal = None;
+        self.rel = None;
         self.pending = 0.0;
         self.set_scroll_units(px_to_units(offset.clamp(0.0, self.scroll_extent().1)));
     }
@@ -276,6 +394,7 @@ impl ListView {
             return;
         }
         self.goal = None;
+        self.rel = None;
         let max = self.index.total().saturating_sub(self.view_units());
         self.set_scroll_units((max as f64 * f.clamp(0.0, 1.0)) as u64);
     }
@@ -283,6 +402,7 @@ impl ListView {
     /// The end of the list, at the bottom of the viewport.
     pub fn scroll_to_end(&mut self) {
         self.goal = None;
+        self.rel = None;
         self.set_scroll_units(u64::MAX / 2);
         if !self.opts.stick_to_bottom {
             self.pos = self.bottom_anchor();
@@ -298,6 +418,7 @@ impl ListView {
         }
         let item = item.min(self.index.len() - 1);
         self.pending = 0.0;
+        self.rel = None;
         self.goal = Some((item, align));
         self.pos = self.goal_pos(item, align);
     }
@@ -359,6 +480,7 @@ impl ListView {
     /// A wheel or trackpad delta. Precise deltas (a trackpad) apply at once;
     /// notched wheel deltas ease in over a few frames ([`ListView::tick`]).
     pub fn wheel(&mut self, dy: f64, precise: bool) {
+        self.absorbed = false;
         if precise {
             self.scroll_by(dy);
         } else if dy.is_finite() {
@@ -369,8 +491,17 @@ impl ListView {
     /// Advance the smooth scroll by `dt` seconds. Returns whether another
     /// frame is needed (false when idle: no frames while nothing moves).
     pub fn tick(&mut self, dt: f64) -> bool {
+        let mut moving = false;
+        if self.over != 0.0 && !self.held {
+            // the band relaxes: critically damped, so it settles without swinging back
+            self.over *= (-dt.max(0.0) / RELAX).exp();
+            if self.over.abs() < 0.25 {
+                self.over = 0.0;
+            }
+            moving = true;
+        }
         if self.pending == 0.0 {
-            return self.more_to_measure;
+            return moving || self.more_to_measure;
         }
         let step = if self.pending.abs() < 0.5 { self.pending } else { self.pending * (1.0 - (-dt.max(0.0) / 0.075).exp()) };
         self.pending -= step;

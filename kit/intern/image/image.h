@@ -8,7 +8,8 @@
  *                (IMB_load_image_from_memory): probe, decode at the size
  *                drawn, scale, crop.
  *  format_*.c    one decoder per format (Wuffs, libjpeg-turbo, libwebp,
- *                Radiance HDR, PNM, nanosvg).
+ *                Radiance HDR, PNM, nanosvg, libtiff, OpenEXR, libavif + dav1d,
+ *                libjxl; HEIC through the OS, format_heic*.c).
  *  cache.c       decoded images by (source, size, fit), within a memory
  *                budget (Blender's moviecache / TextCache generations).
  *  loader.c      the worker pool: requests by priority, cancellation,
@@ -44,6 +45,7 @@ struct BKImBuf {
   int format;     /* BUI_PIXMAP_*: ARGB, or NV12 (one frame; `rect` holds its planes) */
   uint64_t stream; /* frames of one playing movie share it (one GPU texture); 0 else */
   int src_x, src_y; /* intrinsic size of the source (after EXIF orientation) */
+  int src_flags;    /* the source's BK_IMAGE_INFO_* (a vector, a size it lacks) */
   float crop[4];    /* the part to draw (x, y, w, h in these pixels): the visible
                      * region of a fitted decode, sub-pixel exact; else all */
   int loops;      /* animation repeat count, 0 = forever */
@@ -84,6 +86,17 @@ void imb_rekey(BKImBuf *ib);
 /* Straight RGBA (8 bits, any stride) <-> premultiplied 0xAARRGGBB rows. */
 void imb_premultiply_rgba(uint32_t *dst, const uint8_t *rgba, int n);
 void imb_unpremultiply(uint8_t *rgba, const uint32_t *src, int n);
+/* The Orientation tag (0x0112, 1..8; 1 when absent) of IFD0 of a TIFF structure: a TIFF file,
+ * or the EXIF block of a JPEG. */
+int imb_tiff_orientation(const uint8_t *tiff, size_t size);
+/* Scene-linear light shown the way Blender's "Standard" view transform shows it: clipped to
+ * 0..1 and sRGB-encoded, through a table of IMB_SRGB_STEPS steps (Radiance HDR, OpenEXR). */
+#define IMB_SRGB_STEPS 4096
+void imb_srgb_table(uint8_t lut[IMB_SRGB_STEPS + 1]);
+static inline uint32_t imb_srgb(const uint8_t *lut, float v)
+{
+  return lut[v >= 1.0f ? IMB_SRGB_STEPS : v > 0.0f ? (int)(v * (float)IMB_SRGB_STEPS) : 0];
+}
 /* Rows y0 .. y0 + rows of a frame as straight RGBA (any format). */
 bool imb_rgba_rows(const BKImBuf *ib, int frame, int y0, int rows, uint8_t *dst);
 
@@ -109,15 +122,16 @@ typedef struct BKImPlan {
   float src[4];
 } BKImPlan;
 /* What a box `want` decodes: the whole image (no crop) at its scale in that box, rounded up to a
- * step of 2^(1/4) and never above intrinsic. False when nothing of it shows. Any thread. */
+ * step of 2^(1/4) and never above intrinsic; a vector image at each axis' own scale, above too.
+ * False when nothing of it shows. Any thread. */
 bool imb_whole_fit(const BKImageInfo *info, const BKImageFit *want, BKImageFit *r_whole);
 /* A cache key and request target, BK_FIT_WHOLE + want's fit: the whole decode for the box, while
  * the image's size is not known. The worker reads the size from the file it decodes and works
  * the target out (imb_whole_fit); the UI thread never reads the file for it. */
 enum { BK_FIT_WHOLE = 0x100 };
 
-/* False when nothing of the image shows. */
-bool imb_plan(const BKImageFit *t, int iw, int ih, int orient, BKImPlan *r_plan);
+/* False when nothing of the image shows. `vector`: decoded at the size drawn, also above its own. */
+bool imb_plan(const BKImageFit *t, int iw, int ih, int orient, bool vector, BKImPlan *r_plan);
 /* Scale (to fw x fh), orient and crop a decode (freed) to the plan. */
 BKImBuf *imb_finish(BKImBuf *ib, const BKImPlan *p);
 
@@ -133,6 +147,9 @@ typedef struct BKImFileType {
    * decode smaller for free, JPEG DCT scaling and SVG, use it). The result
    * is in the file's orientation; src_x/src_y are set by the caller. */
   BKImBuf *(*load)(const uint8_t *mem, size_t size, int want_w, int want_h);
+  /* The EXIF orientation (1..8) the decode is shown with, which imb_load applies (the header's
+   * size is already the shown one); NULL: the decoder orients itself, or the format has none. */
+  int (*orientation)(const uint8_t *mem, size_t size);
 } BKImFileType;
 
 extern const BKImFileType BK_IMB_FILE_TYPES[];
@@ -145,7 +162,7 @@ BKImBuf *imb_load(const uint8_t *mem, size_t size, const BKImageFit *target);
 uint8_t *imb_read_file(const char *path, size_t max, size_t *r_size);
 
 /* -- anim.c: animated media, one frame at a time --------------------------------------
- * GIF, animated WebP and video share one codec interface (Blender's anim /
+ * GIF, animated WebP, AVIF and JPEG XL, and video share one codec interface (Blender's anim /
  * MovieReader: open, next frame, seek, close) and one player (play.c). */
 
 typedef struct BKImAnimInfo {
@@ -197,7 +214,7 @@ typedef struct BKImAnimCodec {
    * tell; BK_sound_duration is then 0). Optional, unlike the hooks above. */
   double (*audio_duration)(void *state);
 } BKImAnimCodec;
-extern const BKImAnimCodec imb_gif_codec, imb_webp_codec;
+extern const BKImAnimCodec imb_gif_codec, imb_webp_codec, imb_avif_codec, imb_jxl_codec;
 /* The audio readers' block buffer: `*buf` (`*cap` floats) grown to hold `floats` (its old
  * contents are not kept); returns it. A block is then `floats / channels` frames; a block of
  * none is skipped by the reader, not taken for the end. */
@@ -212,7 +229,7 @@ extern const BKImAnimCodec *const imb_movie_codecs[];
 /* The first bytes look like a movie container (MP4/MOV, WebM/MKV, AVI, ASF,
  * Ogg, MPEG-PS/TS, FLV). */
 bool imb_is_a_movie(const uint8_t *head, size_t size);
-/* The in-memory codec for an animation (GIF always, animated WebP). */
+/* The in-memory codec for an animation (GIF always, animated WebP, AVIF, JPEG XL). */
 const BKImAnimCodec *imb_anim_codec(const uint8_t *mem, size_t size);
 
 typedef struct BKImAnim BKImAnim;
@@ -266,6 +283,35 @@ BKImBuf *imb_load_webp(const uint8_t *mem, size_t size, int want_w, int want_h);
 bool imb_is_a_hdr(const uint8_t *mem, size_t size);
 bool imb_header_hdr(const uint8_t *mem, size_t size, BKImageInfo *r_info);
 BKImBuf *imb_load_hdr(const uint8_t *mem, size_t size, int want_w, int want_h);
+
+bool imb_is_a_tiff(const uint8_t *mem, size_t size);
+bool imb_header_tiff(const uint8_t *mem, size_t size, BKImageInfo *r_info);
+BKImBuf *imb_load_tiff(const uint8_t *mem, size_t size, int want_w, int want_h);
+
+bool imb_is_a_exr(const uint8_t *mem, size_t size);
+bool imb_header_exr(const uint8_t *mem, size_t size, BKImageInfo *r_info);
+BKImBuf *imb_load_exr(const uint8_t *mem, size_t size, int want_w, int want_h);
+
+bool imb_is_a_avif(const uint8_t *mem, size_t size);
+bool imb_avif_animated(const uint8_t *mem, size_t size); /* an image sequence ('avis') */
+bool imb_header_avif(const uint8_t *mem, size_t size, BKImageInfo *r_info);
+BKImBuf *imb_load_avif(const uint8_t *mem, size_t size, int want_w, int want_h);
+int imb_avif_orientation(const uint8_t *mem, size_t size); /* irot / imir */
+
+bool imb_is_a_jxl(const uint8_t *mem, size_t size);
+bool imb_jxl_animated(const uint8_t *mem, size_t size);
+bool imb_header_jxl(const uint8_t *mem, size_t size, BKImageInfo *r_info);
+BKImBuf *imb_load_jxl(const uint8_t *mem, size_t size, int want_w, int want_h);
+
+/* HEIC / HEIF (format_heic.c): the OS decoder, loaded at run time. is_a is false when this
+ * system has none, so the format reads as missing, like a format the build is without. The
+ * backend (heic_wic.c, heic_imageio.c, heic_libheif.c) has the rest. */
+bool imb_is_a_heic(const uint8_t *mem, size_t size);
+bool imb_heic_supported(void); /* loads the OS decoder once; any thread */
+bool imb_header_heic(const uint8_t *mem, size_t size, BKImageInfo *r_info);
+BKImBuf *imb_load_heic(const uint8_t *mem, size_t size, int want_w, int want_h);
+/* The ISO-BMFF 'ftyp' brands (AVIF, HEIC): `brand` is the major brand or a compatible one. */
+bool imb_isobmff_brand(const uint8_t *mem, size_t size, const char *const *brands);
 
 bool imb_is_a_svg(const uint8_t *mem, size_t size);
 /* Blender's icons (kit_draw.c) and SVG files: rasterized within want_w x want_h. */

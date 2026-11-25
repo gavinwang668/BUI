@@ -19,6 +19,8 @@ struct BuiRaster;
 enum BUI_FONT_BOLD = 1 << 0;
 enum BUI_FONT_ITALIC = 1 << 1;
 enum BUI_FONT_UNDERLINE = 1 << 2;
+enum BUI_FONT_HAN_JA = 1 << 4;
+enum BUI_FONT_HAN_KO = 1 << 5;
 
 enum BUI_CORNER_TOP_LEFT = 1 << 0;
 enum BUI_CORNER_TOP_RIGHT = 1 << 1;

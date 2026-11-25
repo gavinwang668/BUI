@@ -1,0 +1,18 @@
+Project: OpenEXR: OpenEXRCore (the C library) and the libdeflate it ships
+URL: https://github.com/AcademySoftwareFoundation/openexr
+Version: 3.5.5 (libdeflate 1.26, OpenEXR's external/deflate)
+License: BSD-3-Clause (see LICENSE.md; PATENTS: DreamWorks' patent grant for DWA);
+         libdeflate: MIT (external/deflate/COPYING)
+Used for: OpenEXR decoding in kit/intern/image (format_exr.c). Blender's imbuf reads EXR
+          through the same project's C++ library (imbuf/intern/openexr/openexr_api.cpp).
+
+Copied unmodified: src/lib/OpenEXRCore (every .c and .h but internal_zstd*.c and
+internal_ht*.cpp; internal_ht_quality.h stays, base.c includes it) and external/deflate (lib/,
+libdeflate.h, common_defs.h, COPYING), which compression.c includes by relative path. Every
+compression decodes but zstd (it needs the vendored zstd) and HTJ2K (it needs OpenJPH, C++).
+Imath is not needed: OpenEXRCore's own half conversion is used.
+
+BUI files (bui/):
+  OpenEXRConfig.h, OpenEXRConfigInternal.h, IlmThreadConfig.h, Imath/ImathConfig.h
+                configuration (CMake generates these upstream)
+  exr_bui.c     zstd and HTJ2K entry points, failing with EXR_ERR_FEATURE_NOT_IMPLEMENTED

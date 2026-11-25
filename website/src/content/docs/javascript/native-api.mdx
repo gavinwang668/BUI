@@ -149,6 +149,19 @@ win.requestAnimationFrame(tick)
 - **`el.getBoundingClientRect()`** and **`win.screenshot()`** return promises, because the answer comes from the UI thread.
 - **Changes are sent once per tick.** `win.flush()` sends them right away, if you ever need to.
 
+## Tray, notifications and the taskbar
+
+The desktop shell has Electron's names: `app.createTray({ icon, tooltip, menu })` (a `Tray` with
+`setContextMenu`, `setToolTip`, `setImage`, `on('click')`, `destroy`), `app.notify({ title, body,
+onClick })`, `win.setProgressBar(0.4, { mode })` and `app.addRecentDocument(path)`. See
+[Desktop shell](/docs/concepts/desktop-shell) for each platform.
+
+```js
+const tray = await app.createTray({ icon: 'BLENDER', tooltip: 'My app' })
+tray?.setContextMenu([{ label: 'Quit', click: () => app.quit() }])
+win.setProgressBar(0.5)
+```
+
 ## Testing without a window
 
 `new App({ headless: true })` renders off-screen. Combine it with `win.click(x, y)` and `win.screenshot()` to test a UI in CI:

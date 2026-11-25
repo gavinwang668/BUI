@@ -25,6 +25,7 @@ test('the GPU and the file browser need the full runtime', () => {
 })
 
 test('explicit features are checked against the table', () => {
-  assert.throws(() => pickRuntime(new Set(['avif'])), /unknown feature "avif"/)
+  assert.throws(() => pickRuntime(new Set(['jpeg2000'])), /unknown feature "jpeg2000"/)
   assert.strictEqual(pickRuntime(new Set(['png', 'video'])).name, 'media')
+  assert.strictEqual(pickRuntime(new Set(['avif', 'heic'])).name, 'media')
 })

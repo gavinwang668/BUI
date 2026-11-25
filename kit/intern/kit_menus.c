@@ -31,7 +31,7 @@ static int u(void)
 /** \name Menu specs (deep copies with retained refs)
  * \{ */
 
-static bool is_sep(const BKMenuSpec *s)
+bool bk_menuspec_is_sep(const BKMenuSpec *s)
 {
   return !s->text || strcmp(s->text, "-") == 0;
 }
@@ -182,7 +182,7 @@ static void menu_row_geom(BKNode *n, int row, int *r_y, int *r_h)
   BKMenuSpec *items = menu_items(n, &count);
   int y = menu_pad() + menu_title_h(n);
   for (int i = 0; i < count; i++) {
-    const int h = is_sep(&items[i]) ? menu_sep_h() : menu_row_h(n);
+    const int h = bk_menuspec_is_sep(&items[i]) ? menu_sep_h() : menu_row_h(n);
     if (i == row) {
       *r_y = n->y + y;
       *r_h = h;
@@ -202,7 +202,7 @@ static int menu_row_at(BKNode *n, int y)
     int ry, rh;
     menu_row_geom(n, i, &ry, &rh);
     if (y >= ry && y < ry + rh) {
-      return (!is_sep(&items[i]) && items[i].enabled) ? i : -1;
+      return (!bk_menuspec_is_sep(&items[i]) && items[i].enabled) ? i : -1;
     }
   }
   return -1;
@@ -211,7 +211,7 @@ static int menu_row_at(BKNode *n, int y)
 static bool menu_has_icons(BKMenuSpec *items, int count)
 {
   for (int i = 0; i < count; i++) {
-    if (!is_sep(&items[i]) && (items[i].icon || items[i].checked >= 0)) {
+    if (!bk_menuspec_is_sep(&items[i]) && (items[i].icon || items[i].checked >= 0)) {
       return true;
     }
   }
@@ -252,7 +252,7 @@ static void html_menu_measure(BKNode *n, int *rw, int *rh)
   float w = 0;
   int h = 0;
   for (int i = 0; i < count; i++) {
-    if (is_sep(&items[i])) {
+    if (bk_menuspec_is_sep(&items[i])) {
       h += menu_sep_h();
       continue;
     }
@@ -283,7 +283,7 @@ static void html_menu_draw(BKNode *n)
     menu_row_geom(n, i, &ry, &rh);
     const BKMenuSpec *it = &items[i];
     const BKRect row = bk_rect(n->x + p, ry, n->w - 2 * p, rh);
-    if (is_sep(it)) { /* <hr> in a select */
+    if (bk_menuspec_is_sep(it)) { /* <hr> in a select */
       bk_argb(0xFFC0C0C0u, c);
       bk_fill_f(row.xmin + bk_hpx(4.0f), ry + rh / 2, bk_rw(&row) - bk_hpx(8.0f),
                 BK_MAX(1.0f, floorf(bk_hpx(1.0f))), c);
@@ -317,7 +317,7 @@ static int html_menu_typeahead(BKNode *n, BKEvent *e)
   for (int k = 1; k <= count; k++) {
     const int i = ((n->hot < 0 ? -1 : n->hot) + k + count) % count;
     const BKMenuSpec *it = &items[i];
-    if (!is_sep(it) && it->enabled && tolower((unsigned char)it->text[0]) == ch) {
+    if (!bk_menuspec_is_sep(it) && it->enabled && tolower((unsigned char)it->text[0]) == ch) {
       n->hot = i;
       bk_invalidate(n);
       break;
@@ -339,7 +339,7 @@ static void menu_measure(BKNode *n, int *rw, int *rh)
   bool sub = false;
   int h = 0;
   for (int i = 0; i < count; i++) {
-    if (is_sep(&items[i])) {
+    if (bk_menuspec_is_sep(&items[i])) {
       h += menu_sep_h();
       continue;
     }
@@ -404,7 +404,7 @@ static void menu_pick(BKNode *n, int row)
 {
   int count;
   BKMenuSpec *items = menu_items(n, &count);
-  if (row < 0 || row >= count || is_sep(&items[row]) || !items[row].enabled) {
+  if (row < 0 || row >= count || bk_menuspec_is_sep(&items[row]) || !items[row].enabled) {
     return;
   }
   if (items[row].nsub) {
@@ -448,7 +448,7 @@ static void menu_filter_walk(MenuData *m, const BKMenuSpec *items, int count, co
 {
   for (int i = 0; i < count; i++) {
     const BKMenuSpec *it = &items[i];
-    if (is_sep(it)) {
+    if (bk_menuspec_is_sep(it)) {
       continue;
     }
     char full[512];
@@ -571,7 +571,7 @@ static void menu_step(BKNode *n, int d)
   int i = n->hot;
   for (int k = 0; k < count; k++) {
     i = i >= 0 ? (i + d + count) % count : (d > 0 ? 0 : count - 1);
-    if (!is_sep(&items[i]) && items[i].enabled) {
+    if (!bk_menuspec_is_sep(&items[i]) && items[i].enabled) {
       n->hot = i;
       bk_invalidate(n);
       return;
@@ -695,7 +695,7 @@ static void menu_draw(BKNode *n)
     menu_row_geom(n, i, &ry, &rh);
     BKMenuSpec *it = &items[i];
     BKRect row = bk_rect(n->x + p, ry, n->w - 2 * p, rh);
-    if (is_sep(it)) {
+    if (bk_menuspec_is_sep(it)) {
       float c[4];
       bk_rgba_alpha(mi->text, 0.15f, c);
       bk_fill_f(row.xmin + bk_pad(), ry + rh / 2, bk_rw(&row) - 2 * bk_pad(), 1, c);
@@ -794,7 +794,7 @@ static bool menu_a11y_item(BKNode *n, int i, BKA11yNode *r)
     return false;
   }
   const BKMenuSpec *it = &items[i];
-  if (is_sep(it)) {
+  if (bk_menuspec_is_sep(it)) {
     return true; /* generic: not shown */
   }
   r->role = it->checked >= 0 ? BK_ROLE_MENU_ITEM_CHECKBOX : BK_ROLE_MENU_ITEM;
@@ -860,7 +860,7 @@ BKNode *bk_menu_new(const BKMenuSpec *items, int n, const char *title, const cha
   menu->hot = -1;
   if (current) {
     for (int i = 0; i < n; i++) {
-      if (!is_sep(&items[i]) && strcmp(items[i].text, current) == 0) {
+      if (!bk_menuspec_is_sep(&items[i]) && strcmp(items[i].text, current) == 0) {
         menu->hot = i;
       }
     }

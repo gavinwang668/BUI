@@ -42,7 +42,7 @@ Python, Qt, tkinter and D are not available on Android: each needs its
 runtime on the device.
 
 The Rust demo (`platform/android/rust`) has three tabs: the widgets, a list of **10 000 000 rows** and a
-chat of **100 000 messages** (`blenderui::vlist`: only the visible rows exist, the row text is computed
+chat of **a million messages** (`blenderui::vlist`: only the visible rows exist, the row text is computed
 when it is fetched, a frame costs O(visible rows)). The emulator runs it at about 75 MB.
 
 For Rust the staticlib carries its own copy of the kit (`blenderui-sys` builds it for the target), so

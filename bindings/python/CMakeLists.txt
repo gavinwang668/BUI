@@ -11,7 +11,7 @@ endif()
 message(STATUS "BUI: building buipy Python bindings for Python ${Python3_VERSION}")
 
 Python3_add_library(buipy MODULE WITH_SOABI src/buipy_module.c src/buipy_kit.c src/buipy_video.c
-                   src/buipy_anim.c)
+                   src/buipy_anim.c src/buipy_shell.c)
 target_link_libraries(buipy PRIVATE bui_api bui_gpu bui_kit)
 
 # ($<0:> keeps multi-config generators from adding a Release/ subdirectory.)
@@ -164,4 +164,10 @@ if(BUI_BUILD_TESTS)
     COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_filebrowser.py
   )
   set_tests_properties(buipy_filebrowser PROPERTIES ENVIRONMENT "PYTHONPATH=${BUIPY_TEST_PYTHONPATH}")
+  # the desktop shell: a tray icon and its menu, notifications, recent files (what the system has)
+  add_test(
+    NAME buipy_shell
+    COMMAND ${Python3_EXECUTABLE} ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_shell.py
+  )
+  set_tests_properties(buipy_shell PROPERTIES ENVIRONMENT "PYTHONPATH=${BUIPY_TEST_PYTHONPATH}")
 endif()

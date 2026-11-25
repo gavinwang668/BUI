@@ -94,6 +94,7 @@ static BKImBuf *imb_alloc_like(const BKImBuf *ib, int w, int h)
     out->ftype = ib->ftype;
     out->src_x = ib->src_x;
     out->src_y = ib->src_y;
+    out->src_flags = ib->src_flags;
     out->loops = ib->loops;
     if (ib->delays && out->delays) { /* frames may have shrunk to 1 (truncated) */
       memcpy(out->delays, ib->delays, sizeof(int) * (size_t)ib->frames);
@@ -277,6 +278,41 @@ BKImBuf *imb_crop(BKImBuf *ib, int x, int y, int w, int h)
   return out;
 }
 
+static unsigned rd16(const uint8_t *p, bool le)
+{
+  return le ? (unsigned)(p[0] | p[1] << 8) : (unsigned)(p[0] << 8 | p[1]);
+}
+
+static uint32_t rd32(const uint8_t *p, bool le)
+{
+  return le ? (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24 :
+              (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | (uint32_t)p[3];
+}
+
+int imb_tiff_orientation(const uint8_t *tiff, size_t n)
+{
+  if (n < 8 || !((tiff[0] == 'I' && tiff[1] == 'I') || (tiff[0] == 'M' && tiff[1] == 'M'))) {
+    return 1;
+  }
+  const bool le = tiff[0] == 'I';
+  const uint32_t ifd = rd32(tiff + 4, le);
+  if (ifd > n - 2) {
+    return 1;
+  }
+  const unsigned count = rd16(tiff + ifd, le);
+  for (unsigned i = 0; i < count; i++) {
+    const size_t e = ifd + 2 + (size_t)i * 12;
+    if (e + 12 > n) {
+      break;
+    }
+    if (rd16(tiff + e, le) == 0x0112) {
+      const unsigned v = rd16(tiff + e + 8, le);
+      return v >= 1 && v <= 8 ? (int)v : 1;
+    }
+  }
+  return 1;
+}
+
 BKImBuf *imb_orient(BKImBuf *ib, int o)
 {
   if (o < 2 || o > 8) {
@@ -354,6 +390,22 @@ void imb_unpremultiply(uint8_t *rgba, const uint32_t *src, int n)
     rgba[1] = (uint8_t)g;
     rgba[2] = (uint8_t)b;
     rgba[3] = (uint8_t)a;
+  }
+}
+
+/** \} */
+
+/* -------------------------------------------------------------------- */
+/** \name Scene-linear light (Blender's "Standard" view transform)
+ * \{ */
+
+void imb_srgb_table(uint8_t lut[IMB_SRGB_STEPS + 1])
+{
+  /* built per decode (~4k powf, nothing next to the pixels) */
+  for (int i = 0; i <= IMB_SRGB_STEPS; i++) {
+    const float v = (float)i / (float)IMB_SRGB_STEPS;
+    const float s = v <= 0.0031308f ? v * 12.92f : 1.055f * powf(v, 1.0f / 2.4f) - 0.055f;
+    lut[i] = (uint8_t)(s * 255.0f + 0.5f);
   }
 }
 

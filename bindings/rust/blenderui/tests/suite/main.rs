@@ -48,6 +48,7 @@ mod screen;
 mod scroll_into_view;
 mod scroll_replace;
 mod selection;
+mod shell;
 mod sound;
 mod struct_props;
 mod table;
