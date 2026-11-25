@@ -1,0 +1,43 @@
+---
+title: BUI for C#
+sidebarLabel: Overview
+description: Blender's widgets from .NET. C# components (Node, Button, Context, Window) over every BK_* function generated from BUI_kit.h.
+section: C#
+order: 10
+languages: ["csharp"]
+sources: ["bindings/csharp/README.md", "bindings/csharp/CMakeLists.txt", "bindings/csharp/gen/generate.rsp", "bindings/csharp/src/Bui/Node.cs", "bindings/csharp/src/Bui/Context.cs", "bindings/csharp/src/Bui/Window.cs", "bindings/csharp/tests/Bui.Tests/Program.cs"]
+---
+
+**`bindings/csharp` gives .NET programs Blender's widget drawing, layout and interaction rules.** It has two layers: every `BK_*` function of `BUI_kit.h`, generated with no marshalling stubs; and C# components (`Node`, `Button`, `Context`, `Window`) on top.
+
+It is a first slice. It runs on Linux, macOS and Windows, and installs from NuGet: `dotnet add package BlenderUI`, with the native kit for Linux x64, macOS arm64 and x64, and Windows x64 in the package.
+
+## Build it
+
+```sh
+cmake -S . -B build -DBUI_BUILD_CSHARP_BINDINGS=ON
+cmake --build build --target bui_kit_shared
+cd bindings/csharp
+dotnet run --project tests/Bui.Tests
+dotnet run --project examples/Hello
+```
+
+To use a local build in your own project, see [Use BUI in your app](../in-your-app/).
+
+## Components
+
+```csharp
+using Bui;
+
+var root = new Frame();
+var button = new Button("Press") { Geometry = GeometryManager.Pack };
+button.Click += (_, _) => System.Console.WriteLine("pressed");
+root.Add(button);
+
+using var context = new Context(root);
+using var window = new Window(context, "BUI", 320, 120);
+window.Show();
+Window.Run();
+```
+
+`new Node("slider")` makes any kit type, and `Set` / `GetNumber` / `GetString` reach every property by name. A parent keeps its children's wrappers alive, so handlers work without a reference of your own. The kit is a UI-thread API, and a handler's exception is thrown from the call that caused it.

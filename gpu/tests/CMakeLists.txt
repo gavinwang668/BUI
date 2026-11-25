@@ -19,6 +19,10 @@ if(NOT MSVC)
 endif()
 add_test(NAME gpu_effect COMMAND bui_gpu_effect)
 
+add_executable(bui_gpu_choice test_gpu_choice.c)
+target_link_libraries(bui_gpu_choice PRIVATE bui_gpu)
+add_test(NAME gpu_choice COMMAND bui_gpu_choice)
+
 # Windows: the same GPU tests on Direct3D 12 (Direct3D 11 is the default). test_gpu_api.h fails a
 # run whose device fell back to Direct3D 11.
 if(WIN32)
