@@ -254,11 +254,33 @@ impl GpuApi {
     }
 }
 
+/// Which GPU renders on a machine with two, as a hybrid laptop's integrated and discrete ones
+/// (Windows; elsewhere the GPU is the display's and this is ignored).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub enum GpuAdapter {
+    /// The display's GPU, the default: the integrated one on most hybrid laptops, which costs the
+    /// least power and needs no copy of each frame between GPUs.
+    Default,
+    /// The GPU Windows picks for high performance: the discrete one (and the one vendor profilers
+    /// such as NVIDIA Nsight see).
+    HighPerformance,
+}
+
+impl GpuAdapter {
+    const fn raw(self) -> c_int {
+        match self {
+            Self::Default => sys::BUI_GPU_ADAPTER_DEFAULT,
+            Self::HighPerformance => sys::BUI_GPU_ADAPTER_HIGH_PERFORMANCE,
+        }
+    }
+}
+
 /// The application entry point (gpui's `Application`).
 pub struct Application {
     headless: bool,
     gpu: Option<bool>,
     gpu_api: Option<GpuApi>,
+    gpu_adapter: Option<GpuAdapter>,
     slug: Option<bool>,
     keep_alive: bool,
     theme: Option<String>,
@@ -273,7 +295,7 @@ impl Default for Application {
 impl Application {
     /// Native windows.
     pub fn new() -> Application {
-        Application { headless: false, gpu: None, gpu_api: None, slug: None, keep_alive: false, theme: None }
+        Application { headless: false, gpu: None, gpu_api: None, gpu_adapter: None, slug: None, keep_alive: false, theme: None }
     }
 
     /// Draw every window on the GPU (Direct3D 11 on Windows, or 12: [`Application::gpu_api`]): the same
@@ -291,6 +313,15 @@ impl Application {
     /// default baked into the executable (`bui` CLI) applies, then Direct3D 11.
     pub fn gpu_api(mut self, api: GpuApi) -> Application {
         self.gpu_api = Some(api);
+        self
+    }
+
+    /// Which GPU the GPU renderer uses on a machine with two (Windows): [`GpuAdapter::Default`],
+    /// the display's (the integrated GPU of most hybrid laptops), or
+    /// [`GpuAdapter::HighPerformance`], the discrete one. The `BUI_GPU_ADAPTER` environment variable
+    /// (`high-performance`/`default`) overrides this.
+    pub fn gpu_adapter(mut self, adapter: GpuAdapter) -> Application {
+        self.gpu_adapter = Some(adapter);
         self
     }
 
@@ -320,7 +351,7 @@ impl Application {
     /// Off-screen windows (tests, screenshots, CI): nothing is shown, the
     /// `simulate_*` and `draw` methods drive it.
     pub fn headless() -> Application {
-        Application { headless: true, gpu: None, gpu_api: None, slug: None, keep_alive: false, theme: None }
+        Application { headless: true, gpu: None, gpu_api: None, gpu_adapter: None, slug: None, keep_alive: false, theme: None }
     }
 
     /// The kit's global settings for this application (renderer, text, theme, off-screen scale).
@@ -331,6 +362,10 @@ impl Application {
         if let Some(api) = self.gpu_api {
             // SAFETY: sets a global choice, read when a device is created.
             unsafe { sys::BUI_gpu_set_api(api.raw()) };
+        }
+        if let Some(adapter) = self.gpu_adapter {
+            // SAFETY: as above.
+            unsafe { sys::BUI_gpu_set_adapter(adapter.raw()) };
         }
         if let Some(on) = self.slug {
             crate::set_slug(on);

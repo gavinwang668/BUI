@@ -294,6 +294,15 @@ static BuiGpuApi gpu_api_name(const char *s, size_t n)
   return s[4] == '1' ? BUI_GPU_API_D3D11 : s[4] == '2' ? BUI_GPU_API_D3D12 : BUI_GPU_API_DEFAULT;
 }
 
+/* An environment variable with a value it doesn't take: said under BUI_GPU_DEBUG, then ignored. */
+static void gpu_env_ignored(const char *name, const char *value, const char *expected)
+{
+  const char *dbg = getenv("BUI_GPU_DEBUG");
+  if (dbg && dbg[0] >= '1' && dbg[0] <= '9') {
+    fprintf(stderr, "bui gpu: %s=%s ignored (expected %s)\n", name, value, expected);
+  }
+}
+
 BuiGpuApi BUI_gpu_api(void)
 {
   const char *env = getenv("BUI_GPU_API");
@@ -302,10 +311,7 @@ BuiGpuApi BUI_gpu_api(void)
     if (api != BUI_GPU_API_DEFAULT) {
       return api;
     }
-    const char *dbg = getenv("BUI_GPU_DEBUG");
-    if (dbg && dbg[0] >= '1' && dbg[0] <= '9') {
-      fprintf(stderr, "bui gpu: BUI_GPU_API=%s ignored (expected d3d11 or d3d12)\n", env);
-    }
+    gpu_env_ignored("BUI_GPU_API", env, "d3d11 or d3d12");
   }
   if (g_gpu_api != BUI_GPU_API_DEFAULT) {
     return g_gpu_api;
@@ -319,6 +325,30 @@ BuiGpuApi BUI_gpu_api(void)
   const size_t eq = sizeof("BUIGPUAPI=") - 1;
   const BuiGpuApi api = n > eq ? gpu_api_name(baked + eq, n - eq) : BUI_GPU_API_DEFAULT;
   return api != BUI_GPU_API_DEFAULT ? api : BUI_GPU_API_D3D11;
+}
+
+static BuiGpuAdapter g_gpu_adapter = BUI_GPU_ADAPTER_DEFAULT;
+
+void BUI_gpu_set_adapter(BuiGpuAdapter adapter)
+{
+  if (adapter == BUI_GPU_ADAPTER_DEFAULT || adapter == BUI_GPU_ADAPTER_HIGH_PERFORMANCE) {
+    g_gpu_adapter = adapter;
+  }
+}
+
+BuiGpuAdapter BUI_gpu_adapter(void)
+{
+  const char *env = getenv("BUI_GPU_ADAPTER");
+  if (env && env[0]) {
+    if (strcmp(env, "high-performance") == 0) {
+      return BUI_GPU_ADAPTER_HIGH_PERFORMANCE;
+    }
+    if (strcmp(env, "default") == 0) {
+      return BUI_GPU_ADAPTER_DEFAULT;
+    }
+    gpu_env_ignored("BUI_GPU_ADAPTER", env, "high-performance or default");
+  }
+  return g_gpu_adapter;
 }
 
 #ifndef BUI_SLUG_DEFAULT
