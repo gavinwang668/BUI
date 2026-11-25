@@ -21,6 +21,7 @@
 
 #ifdef BUI_WINDOW_ANDROID
 
+#  include <dlfcn.h>
 #  include <android/configuration.h>
 #  include <android/keycodes.h>
 #  include <android/looper.h>
@@ -37,16 +38,12 @@
 #  include <time.h>
 
 #  include "GPU_raster.h"
+#  include "kit_fling.h"
 #  include "android_native_app_glue.h"
 
 #  define MAX_TIMERS 16
+#  define IDLE_FRAME_MS 4.0 /* an animating pass that drew nothing waits this long (under any panel's frame) */
 #  define TOUCH_SLOP_DP 8.0f
-/* fling: slowest and fastest (dp/s) and how fast it slows down (1/s): UIScrollView's normal
- * deceleration, 0.998 per millisecond, is exp(-2.0) per second */
-#  define FLING_MIN_DP 40.0f
-#  define FLING_MAX_DP 8000.0f
-#  define FLING_FRICTION 2.0f
-#  define TRAIL 12 /* touches kept for the fling's velocity */
 /* a touch this close to the right edge of a custom node is the app's: its scrollbar */
 #  define EDGE_DP 20.0f
 #  define WINDOW_FORMAT_RGBX 0x2
@@ -56,11 +53,6 @@ typedef struct Timer {
   int id;
   int user; /* BK_window_timer (on_timer) rather than the kit's own (BK_timer) */
 } Timer;
-
-typedef struct Sample { /* one touch of a scroll: when and where */
-  double t;
-  float x, y;
-} Sample;
 
 struct BKWindow {
   BKContext *ctx;
@@ -73,6 +65,7 @@ struct BKWindow {
   int sw, sh; /* the surface */
   int req_w, req_h; /* logical size the app asked for, used before the surface exists */
   int dirty, full, want_frame, frames;
+  double idle_ms; /* an animating pass drew nothing: when to look again (0: none pending) */
   double retry_ms; /* a present failed: when to draw it all again (0: none pending) */
   int ime_on;
   float scale, density;
@@ -85,10 +78,11 @@ struct BKWindow {
   int pending_tap; /* a finger is down on something that does not drag: a click if it lifts in place */
   int drag_custom; /* custom and canvas nodes take drags (BK_window_wm "touch_drag"); else they scroll */
   float down_x, down_y, scroll_x, scroll_y;
-  /* momentum: the last touches of a one-finger scroll, and the fling (velocity in px/s) after it */
-  Sample trail[TRAIL];
-  int trail_n;
-  float vel_x, vel_y;
+  /* momentum: the touches of a one-finger scroll (Android's VelocityTracker) and the fling after it
+   * (Android's OverScroller spline, one per axis) */
+  BKVelocityTracker vt;
+  BKFling fling_x, fling_y;
+  float fling_done_x, fling_done_y; /* the distance of each already scrolled */
   double fling_ms;
   int fling;
 };
@@ -182,6 +176,27 @@ static void apply_density(BKWindow *win)
   BK_set_scale(win->scale);
 }
 
+/* Vote for the display's fastest mode. Without a vote the system picks the rate for a surface that
+ * only posts CPU buffers, and many devices settle on 60 Hz. ANativeWindow_setFrameRate is API 30+,
+ * so it is looked up at run time; the system rounds the vote to the nearest mode it supports, and an
+ * idle (damage-driven) window posts nothing, so the panel still drops back on its own. */
+#  define FRAME_RATE_VOTE_HZ 240.0f
+#  define FRAME_RATE_COMPAT_DEFAULT 0 /* ANATIVEWINDOW_FRAME_RATE_COMPATIBILITY_DEFAULT */
+
+static void vote_frame_rate(ANativeWindow *surface)
+{
+  typedef int32_t (*SetFrameRate)(ANativeWindow *, float, int8_t);
+  static SetFrameRate set_rate;
+  static int looked_up;
+  if (!looked_up) {
+    looked_up = 1;
+    set_rate = (SetFrameRate)dlsym(RTLD_DEFAULT, "ANativeWindow_setFrameRate");
+  }
+  if (set_rate) {
+    set_rate(surface, FRAME_RATE_VOTE_HZ, FRAME_RATE_COMPAT_DEFAULT);
+  }
+}
+
 static void surface_changed(BKWindow *win)
 {
   ANativeWindow *surface = g_app->window;
@@ -191,6 +206,7 @@ static void surface_changed(BKWindow *win)
   win->sw = ANativeWindow_getWidth(surface);
   win->sh = ANativeWindow_getHeight(surface);
   ANativeWindow_setBuffersGeometry(surface, win->sw, win->sh, WINDOW_FORMAT_RGBX);
+  vote_frame_rate(surface);
   apply_density(win);
   /* the activity's content rectangle: the surface less the status and navigation bars */
   const ARect c = g_app->contentRect;
@@ -320,8 +336,37 @@ static void sync_keyboard(BKWindow *win)
   win->ime_on = st.enabled;
 }
 
+#  ifdef BUI_ANDROID_FRAME_LOG
+#    include <android/log.h>
+/* Build with -DBUI_ANDROID_FRAME_LOG: once a second, logcat (tag "BUI") gets the frames drawn and
+ * the mean/worst CPU time of one. Mean over ~8 ms (120 Hz) or ~11 ms (90 Hz) means the software
+ * raster is the cap; below it, a 60 Hz lock is the system's rate policy. */
+static void log_frame_time(double ms)
+{
+  static double t0, sum, worst;
+  static int n;
+  const double t = now_ms();
+  if (t0 == 0.0) {
+    t0 = t;
+  }
+  sum += ms;
+  worst = BK_MAX(worst, ms);
+  n++;
+  if (t - t0 >= 1000.0) {
+    __android_log_print(
+        ANDROID_LOG_INFO, "BUI", "%d frames/s, cpu mean %.2f ms worst %.2f ms", n, sum / n, worst);
+    t0 = t;
+    sum = worst = 0.0;
+    n = 0;
+  }
+}
+#  endif
+
 static void render_window(BKWindow *win)
 {
+#  ifdef BUI_ANDROID_FRAME_LOG
+  const double start = now_ms();
+#  endif
   if (win->want_frame) {
     win->want_frame = 0;
     if (win->cb.on_frame) {
@@ -330,6 +375,9 @@ static void render_window(BKWindow *win)
   }
   draw(win);
   sync_keyboard(win);
+#  ifdef BUI_ANDROID_FRAME_LOG
+  log_frame_time(now_ms() - start);
+#  endif
 }
 
 /* -- input -------------------------------------------------------------------------------------- */
@@ -363,6 +411,94 @@ static void jni_leave(JNIEnv *env, int attached)
   }
   if (attached) {
     (*g_app->activity->vm)->DetachCurrentThread(g_app->activity->vm);
+  }
+}
+
+/* Names the display's fastest mode on the window. A window that states no preference can be held to
+ * 60 Hz by the system's per-app refresh-rate policy; one that names a mode is a request the policy
+ * has to weigh. Window attributes change only on the UI thread, and the activity's callbacks are the
+ * code that runs there (the glue's own forward to this thread), so this is a wrapper around its
+ * onWindowFocusChanged, written in JNI: no Java class is needed. `env` is the UI thread's. */
+static float best_mode(JNIEnv *env, jobject display, int *r_id)
+{
+  float best = 0.0f;
+  jclass dc = (*env)->GetObjectClass(env, display);
+  jmethodID get_mode = (*env)->GetMethodID(env, dc, "getMode", "()Landroid/view/Display$Mode;");
+  jmethodID get_modes = (*env)->GetMethodID(env, dc, "getSupportedModes", "()[Landroid/view/Display$Mode;");
+  jobject cur = get_mode ? (*env)->CallObjectMethod(env, display, get_mode) : NULL;
+  jobjectArray modes = get_modes ? (jobjectArray)(*env)->CallObjectMethod(env, display, get_modes) : NULL;
+  if (!cur || !modes) {
+    return 0.0f;
+  }
+  jclass mc = (*env)->GetObjectClass(env, cur);
+  jmethodID width = (*env)->GetMethodID(env, mc, "getPhysicalWidth", "()I");
+  jmethodID height = (*env)->GetMethodID(env, mc, "getPhysicalHeight", "()I");
+  jmethodID rate = (*env)->GetMethodID(env, mc, "getRefreshRate", "()F");
+  jmethodID id = (*env)->GetMethodID(env, mc, "getModeId", "()I");
+  if (!width || !height || !rate || !id) {
+    return 0.0f;
+  }
+  const int w = (*env)->CallIntMethod(env, cur, width), h = (*env)->CallIntMethod(env, cur, height);
+  const jsize n = (*env)->GetArrayLength(env, modes);
+  for (jsize i = 0; i < n; i++) {
+    jobject m = (*env)->GetObjectArrayElement(env, modes, i);
+    const float hz = (*env)->CallFloatMethod(env, m, rate);
+    if ((*env)->CallIntMethod(env, m, width) == w && (*env)->CallIntMethod(env, m, height) == h && hz > best) {
+      best = hz; /* the fastest at this size, whatever the panel offers: nothing is capped here */
+      *r_id = (*env)->CallIntMethod(env, m, id);
+    }
+    (*env)->DeleteLocalRef(env, m);
+  }
+  return best;
+}
+
+static void request_display_mode(JNIEnv *env, jobject act)
+{
+  jclass ac = (*env)->GetObjectClass(env, act);
+  jmethodID get_wm = (*env)->GetMethodID(env, ac, "getWindowManager", "()Landroid/view/WindowManager;");
+  jmethodID get_window = (*env)->GetMethodID(env, ac, "getWindow", "()Landroid/view/Window;");
+  jobject wm = get_wm ? (*env)->CallObjectMethod(env, act, get_wm) : NULL;
+  jobject window = get_window ? (*env)->CallObjectMethod(env, act, get_window) : NULL;
+  if (!wm || !window) {
+    return;
+  }
+  jclass wc = (*env)->GetObjectClass(env, wm);
+  jmethodID get_display = (*env)->GetMethodID(env, wc, "getDefaultDisplay", "()Landroid/view/Display;");
+  jobject display = get_display ? (*env)->CallObjectMethod(env, wm, get_display) : NULL;
+  int mode_id = 0;
+  const float hz = display ? best_mode(env, display, &mode_id) : 0.0f;
+  if (hz <= 0.0f) {
+    return;
+  }
+  jclass winc = (*env)->GetObjectClass(env, window);
+  jmethodID get_attrs = (*env)->GetMethodID(env, winc, "getAttributes", "()Landroid/view/WindowManager$LayoutParams;");
+  jmethodID set_attrs = (*env)->GetMethodID(env, winc, "setAttributes", "(Landroid/view/WindowManager$LayoutParams;)V");
+  jobject lp = get_attrs ? (*env)->CallObjectMethod(env, window, get_attrs) : NULL;
+  if (!lp || !set_attrs) {
+    return;
+  }
+  jclass lc = (*env)->GetObjectClass(env, lp);
+  jfieldID f_id = (*env)->GetFieldID(env, lc, "preferredDisplayModeId", "I");
+  jfieldID f_hz = (*env)->GetFieldID(env, lc, "preferredRefreshRate", "F");
+  if (f_id && f_hz) {
+    (*env)->SetIntField(env, lp, f_id, mode_id);
+    (*env)->SetFloatField(env, lp, f_hz, hz);
+    (*env)->CallVoidMethod(env, window, set_attrs, lp);
+  }
+}
+
+static void (*g_glue_focus)(ANativeActivity *, int);
+
+static void on_focus(ANativeActivity *activity, int focused)
+{
+  if (focused) {
+    request_display_mode(activity->env, activity->clazz);
+    if ((*activity->env)->ExceptionCheck(activity->env)) {
+      (*activity->env)->ExceptionClear(activity->env);
+    }
+  }
+  if (g_glue_focus) {
+    g_glue_focus(activity, focused);
   }
 }
 
@@ -562,85 +698,78 @@ static void cancel_press(BKWindow *win)
   BK_motion(win->ctx, -1, -1, 0);
 }
 
-/* Scrolls the content under (x, y) by (dx, dy) pixels. */
-static void scroll_px(BKWindow *win, float x, float y, float dx, float dy)
+/* Scrolls the content under (x, y) by (dx, dy) pixels; `phase` (BK_SCROLL_*) tells a list whether a
+ * finger is on it (it stretches past an end until the finger lifts) or it coasts. */
+static void scroll_px(BKWindow *win, float x, float y, float dx, float dy, int phase)
 {
   BK_motion(win->ctx, (int)x, (int)y, 0); /* a page that scrolls under the pointer needs to know it */
+  BK_scroll_phase(win->ctx, phase);
   BK_scroll_px(win->ctx, (int)x, (int)y, dx, dy, 0); /* the content follows the finger exactly */
+  BK_scroll_phase(win->ctx, BK_SCROLL_WHEEL);
   BK_motion(win->ctx, -1, -1, 0); /* a scrolling touch is no hover: nothing under it lights up */
 }
 
 static void scroll_by(BKWindow *win, float x, float y, float *last_x, float *last_y)
 {
-  scroll_px(win, x, y, *last_x - x, y - *last_y);
+  scroll_px(win, x, y, *last_x - x, y - *last_y, BK_SCROLL_DRAG);
   *last_x = x;
   *last_y = y;
 }
 
-/* A one-finger scroll to (x, y): the touch is recorded for the fling's velocity. */
-static void scroll_finger(BKWindow *win, float x, float y)
+/* The finger lifted: a list lets go of a stretch (nothing to scroll). */
+static void scroll_end(BKWindow *win, float x, float y)
 {
-  const double t = now_ms();
-  Sample *s = &win->trail[win->trail_n++ % TRAIL];
-  s->t = t;
-  s->x = x;
-  s->y = y;
-  scroll_by(win, x, y, &win->scroll_x, &win->scroll_y);
+  scroll_px(win, x, y, 0.0f, 0.0f, BK_SCROLL_END);
 }
 
-/* The finger lifted while scrolling: carry on at its velocity, over the last 100 ms of touches
- * (a finger that rested before lifting does not fling), slowing down the way UIScrollView does. */
-static void fling_start(BKWindow *win)
+/* The finger lifted while scrolling: carry on at its velocity (Android's: a least squares fit of the
+ * last 100 ms of touches, none when the finger rested before lifting), along OverScroller's spline. */
+static void fling_start(BKWindow *win, double now)
 {
-  const float max = FLING_MAX_DP * win->density, min = FLING_MIN_DP * win->density;
-  const double t = now_ms();
-  const int n = win->trail_n < TRAIL ? win->trail_n : TRAIL;
-  win->vel_x = win->vel_y = 0.0f;
-  if (n < 2) {
+  float vx, vy;
+  if (!bk_vt_velocity(&win->vt, now, &vx, &vy)) {
     return;
   }
-  const Sample last = win->trail[(win->trail_n - 1) % TRAIL];
-  if (t - last.t > 80.0) { /* the finger rested: no fling */
-    return;
+  const int fx = bk_fling_start(&win->fling_x, vx, win->density);
+  const int fy = bk_fling_start(&win->fling_y, vy, win->density);
+  if (!fx) {
+    win->fling_x.distance_px = 0.0f;
+    win->fling_x.duration_ms = 1.0f;
   }
-  Sample first = last;
-  for (int i = 2; i <= n; i++) { /* the oldest touch within 100 ms of the last */
-    const Sample s = win->trail[(win->trail_n - i) % TRAIL];
-    if (last.t - s.t > 100.0) {
-      break;
-    }
-    first = s;
+  if (!fy) {
+    win->fling_y.distance_px = 0.0f;
+    win->fling_y.duration_ms = 1.0f;
   }
-  const float dt = (float)(last.t - first.t) * 0.001f;
-  if (dt <= 0.0f) {
-    return;
-  }
-  float vx = (last.x - first.x) / dt, vy = (last.y - first.y) / dt;
-  vx = vx > max ? max : (vx < -max ? -max : vx);
-  vy = vy > max ? max : (vy < -max ? -max : vy);
-  if (vx * vx + vy * vy >= min * min) {
-    win->vel_x = vx;
-    win->vel_y = vy;
+  if (fx || fy) {
     win->fling = 1;
-    win->fling_ms = t;
+    win->fling_ms = now;
+    win->fling_done_x = win->fling_done_y = 0.0f;
   }
 }
 
 static void fling_step(BKWindow *win)
 {
-  const double t = now_ms();
-  float dt = (float)(t - win->fling_ms) * 0.001f;
-  dt = dt > 0.05f ? 0.05f : dt; /* a stalled frame is not a leap */
-  win->fling_ms = t;
-  scroll_px(win, (float)win->px, (float)win->py, -win->vel_x * dt, win->vel_y * dt);
-  const float keep = expf(-FLING_FRICTION * dt);
-  win->vel_x *= keep;
-  win->vel_y *= keep;
-  const float min = FLING_MIN_DP * win->density * 0.5f;
-  if (win->vel_x * win->vel_x + win->vel_y * win->vel_y < min * min) {
-    win->fling = 0;
-  }
+  const double elapsed = now_ms() - win->fling_ms;
+  bool done_x, done_y;
+  const float x = bk_fling_at(&win->fling_x, elapsed, &done_x);
+  const float y = bk_fling_at(&win->fling_y, elapsed, &done_y);
+  scroll_px(win, (float)win->px, (float)win->py, -(x - win->fling_done_x), y - win->fling_done_y, BK_SCROLL_FLING);
+  win->fling_done_x = x;
+  win->fling_done_y = y;
+  win->fling = !(done_x && done_y);
   win->dirty = 1;
+}
+
+/* The touches of pointer 0 in `e`, the batched ones first, to the velocity tracker. */
+static void track(BKWindow *win, const AInputEvent *e)
+{
+  const size_t n = AMotionEvent_getHistorySize(e);
+  for (size_t i = 0; i < n; i++) {
+    bk_vt_add(&win->vt, (double)AMotionEvent_getHistoricalEventTime(e, i) * 1.0e-6,
+              AMotionEvent_getHistoricalX(e, 0, i) - (float)win->ox, AMotionEvent_getHistoricalY(e, 0, i) - (float)win->oy);
+  }
+  bk_vt_add(&win->vt, (double)AMotionEvent_getEventTime(e) * 1.0e-6, AMotionEvent_getX(e, 0) - (float)win->ox,
+            AMotionEvent_getY(e, 0) - (float)win->oy);
 }
 
 static int32_t on_touch(BKWindow *win, AInputEvent *e)
@@ -655,9 +784,8 @@ static int32_t on_touch(BKWindow *win, AInputEvent *e)
       win->down_x = win->scroll_x = x;
       win->down_y = win->scroll_y = y;
       win->scrolling = win->fling = 0; /* a touch stops a fling */
-      win->vel_x = win->vel_y = 0.0f;
-      win->trail_n = 1; /* the velocity of a scroll counts from the touch down */
-      win->trail[0] = (Sample){now_ms(), x, y};
+      bk_vt_clear(&win->vt); /* the velocity of a scroll counts from the touch down */
+      track(win, e);
       BK_motion(win->ctx, (int)x, (int)y, 0);
       win->draggable = drags(win, BK_hover(win->ctx)) || on_edge(win, BK_hover(win->ctx), x);
       if (win->draggable) { /* a slider, a text field ...: it gets the press now */
@@ -682,20 +810,25 @@ static int32_t on_touch(BKWindow *win, AInputEvent *e)
       }
       break;
     case AMOTION_EVENT_ACTION_MOVE:
+      track(win, e);
       if (win->scrolling && count >= 2) {
         scroll_by(win, (AMotionEvent_getX(e, 0) + AMotionEvent_getX(e, 1)) * 0.5f - (float)win->ox,
                   (AMotionEvent_getY(e, 0) + AMotionEvent_getY(e, 1)) * 0.5f - (float)win->oy,
                   &win->scroll_x, &win->scroll_y);
       }
       else if (win->scrolling) { /* a one-finger scroll */
-        scroll_finger(win, x, y);
+        scroll_by(win, x, y, &win->scroll_x, &win->scroll_y);
       }
       else if (win->pending_tap) {
         const float dx = x - win->down_x, dy = y - win->down_y;
         if (dx * dx + dy * dy > slop * slop) { /* not a click: scroll, from where the finger went down */
           win->pending_tap = 0;
           win->scrolling = 1;
-          scroll_finger(win, x, y);
+          /* the slop is the finger's, not the content's: the scroll starts from just past it, so the
+           * content does not jump by the slop (what RecyclerView does) */
+          win->scroll_x = x - (fabsf(dx) > slop ? copysignf(slop, dx) : dx);
+          win->scroll_y = y - (fabsf(dy) > slop ? copysignf(slop, dy) : dy);
+          scroll_by(win, x, y, &win->scroll_x, &win->scroll_y);
         }
       }
       else if (win->pointer_down) {
@@ -709,7 +842,9 @@ static int32_t on_touch(BKWindow *win, AInputEvent *e)
       break;
     case AMOTION_EVENT_ACTION_UP:
       if (win->scrolling) { /* a one-finger scroll (two fingers cleared it when one lifted) */
-        fling_start(win);
+        scroll_end(win, x, y);
+        track(win, e);
+        fling_start(win, (double)AMotionEvent_getEventTime(e) * 1.0e-6);
       }
       win->scrolling = 0;
       if (win->pending_tap) { /* lifted in place: the click */
@@ -721,6 +856,9 @@ static int32_t on_touch(BKWindow *win, AInputEvent *e)
       pointer_up(win, x, y);
       break;
     case AMOTION_EVENT_ACTION_CANCEL:
+      if (win->scrolling) {
+        scroll_end(win, x, y);
+      }
       win->scrolling = win->pending_tap = win->fling = 0;
       cancel_press(win);
       break;
@@ -813,6 +951,10 @@ void BK_android_attach(void *android_app)
   g_app->onAppCmd = on_cmd;
   g_app->onInputEvent = on_input;
   app_folders(g_app->activity);
+  if (g_app->activity->callbacks->onWindowFocusChanged != on_focus) { /* once per activity */
+    g_glue_focus = g_app->activity->callbacks->onWindowFocusChanged;
+    g_app->activity->callbacks->onWindowFocusChanged = on_focus; /* runs on the UI thread */
+  }
   pthread_mutex_lock(&g_wake_lock);
   g_looper = g_app->looper;
   pthread_mutex_unlock(&g_wake_lock);
@@ -849,12 +991,19 @@ static int wait_ms(const BKWindow *win)
   /* With no surface nothing can be drawn, so a pending frame must not keep the loop spinning: it
    * waits for the surface (APP_CMD_INIT_WINDOW wakes the looper). */
   if (atomic_load(&g_wake_flag) ||
-      (win && (win->fling || (g_app->window && (win->dirty || win->want_frame || BK_animating(win->ctx)))))) {
+      (win && (win->fling || (g_app->window && (win->dirty || win->want_frame))))) {
     return 0;
   }
   double next = 0.0;
+  if (win && g_app->window && BK_animating(win->ctx)) {
+    /* animating: look again when a frame is due, not in a spin (a pass that damaged nothing
+     * would otherwise return at once, thousands of times a second) */
+    next = win->idle_ms != 0.0 ? win->idle_ms : now_ms();
+  }
   if (win) {
-    next = g_app->window ? win->retry_ms : 0.0; /* a failed present waits for the surface too */
+    if (g_app->window && win->retry_ms != 0.0 && (next == 0.0 || win->retry_ms < next)) {
+      next = win->retry_ms; /* a failed present waits for the surface too */
+    }
     for (int i = 0; i < MAX_TIMERS; i++) {
       if (win->timers[i].due_ms != 0.0 && (next == 0.0 || win->timers[i].due_ms < next)) {
         next = win->timers[i].due_ms;
@@ -927,8 +1076,12 @@ static void step(int block)
     win->dirty = 1; /* the failed present's turn (`draw` clears it) */
   }
   if (win->open && g_app->window &&
-      (win->dirty || win->want_frame || BK_needs_render(win->ctx) || BK_animating(win->ctx))) {
+      (win->dirty || win->want_frame || BK_needs_render(win->ctx) ||
+       (BK_animating(win->ctx) && now_ms() >= win->idle_ms))) {
+    const int frames = win->frames;
     render_window(win);
+    /* nothing was drawn (the animation changed no pixel): next look in one frame's time */
+    win->idle_ms = win->frames == frames && !win->dirty ? now_ms() + IDLE_FRAME_MS : 0.0;
   }
 }
 

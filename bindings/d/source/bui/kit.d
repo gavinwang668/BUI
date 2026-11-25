@@ -215,6 +215,7 @@ struct BKImageInfo {
     int width;
     int height;
     int frames;
+    int flags; /* BK_IMAGE_INFO_* */
 }
 
 struct BKImageStats {

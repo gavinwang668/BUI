@@ -97,6 +97,21 @@ Selectors Level 4, the same ones you'd use on the web:
 - **`@font-face`** with local font files, and **`@property`** initial values.
 - **`@keyframes`**: see [Effects and animations](../effects-and-animations/).
 
+### Subgrids, anchors and view transitions
+
+- **`subgrid`**: `grid-template-rows: subgrid` (or columns) makes a grid item's rows the parent grid's, so cards' headers, bodies and footers line up; the subgrid's padding and border push its items in at its edges. An axis the subgrid doesn't share keeps tracks of its own (a form's rows can share the label column and stack their own items). Line names after `subgrid` aren't used.
+- **Anchor positioning**: `anchor-name: --tip` on a box, then on an absolutely positioned one `position-anchor: --tip` and `top: anchor(bottom)`, `left: anchor(--tip left, 8px)` (with a fallback), `calc(anchor(top) - 4px)`, `width: anchor-size(width)`, `position-area: bottom span-right`, `justify-self: anchor-center`, and `position-try-fallbacks: flip-block, flip-inline, top` when it would overflow.
+- **View transitions**: call `window.start_view_transition()` before changing state, and boxes with a `view-transition-name` move and resize to their new place while their old picture fades out; the rest of the page cross-fades. `::view-transition-group(name)` / `-old()` / `-new()` (by name, `*` or `.class` from `view-transition-class`) set `animation-duration`, `-delay`, `-timing-function`, or `animation: none`.
+
+### Grid lanes, baselines and text
+
+- **Grid lanes (masonry)**: `display: grid-lanes` with `grid-template-columns: repeat(3, 1fr)` stacks each item in the column where it ends up highest, like a photo wall. `fit-tolerance` (default `1em`, or `infinite`) treats lanes that close as level, so items keep their order across them; `grid-lanes-direction: row` makes rows the lanes, `fill-reverse` stacks from the end and `track-reverse` fills from the last lane; `grid-lanes-pack: dense` fills gaps higher up. Items can take a lane (`grid-column: 2`) or span several, and `flow-start` / `flow-end` alignment follows the reversed axes. Every auto-placed item counts towards the width of every lane it could go in, so the lanes come out even; `repeat(auto-fill, auto)` makes as many as fit. A subgrid item shares the lanes it spans.
+- **Sizing**: `min-width: min-content`, `max-width: fit-content`, `min-height: stretch` and the rest; `contain: size` with `contain-intrinsic-size: 300px 200px` sizes a box as if it held only that. Images keep their ratio in flex and grid layouts (stretched, shrunk or with only one side given), and a `<canvas width="200" height="100">` is that size until CSS says otherwise.
+- **Baselines**: words of different sizes, inline blocks, and flex and grid items with `align-items: baseline` line up on their text's baseline. `line-height: normal` uses the font's own ascent, descent and line gap (an `@font-face` or `add_font` font; the UI font keeps Blender's 1.3 em).
+- **White space**: `pre-wrap` keeps every space, `break-spaces` may break after each one, and `<br><br>` leaves an empty line.
+- **Lines, like a browser's**: Chinese and Japanese wrap between characters, `word-break: keep-all` keeps them together, `line-break: anywhere` breaks between any two, a soft hyphen (`&shy;`) shows a hyphen where the line breaks. `text-align: justify` spreads each line (`text-align-last` sets the last one), `start` / `end` follow `direction`, tabs line up at `tab-size` stops, and `text-wrap: balance` evens out a short heading's lines. A `<span>` with padding or a border takes room on its line and paints its background on each line it spans.
+- **Sizes**: a box with an `aspect-ratio` grows to fit its content, and `aspect-ratio: auto 4 / 3` lets an image's own ratio win. An SVG background without its own width or height takes its `viewBox` ratio (`auto` sizes it like `contain`), and SVGs are drawn sharp at the size they're shown.
+
 ## The cascade
 
 Declarations are applied in this order, later winning:
@@ -140,7 +155,7 @@ What the engine understands:
 - **Negatives, opacity modifiers and important:** `-mt-2`, `bg-sky-500/50`, `text-sm/6`, `p-4!`.
 - **Variants:** states (`hover:`, `focus-visible:` …), pseudo-elements, `group-*` and `peer-*`, `has-*`, `data-*` (`data-[state=open]:`), `aria-*`, `nth-*`, breakpoints (`md:`, `2xl:`, `max-sm:`), container queries (`@md:`), `dark:`, `motion-*`, `supports-*`, `*:` and arbitrary variants like `[&>*]:`.
 
-If your own class names collide with Tailwind's, turn it off: `blenderui::set_tailwind(false)`.
+A class your own CSS styles is yours: with `.hidden { opacity: .5 }` in a `<style>`, `class="hidden"` doesn't also get Tailwind's `display: none`. To have no Tailwind at all, turn it off: `blenderui::set_tailwind(false)`.
 
 ### Checked at compile time with tw!
 

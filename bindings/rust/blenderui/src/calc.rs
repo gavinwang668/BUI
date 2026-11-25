@@ -23,6 +23,10 @@ pub enum Calc {
     Px(f32),
     Pct(f32),
     Em(f32),
+    /// `ch`: advances of "0" in the element's font.
+    Ch(f32),
+    /// `lh`: the element's line height.
+    Lh(f32),
     Rem(f32),
     Vw(f32),
     Vh(f32),
@@ -87,7 +91,7 @@ impl Calc {
         use Calc::*;
         match self {
             Pct(_) => true,
-            Num(_) | Px(_) | Em(_) | Rem(_) | Vw(_) | Vh(_) | Vmin(_) | Vmax(_) => false,
+            Num(_) | Px(_) | Em(_) | Ch(_) | Lh(_) | Rem(_) | Vw(_) | Vh(_) | Vmin(_) | Vmax(_) => false,
             Add(a, b) | Sub(a, b) | Mul(a, b) | Div(a, b) | Mod(a, b) | Rem2(a, b) | Pow(a, b)
             | Atan2(a, b) | Round(_, a, b) => a.has_pct() || b.has_pct(),
             Min(v) | Max(v) | Hypot(v) => v.iter().any(Calc::has_pct),
@@ -103,7 +107,7 @@ impl Calc {
         use Calc::*;
         match self {
             Num(_) => true,
-            Px(_) | Pct(_) | Em(_) | Rem(_) | Vw(_) | Vh(_) | Vmin(_) | Vmax(_) => false,
+            Px(_) | Pct(_) | Em(_) | Ch(_) | Lh(_) | Rem(_) | Vw(_) | Vh(_) | Vmin(_) | Vmax(_) => false,
             Add(a, b) | Sub(a, b) | Mul(a, b) | Div(a, b) | Mod(a, b) | Rem2(a, b) | Pow(a, b)
             | Atan2(a, b) | Round(_, a, b) => a.is_number() && b.is_number(),
             Min(v) | Max(v) | Hypot(v) => v.iter().all(Calc::is_number),
@@ -121,6 +125,8 @@ impl Calc {
             Num(v) | Px(v) => *v,
             Pct(p) => p * basis / 100.0,
             Em(v) => v * u.font_size,
+            Ch(v) => v * u.ch,
+            Lh(v) => v * u.lh,
             Rem(v) => v * u.root_font_size,
             Vw(v) => v * u.viewport.0 / 100.0,
             Vh(v) => v * u.viewport.1 / 100.0,
@@ -190,7 +196,7 @@ impl Calc {
         let b = |c: &Calc| Box::new(c.bake_with(f));
         let v = |l: &[Calc]| l.iter().map(|c| c.bake_with(f)).collect();
         match self {
-            Num(_) | Pct(_) | Px(_) | Em(_) | Rem(_) | Vw(_) | Vh(_) | Vmin(_) | Vmax(_) => f(self),
+            Num(_) | Pct(_) | Px(_) | Em(_) | Ch(_) | Lh(_) | Rem(_) | Vw(_) | Vh(_) | Vmin(_) | Vmax(_) => f(self),
             Add(a, c) => Add(b(a), b(c)),
             Sub(a, c) => Sub(b(a), b(c)),
             Mul(a, c) => Mul(b(a), b(c)),
@@ -213,7 +219,7 @@ impl Calc {
         use Calc::*;
         std::mem::discriminant(self).hash(h);
         match self {
-            Num(x) | Px(x) | Pct(x) | Em(x) | Rem(x) | Vw(x) | Vh(x) | Vmin(x) | Vmax(x) => {
+            Num(x) | Px(x) | Pct(x) | Em(x) | Ch(x) | Lh(x) | Rem(x) | Vw(x) | Vh(x) | Vmin(x) | Vmax(x) => {
                 x.to_bits().hash(h)
             }
             Add(a, b) | Sub(a, b) | Mul(a, b) | Div(a, b) | Mod(a, b) | Rem2(a, b) | Pow(a, b)
@@ -255,6 +261,8 @@ fn clone_calc(c: &Calc) -> Calc {
         Calc::Px(x) => Calc::Px(x),
         Calc::Pct(x) => Calc::Pct(x),
         Calc::Em(x) => Calc::Em(x),
+        Calc::Ch(x) => Calc::Ch(x),
+        Calc::Lh(x) => Calc::Lh(x),
         Calc::Rem(x) => Calc::Rem(x),
         Calc::Vw(x) => Calc::Vw(x),
         Calc::Vh(x) => Calc::Vh(x),
@@ -308,7 +316,7 @@ impl Resolved {
 
 /// Every distinct expression, kept for the life of the process (they are
 /// few: the stylesheets' and styles' calc() values).
-fn intern(c: Calc) -> &'static Calc {
+pub(crate) fn intern(c: Calc) -> &'static Calc {
     static MAP: OnceLock<Mutex<KeyMap<u64, Vec<&'static Calc>>>> = OnceLock::new();
     let mut h = key_hasher();
     c.hash_into(&mut h);
@@ -482,13 +490,13 @@ pub fn leaf(v: f32, unit: &str) -> Option<Calc> {
         "em" => Calc::Em(v),
         "ex" => Calc::Em(v * 0.5),
         "rex" => Calc::Rem(v * 0.5),
-        "ch" => Calc::Em(v * 0.55),
-        "rch" => Calc::Rem(v * 0.55),
+        "ch" => Calc::Ch(v),
+        "rch" => Calc::Rem(v * 0.5),
         "cap" => Calc::Em(v * 0.7),
         "rcap" => Calc::Rem(v * 0.7),
         "ic" => Calc::Em(v),
         "ric" => Calc::Rem(v),
-        "lh" => Calc::Em(v * 1.3),
+        "lh" => Calc::Lh(v),
         "rlh" => Calc::Rem(v * 1.3),
         "vw" | "svw" | "lvw" | "dvw" | "vi" | "svi" | "lvi" | "dvi" | "cqw" | "cqi" => Calc::Vw(v),
         "vh" | "svh" | "lvh" | "dvh" | "vb" | "svb" | "lvb" | "dvb" | "cqh" | "cqb" => Calc::Vh(v),

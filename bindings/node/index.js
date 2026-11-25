@@ -149,6 +149,19 @@ class Window {
 
   cancelAnimationFrame (id) { this._frameCallbacks.delete(id) }
 
+  /**
+   * A view transition (the browser's `document.startViewTransition`): the window as it is now is
+   * pictured, `update` changes the DOM (it may return a promise), and boxes with a
+   * `view-transition-name` move to their new place while the page cross-fades. The promises
+   * resolve once the update is committed (not when the animation ends).
+   */
+  startViewTransition (update) {
+    if (update && typeof update === 'object') update = update.update
+    if (!this.closed) this.app.native.startViewTransition(this.id)
+    const done = Promise.resolve().then(() => update?.()).then(() => this.flush())
+    return { updateCallbackDone: done, ready: done, finished: done, skipTransition () {} }
+  }
+
   _frame () {
     this._framePending = false
     const cbs = this._frameCallbacks // callbacks requested in a callback run in the next frame
@@ -282,6 +295,8 @@ class App {
   constructor (options = {}) {
     this.windows = new Map()
     this._nextWindow = 1
+    this._trays = new Map() // the desktop shell (shell.js)
+    this._notifications = new Map()
     this.quitOnLastWindowClosed = options.quitOnLastWindowClosed ?? true
     this.native = new native.NativeApp(
       { gpu: options.gpu, slug: options.slug, headless: options.headless, theme: options.theme },
@@ -370,6 +385,7 @@ class App {
 
   _event (raw) {
     if (raw.kind === 'motion') return this.motions._event(raw)
+    if (this._shellEvent(raw)) return
     if (raw.kind === 'clock') return this._clock?.shift()?.()
     const win = this.windows.get(raw.window)
     if (!win) return
@@ -398,5 +414,10 @@ class App {
   }
 }
 
+// the desktop shell: App.createTray / notify / addRecentDocument, Window.setProgressBar
+const { Tray, appShell, setProgressBar } = require('./shell')
+Object.assign(App.prototype, appShell)
+Window.prototype.setProgressBar = setProgressBar
+
 const { AreaSplit, createScreen, editorElement } = require('./screen')
-module.exports = { ...dom, App, Window, native, ...signals, AreaSplit, createScreen, editorElement }
+module.exports = { ...dom, App, Window, Tray, native, ...signals, AreaSplit, createScreen, editorElement }

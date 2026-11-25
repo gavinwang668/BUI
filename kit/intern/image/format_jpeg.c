@@ -24,42 +24,6 @@ bool imb_is_a_jpeg(const uint8_t *mem, size_t size)
 /** \name EXIF orientation
  * \{ */
 
-static unsigned rd16(const uint8_t *p, bool le)
-{
-  return le ? (unsigned)(p[0] | p[1] << 8) : (unsigned)(p[0] << 8 | p[1]);
-}
-
-static uint32_t rd32(const uint8_t *p, bool le)
-{
-  return le ? (uint32_t)p[0] | (uint32_t)p[1] << 8 | (uint32_t)p[2] << 16 | (uint32_t)p[3] << 24 :
-              (uint32_t)p[0] << 24 | (uint32_t)p[1] << 16 | (uint32_t)p[2] << 8 | (uint32_t)p[3];
-}
-
-/* Tag 0x0112 of IFD0 in an APP1 "Exif" block (TIFF layout). */
-static int exif_orientation(const uint8_t *tiff, size_t n)
-{
-  if (n < 8 || !((tiff[0] == 'I' && tiff[1] == 'I') || (tiff[0] == 'M' && tiff[1] == 'M'))) {
-    return 1;
-  }
-  const bool le = tiff[0] == 'I';
-  const uint32_t ifd = rd32(tiff + 4, le);
-  if (ifd > n - 2) {
-    return 1;
-  }
-  const unsigned count = rd16(tiff + ifd, le);
-  for (unsigned i = 0; i < count; i++) {
-    const size_t e = ifd + 2 + (size_t)i * 12;
-    if (e + 12 > n) {
-      break;
-    }
-    if (rd16(tiff + e, le) == 0x0112) {
-      const unsigned v = rd16(tiff + e + 8, le);
-      return v >= 1 && v <= 8 ? (int)v : 1;
-    }
-  }
-  return 1;
-}
-
 int imb_jpeg_orientation(const uint8_t *mem, size_t size)
 {
   size_t p = 2;
@@ -77,7 +41,7 @@ int imb_jpeg_orientation(const uint8_t *mem, size_t size)
       break;
     }
     if (marker == 0xE1 && len >= 8 && memcmp(mem + p + 4, "Exif\0\0", 6) == 0) {
-      return exif_orientation(mem + p + 10, len - 8);
+      return imb_tiff_orientation(mem + p + 10, len - 8);
     }
     p += 2 + len;
   }

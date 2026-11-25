@@ -109,6 +109,7 @@ pub enum Space {
     Srgb,
     SrgbLinear,
     DisplayP3,
+    DisplayP3Linear,
     A98,
     ProPhoto,
     Rec2020,
@@ -127,7 +128,8 @@ impl Space {
         Some(match s {
             "srgb" => Space::Srgb,
             "srgb-linear" => Space::SrgbLinear,
-            "display-p3" | "display-p3-linear" => Space::DisplayP3,
+            "display-p3" => Space::DisplayP3,
+            "display-p3-linear" => Space::DisplayP3Linear,
             "a98-rgb" => Space::A98,
             "prophoto-rgb" => Space::ProPhoto,
             "rec2020" => Space::Rec2020,
@@ -157,6 +159,7 @@ impl Space {
             Space::Srgb => mul(&SRGB_TO_XYZ, c.map(srgb_to_lin)),
             Space::SrgbLinear => mul(&SRGB_TO_XYZ, c),
             Space::DisplayP3 => mul(&P3_TO_XYZ, c.map(srgb_to_lin)),
+            Space::DisplayP3Linear => mul(&P3_TO_XYZ, c),
             Space::A98 => mul(&A98_TO_XYZ, c.map(|v| v.abs().powf(563.0 / 256.0).copysign(v))),
             Space::ProPhoto => {
                 let lin = c.map(|v| {
@@ -165,15 +168,8 @@ impl Space {
                 });
                 mul(&D50_TO_D65, mul(&PROPHOTO_TO_XYZ50, lin))
             }
-            Space::Rec2020 => {
-                const A: f64 = 1.09929682680944;
-                const B: f64 = 0.018053968510807;
-                let lin = c.map(|v| {
-                    let a = v.abs();
-                    (if a < B * 4.5 { a / 4.5 } else { ((a + A - 1.0) / A).powf(1.0 / 0.45) }).copysign(v)
-                });
-                mul(&REC2020_TO_XYZ, lin)
-            }
+            // CSS Color 4: rec2020's transfer is a pure 2.4 gamma (BT.1886), not BT.2020's camera curve
+            Space::Rec2020 => mul(&REC2020_TO_XYZ, c.map(|v| v.abs().powf(2.4).copysign(v))),
             Space::XyzD65 => c,
             Space::XyzD50 => mul(&D50_TO_D65, c),
             Space::Lab => mul(&D50_TO_D65, lab_to_xyz50(c)),
@@ -191,19 +187,13 @@ impl Space {
             Space::Srgb => mul(&XYZ_TO_SRGB, x).map(lin_to_srgb),
             Space::SrgbLinear => mul(&XYZ_TO_SRGB, x),
             Space::DisplayP3 => mul(&inv(&P3_TO_XYZ), x).map(lin_to_srgb),
+            Space::DisplayP3Linear => mul(&inv(&P3_TO_XYZ), x),
             Space::A98 => mul(&inv(&A98_TO_XYZ), x).map(|v| v.abs().powf(256.0 / 563.0).copysign(v)),
             Space::ProPhoto => mul(&inv(&PROPHOTO_TO_XYZ50), mul(&D65_TO_D50, x)).map(|v| {
                 let a = v.abs();
                 (if a >= 1.0 / 512.0 { a.powf(1.0 / 1.8) } else { 16.0 * a }).copysign(v)
             }),
-            Space::Rec2020 => {
-                const A: f64 = 1.09929682680944;
-                const B: f64 = 0.018053968510807;
-                mul(&inv(&REC2020_TO_XYZ), x).map(|v| {
-                    let a = v.abs();
-                    (if a > B { A * a.powf(0.45) - (A - 1.0) } else { 4.5 * a }).copysign(v)
-                })
-            }
+            Space::Rec2020 => mul(&inv(&REC2020_TO_XYZ), x).map(|v| v.abs().powf(1.0 / 2.4).copysign(v)),
             Space::XyzD65 => x,
             Space::XyzD50 => mul(&D65_TO_D50, x),
             Space::Lab => xyz50_to_lab(mul(&D65_TO_D50, x)),
@@ -365,6 +355,17 @@ pub fn dark() -> bool {
 /// A system color (`Canvas`, `LinkText` ...) in the active theme's mode: (dark, light). The dark
 /// ones are the kit's dark theme; the light ones a browser's light defaults.
 pub fn system(name: &str) -> Option<Rgba> {
+    // the deprecated ones are the current ones they map to (CSS Color 4 section 6.2)
+    let name = match name {
+        "activecaption" | "appworkspace" | "background" | "inactivecaption" | "infobackground" | "menu"
+        | "scrollbar" | "window" => "canvas",
+        "activeborder" | "inactiveborder" | "threeddarkshadow" | "threedhighlight" | "threedlightshadow"
+        | "threedshadow" | "windowframe" => "buttonborder",
+        "buttonhighlight" | "buttonshadow" | "threedface" => "buttonface",
+        "captiontext" | "infotext" | "menutext" | "windowtext" => "canvastext",
+        "inactivecaptiontext" => "graytext",
+        n => n,
+    };
     let (on_dark, on_light) = match name {
         "canvas" | "field" | "window" | "background" | "appworkspace" => (0x282828, 0xffffff),
         "canvastext" | "fieldtext" | "windowtext" | "captiontext" | "infotext" | "menutext"
@@ -506,8 +507,11 @@ pub fn color_fn(fx: &FuncTok, current: Rgba) -> Option<Rgba> {
         "rgb" | "rgba" => [(comp(0, 255.0, false)? / 255.0).clamp(0.0, 1.0), (comp(1, 255.0, false)? / 255.0).clamp(0.0, 1.0),
                            (comp(2, 255.0, false)? / 255.0).clamp(0.0, 1.0)],
         // s / l (w / b) as percentages; bare numbers in modern syntax mean percent too
-        "hsl" | "hsla" | "hwb" => [comp(0, 0.0, true)?, comp(1, 100.0, false)? / 100.0,
-                                   comp(2, 100.0, false)? / 100.0],
+        // CSS Color 4 §7: a negative hsl() saturation clamps to 0 (the lightness doesn't: out of
+        // range, the color is out of gamut)
+        "hsl" | "hsla" => [comp(0, 0.0, true)?, (comp(1, 100.0, false)? / 100.0).max(0.0),
+                           comp(2, 100.0, false)? / 100.0],
+        "hwb" => [comp(0, 0.0, true)?, comp(1, 100.0, false)? / 100.0, comp(2, 100.0, false)? / 100.0],
         "lab" => [comp(0, 100.0, false)?, comp(1, 125.0, false)?, comp(2, 125.0, false)?],
         "lch" => [comp(0, 100.0, false)?, comp(1, 150.0, false)?, comp(2, 0.0, true)?],
         "oklab" => [comp(0, 1.0, false)?, comp(1, 0.4, false)?, comp(2, 0.4, false)?],

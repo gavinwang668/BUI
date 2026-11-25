@@ -62,6 +62,10 @@ pub(crate) const ROOT_FONT_SIZE: f32 = 16.0;
 #[derive(Clone, Copy, Debug)]
 pub struct Units {
     pub font_size: f32,
+    /// The `ch` unit in px: the advance of "0" in the element's font.
+    pub ch: f32,
+    /// The `lh` unit in px: the element's line height.
+    pub lh: f32,
     /// The root element's font size (`rem`).
     pub root_font_size: f32,
     pub viewport: (f32, f32),
@@ -70,7 +74,7 @@ pub struct Units {
 impl Units {
     /// Units outside any element (media queries, tests): the root font size is its initial value.
     pub(crate) const fn initial(font_size: f32, viewport: (f32, f32)) -> Units {
-        Units { font_size, root_font_size: ROOT_FONT_SIZE, viewport }
+        Units { font_size, ch: font_size * 0.5, lh: font_size * 1.2, root_font_size: ROOT_FONT_SIZE, viewport }
     }
 }
 

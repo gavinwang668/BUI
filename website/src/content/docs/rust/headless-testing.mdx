@@ -4,7 +4,7 @@ description: Run your Rust UI without a window, click and type into it from a te
 section: Rust
 order: 80
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/suite/headless.rs", "bindings/rust/blenderui/tests/suite/animation.rs", "bindings/rust/blenderui/tests/suite/rsx.rs", "bindings/rust/blenderui/tests/suite/hooks.rs", "bindings/rust/blenderui/tests/suite/parity.rs", "bindings/rust/blenderui/examples/hello.rs"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/suite/headless.rs", "bindings/rust/blenderui/tests/suite/animation.rs", "bindings/rust/blenderui/tests/suite/rsx.rs", "bindings/rust/blenderui/tests/suite/hooks.rs", "bindings/rust/blenderui/tests/suite/parity.rs", "bindings/rust/blenderui/tests/wpt/main.rs", "bindings/rust/blenderui/examples/hello.rs"]
 ---
 
 The best UI bug is the one your test catches before anyone sees it. **BUI can run your whole app off-screen**: same code, same layout, same pixels, no window. Your tests click buttons, type text, scroll lists and check the result, in plain `cargo test`, on CI machines with no display.
@@ -191,6 +191,18 @@ cargo test --test suite parity:: -- --nocapture  # print the HTML and CSS covera
 | `tests/suite/effects.rs` | Filters, transforms, clip paths, masks, blend modes, scroll snap, Blender components |
 | `tests/suite/basic_css.rs`, `tests/suite/modern_css.rs` | Borders, counters, `styled`, variables, grid areas, selectors, at-rules |
 | `tests/suite/parity.rs` | The coverage numbers |
+
+### The web-platform-tests
+
+The engine's CSS is also checked against the CSS reftests of [web-platform-tests](https://github.com/web-platform-tests/wpt), the suite browsers test against: each test page and its reference render at 800 x 600 and must match pixel for pixel (within the test's fuzzy tolerance). **4,860 of the 7,135 that run pass (68%)**; [Coverage](/docs/reference/coverage/) has every directory.
+
+```sh
+py -3 tools/wpt_fetch.py                                      # a pinned WPT commit into .wpt/
+cargo test -p blenderui --test wpt -- --ignored --nocapture wpt_run
+WPT_FILTER=css-flexbox/ WPT_DUMP=out cargo test -p blenderui --test wpt -- --ignored wpt_run
+```
+
+A test listed in `tests/wpt/expectations.txt` that stops passing fails the run, and `WPT_DUMP` writes the pixels of each failing test and its reference as PNGs.
 
 <Callout type="joke">
 Headless mode: all of the UI, none of the window. Like rendering with the viewport set to wireframe and the monitor switched off.

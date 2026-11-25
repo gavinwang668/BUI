@@ -19,7 +19,8 @@ use blenderui_sys as sys;
 /// A decoded image, owned by the kit's image module (a `BKImBuf`: one
 /// allocation of premultiplied pixels). Every format and every binding goes
 /// through the same C decoders: PNG, JPEG, WebP, GIF, BMP, TGA, QOI, Radiance
-/// HDR, PNM and SVG. Cheap to share (`Arc<Image>`) and to pass every frame:
+/// HDR, PNM, SVG and TIFF, plus OpenEXR, AVIF and JPEG XL when built with their
+/// features and HEIC through the OS's decoder. Cheap to share (`Arc<Image>`) and to pass every frame:
 /// the canvas borrows it, nothing is copied or converted per frame.
 pub struct Image {
     pub width: u32,
@@ -198,8 +199,11 @@ impl Drop for Animation {
 #[derive(Clone, Debug)]
 pub(crate) struct ImageFile {
     pub src: Arc<str>,
+    /// The natural size, or what stands in for it (`flags`).
     pub width: u32,
     pub height: u32,
+    /// `sys::BK_IMAGE_INFO_*`: which of the size is natural.
+    flags: i32,
 }
 
 impl ImageFile {
@@ -208,8 +212,20 @@ impl ImageFile {
         let mut info = sys::BKImageInfo::default();
         // SAFETY: `path` is NUL-terminated; `info` is written.
         let ok = unsafe { sys::BK_image_info(path.as_ptr(), &raw mut info) } != 0;
-        (ok && info.width > 0 && info.height > 0)
-            .then(|| Self { src: src.into(), width: info.width as u32, height: info.height as u32 })
+        (ok && info.width > 0 && info.height > 0).then(|| Self {
+            src: src.into(), width: info.width as u32, height: info.height as u32, flags: info.flags,
+        })
+    }
+
+    /// Its natural size: an SVG's may lack a width, a height, or a ratio.
+    pub(crate) fn natural(&self) -> crate::style::Natural {
+        let n = crate::style::Natural::of(self.width as f32, self.height as f32);
+        let lacks = |f: i32| self.flags & f != 0;
+        crate::style::Natural {
+            width: n.width.filter(|_| !lacks(sys::BK_IMAGE_INFO_NO_WIDTH)),
+            height: n.height.filter(|_| !lacks(sys::BK_IMAGE_INFO_NO_HEIGHT)),
+            ratio: n.ratio.filter(|_| !lacks(sys::BK_IMAGE_INFO_NO_RATIO)),
+        }
     }
 }
 
@@ -217,6 +233,8 @@ impl ImageFile {
 #[derive(Default)]
 pub(crate) struct ImageCache {
     files: HashMap<String, Option<ImageFile>>,
+    /// Inline `<svg>` pictures, decoded once per markup (by its hash).
+    svgs: HashMap<u64, Option<Arc<Image>>>,
     /// `<video src>` players
     pub(crate) videos: crate::video::VideoCache,
 }
@@ -230,6 +248,23 @@ impl ImageCache {
         let file = ImageFile::probe(src);
         self.files.insert(src.to_owned(), file.clone());
         file
+    }
+
+    /// An inline `<svg>`'s picture, from its markup (the kit's SVG reader rasterizes it).
+    pub(crate) fn svg(&mut self, markup: &str) -> Option<Arc<Image>> {
+        use std::hash::{Hash, Hasher};
+        let mut h = std::collections::hash_map::DefaultHasher::new();
+        markup.hash(&mut h);
+        let key = h.finish();
+        if let Some(i) = self.svgs.get(&key) {
+            return i.clone();
+        }
+        if self.svgs.len() > 256 {
+            self.svgs.clear();
+        }
+        let img = Image::decode(markup.as_bytes(), 0, 0).map(Arc::new);
+        self.svgs.insert(key, img.clone());
+        img
     }
 }
 
@@ -640,6 +675,17 @@ impl Painter {
         self.push(Kind::Image(image.clone()), Self::corners(bounds), Rgba { r: 0.0, g: 0.0, b: 0.0, a: 1.0 });
     }
 
+    /// An image over everything painted so far, at `opacity`, unclipped (a view transition's pictures).
+    pub(crate) fn overlay(&mut self, bounds: Bounds<f32>, image: &Arc<Image>, opacity: f32) {
+        if opacity <= 0.0 {
+            return;
+        }
+        let (o, c) = (self.opacity, self.clip);
+        (self.opacity, self.clip) = (opacity.min(1.0), None);
+        self.image(bounds, image);
+        (self.opacity, self.clip) = (o, c);
+    }
+
     /// An image file (any format the kit reads) scaled to `bounds`. It
     /// decodes on the kit's worker threads at the size drawn and appears when
     /// ready; nothing loads while it is off screen.
@@ -1002,7 +1048,7 @@ fn lp(v: LengthPercentage, basis: f32) -> f32 {
 }
 
 /// Border widths (top, right, bottom, left).
-fn border_widths(c: &Computed, w: f32) -> [f32; 4] {
+pub(crate) fn border_widths(c: &Computed, w: f32) -> [f32; 4] {
     let b = c.layout.border;
     [lp(b.top, w), lp(b.right, w), lp(b.bottom, w), lp(b.left, w)]
 }
@@ -1022,17 +1068,64 @@ pub(crate) fn paint_frame(frame: &Frame, styles: &StyleStore, tc: &mut TextCache
     p.clip = None;
 }
 
+/// The boxes of `frame` that `keep` selects, painted alone into one picture of `area` (a view
+/// transition's snapshot). Layer effects inside (filters, blend modes) are left out, and kit
+/// widgets (form controls) aren't in it.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn snapshot(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, keep: &dyn Fn(usize) -> bool,
+                       area: Bounds<f32>, vp: (f32, f32), scale: f32, app: &crate::window::App) -> Option<Arc<Image>> {
+    let mut p = Painter::new();
+    with_scratch(|s| {
+        let PaintScratch { order, mats, .. } = s;
+        order.clear();
+        order.extend((0..frame.nodes.len()).filter(|&i| keep(i)));
+        if frame.nodes.iter().any(|n| styles[n.style].z_index.is_some()) {
+            order.sort_by_cached_key(|&i| frame.z_of(i, styles));
+        }
+        vector_mats(frame, styles, vp, mats);
+        for &i in order.iter() {
+            let n = &frame.nodes[i];
+            if !n.visible || n.opacity <= 0.0 {
+                continue;
+            }
+            p.opacity = n.opacity;
+            p.clip = n.clip;
+            let start = p.items.len();
+            paint_node(frame, styles, tc, i, &mut p, vp, app);
+            mats.map(&mut p, start, i);
+        }
+    });
+    let (x0, y0, w, h) = device_rect(area, scale);
+    if w == 0 || h == 0 {
+        return None;
+    }
+    let px = p.rasterize_argb(scale, x0, y0, w.min(crate::effects::MAX_RASTER), h.min(crate::effects::MAX_RASTER))?;
+    Image::from_argb(&px).map(Arc::new)
+}
+
 /// [`paint_frame`] with the paint's buffers.
 #[allow(clippy::too_many_arguments)]
 fn paint_frame_with(s: &mut PaintScratch, frame: &Frame, styles: &StyleStore, tc: &mut TextCache, p: &mut Painter,
                     vp: (f32, f32), scale: f32, app: &crate::window::App) {
     let PaintScratch { order, mats, done, tour, subs } = s;
     order.clear();
-    order.extend(0..frame.nodes.len());
+    match frame.order_modified(styles) {
+        Some(o) => order.extend(o),
+        None => order.extend(0..frame.nodes.len()),
+    }
     if frame.nodes.iter().any(|n| styles[n.style].z_index.is_some()) {
         order.sort_by_cached_key(|&i| frame.z_of(i, styles)); // stable: tree order within a level
     }
     vector_mats(frame, styles, vp, mats);
+    // the canvas's background, under every box
+    let (_, canvas) = canvas_background(frame, styles);
+    if let Some(root) = frame.nodes.first() {
+        let r = root.bounds;
+        let (w, h) = (vp.0.max(r.origin.x + r.size.width), vp.1.max(r.origin.y + r.size.height));
+        p.opacity = 1.0;
+        p.clip = None;
+        p.quad(rect(0.0, 0.0, w, h), 0.0, canvas, Rgba::TRANSPARENT, 0.0);
+    }
     if !mats.layered {
         // each box's items, for redraws that paint only what moved
         p.ranges.clear();
@@ -1981,6 +2074,26 @@ fn paint_source(p: &mut Painter, src: &crate::effects::ImageSource, area: Bounds
 /// A background that repaints exactly the pixels already under it: an opaque
 /// plain fill with the colour and bounds of the nearest painted ancestor, with
 /// only undecorated same-sized boxes in between (so nothing else can show).
+/// The canvas's background (CSS Backgrounds 2.11.2): the root element's colour, or `<body>`'s
+/// when the root has none, or white; and the box it came from (which doesn't paint it again).
+pub(crate) fn canvas_background(frame: &Frame, styles: &StyleStore) -> (Option<usize>, Rgba) {
+    let Some(root) = frame.nodes.first() else { return (None, Rgba::WHITE) };
+    let own = |c: &Computed| !c.background.is_transparent();
+    let plain = |c: &Computed| c.gradient.is_none() && c.images.as_ref().is_none_or(|i| i.bg_url.is_none());
+    let rc = &styles[root.style];
+    if own(rc) {
+        return (Some(0), rc.background);
+    }
+    if plain(rc) {
+        let body = (1..frame.nodes.len()).find(|&i| frame.nodes[i].parent == Some(0) && frame.el(i).is_some_and(|e| e.tag == "body"));
+        // (a body without a box, `display: contents`, has nothing to give)
+        if let Some(b) = body.filter(|&b| frame.nodes[b].taffy.is_some() && own(&styles[frame.nodes[b].style])) {
+            return (Some(b), styles[frame.nodes[b].style].background);
+        }
+    }
+    (None, Rgba::WHITE)
+}
+
 fn redundant_background(frame: &Frame, styles: &StyleStore, n: &BoxNode) -> bool {
     let c = &styles[n.style];
     if c.background.a < 1.0 || c.gradient.is_some() || !c.shadows.is_empty()
@@ -2007,6 +2120,131 @@ fn redundant_background(frame: &Frame, styles: &StyleStore, n: &BoxNode) -> bool
     false
 }
 
+/// The inline boxes around line item `i` (a word or an inline box's edge), outermost first: each
+/// paints the piece of its fragment the item covers, its background and its top and bottom borders
+/// round its content area (with its padding), its start and end borders where its edges are (CSS
+/// Inline 3: `box-decoration-break: slice`).
+fn paint_inline_boxes(frame: &Frame, styles: &StyleStore, i: usize, p: &mut Painter) {
+    let n = &frame.nodes[i];
+    let b = n.bounds;
+    let mut chain: smallvec::SmallVec<[usize; 4]> = smallvec::SmallVec::new();
+    let mut o = Some(n.owner);
+    while let Some(k) = o.filter(|&k| k < frame.nodes.len()) {
+        let m = &frame.nodes[k];
+        if m.taffy.is_some() || !matches!(m.content, Content::Element) || styles[m.style].display != DisplayKind::Inline {
+            break;
+        }
+        chain.push(k);
+        o = m.parent;
+    }
+    // the item's baseline: where its own style's text sits in its box
+    let c = &styles[n.style];
+    let base = text::baseline(b.origin.y, b.size.height, c.font_size, c.font_id);
+    for &k in chain.iter().rev() {
+        let s = &styles[frame.nodes[k].style];
+        let w = b.size.width;
+        let (top, bottom) = text::content_box(base, s.font_size, s.font_id);
+        let bw = border_widths(s, w);
+        let pad = |v: taffy::style::LengthPercentage| lp(v, 0.0);
+        let (top, bottom) = (top - pad(s.layout.padding.top) - bw[0], bottom + pad(s.layout.padding.bottom) + bw[2]);
+        // its own edge: the part past its margin
+        let margin = |v: taffy::style::LengthPercentageAuto| taffy::ResolveOrZero::resolve_or_zero(v, Some(0.0), crate::tree::resolve_calc);
+        let (mut x0, mut x1) = (b.origin.x, b.origin.x + w);
+        let edge = match n.content {
+            Content::Edge(start) if n.owner == k => Some(start),
+            _ => None,
+        };
+        match edge {
+            Some(true) => x0 += margin(s.layout.margin.left),
+            Some(false) => x1 -= margin(s.layout.margin.right),
+            None => {}
+        }
+        let r = rect(x0, top, (x1 - x0).max(0.0), (bottom - top).max(0.0));
+        if !s.background.is_transparent() {
+            p.fill(r, s.background);
+        }
+        let side = |p: &mut Painter, r: Bounds<f32>, c: Rgba| if r.size.width > 0.0 && r.size.height > 0.0 && c.a > 0.0 { p.fill(r, c) };
+        side(p, rect(x0, top, r.size.width, bw[0]), s.border_color[0]);
+        side(p, rect(x0, bottom - bw[2], r.size.width, bw[2]), s.border_color[2]);
+        match edge {
+            Some(true) => side(p, rect(x0, top, bw[3], r.size.height), s.border_color[3]),
+            Some(false) => side(p, rect(x1 - bw[1], top, bw[1], r.size.height), s.border_color[1]),
+            None => {}
+        }
+    }
+}
+
+/// Word box `i`'s text node, and where its word starts and ends in it.
+fn word_span(frame: &Frame, i: usize) -> Option<(usize, usize, usize)> {
+    match frame.nodes.get(i)?.content {
+        Content::Word { src, start, end, .. } => Some((src as usize, start as usize, end as usize)),
+        _ => None,
+    }
+}
+
+/// The text between word box `i - 1`'s word and word box `i`'s: of one text node, or the end of
+/// one and the start of the next when that is white space only.
+fn between_words(frame: &Frame, i: usize) -> Option<&str> {
+    let (src, start, _) = word_span(frame, i)?;
+    let (psrc, _, pend) = word_span(frame, i.checked_sub(1)?)?;
+    let text = |s: usize| match &frame.nodes[s].content {
+        Content::Text(t) => Some(t.as_ref()),
+        _ => None,
+    };
+    if psrc == src {
+        return text(src)?.get(pend..start);
+    }
+    let (tail, head) = (text(psrc)?.get(pend..)?, text(src)?.get(..start)?);
+    let blank = |s: &str| s.chars().all(|c| c == ' ');
+    // (one gap only: the space at the end of the first, or the start of the second)
+    (blank(tail) && blank(head)).then_some(if tail.is_empty() { head } else { tail })
+}
+
+/// When word box `i` continues the run of the word box before it, the text between them: text that
+/// looks the same on the same line, where that text puts it (no justification, spacing, tab or
+/// soft hyphen between them; a gap of discarded white space, `white-space-trim`, is none).
+fn run_gap<'f>(frame: &'f Frame, styles: &StyleStore, tc: &mut TextCache, i: usize) -> Option<&'f str> {
+    let k = i.checked_sub(1)?;
+    word_span(frame, k)?;
+    let between = between_words(frame, i)?;
+    let (n, m) = (&frame.nodes[i], &frame.nodes[k]);
+    let (c, d) = (&styles[n.style], &styles[m.style]);
+    let looks = n.style == m.style
+        || (c.font_size == d.font_size && text::flags(c) == text::flags(d) && c.color == d.color
+            && c.underline == d.underline && c.line_through == d.line_through && c.overline == d.overline
+            && c.text_shadow.is_none() && d.text_shadow.is_none() && c.opacity == d.opacity);
+    // (letter spacing paints per character, the same in a run: alike on both sides it joins)
+    if !looks || (n.bounds.origin.y - m.bounds.origin.y).abs() > 0.01 || c.letter_spacing != d.letter_spacing
+        || c.word_spacing != 0.0 || d.word_spacing != 0.0 {
+        return None;
+    }
+    let (prev, word) = (frame.text(k), frame.text(i));
+    if [prev, between, word].iter().any(|s| s.contains(['\t', crate::linebreak::SOFT_HYPHEN])) {
+        return None;
+    }
+    let fits = |tc: &mut TextCache, gap: &str| {
+        let joined = format!("{prev}{gap}");
+        let w = tc.width(&joined, c.font_size, text::flags(c)) + c.letter_spacing * joined.chars().count() as f32;
+        (m.bounds.origin.x + w - n.bounds.origin.x).abs() < 0.5
+    };
+    if fits(tc, between) {
+        Some(between)
+    } else if !between.is_empty() && between.chars().all(|ch| ch == ' ') && fits(tc, "") {
+        Some("")
+    } else {
+        None
+    }
+}
+
+/// The last word box of the run word box `i` starts (`i` itself when none continues it).
+fn run_after(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize) -> usize {
+    let mut j = i;
+    while j + 1 < frame.nodes.len() && run_gap(frame, styles, tc, j + 1).is_some() {
+        j += 1;
+    }
+    j
+}
+
 fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, p: &mut Painter,
               vp: (f32, f32), app: &crate::window::App) {
     let n = &frame.nodes[i];
@@ -2015,18 +2253,47 @@ fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, 
     p.snap = true; // a CSS box (a canvas's own drawing turns it off)
     let b = n.bounds;
     match &n.content {
+        Content::Edge(_) => paint_inline_boxes(frame, styles, i, p),
         Content::Word { .. } => {
-            // inline element backgrounds paint per line fragment (here: per word)
-            let owner = &frame.nodes[n.owner];
-            if owner.taffy.is_none() {
-                p.fill(b, styles[owner.style].background);
-            }
+            // the inline boxes it is in paint their fragments of this line under it
+            paint_inline_boxes(frame, styles, i, p);
             let text = frame.text(i);
             if let Some(sel) = p.sel {
                 let line = RunLine { text, x: b.origin.x, y: b.origin.y, lh: b.size.height, w: b.size.width, at: 0 };
                 paint_selection(p, tc, c, &sel, n.seq, text.len(), &line, true);
             }
-            paint_text_line(p, tc, c, text, b.origin.x, b.origin.y, b.size.height, None);
+            // Han in a Japanese or Korean paragraph keeps its faces
+            let hint = match n.content {
+                Content::Word { lang: 1, .. } => sys::BUI_FONT_HAN_JA,
+                Content::Word { lang: 2, .. } => sys::BUI_FONT_HAN_KO,
+                _ => 0,
+            };
+            // words of one text at their natural spacing on a line draw as one run, as a browser
+            // draws a text run (its glyphs placed by the run, not word by word): the first paints
+            // them all
+            let run = run_after(frame, styles, tc, i);
+            if run_gap(frame, styles, tc, i).is_some() {
+                // drawn by the run's first word
+            } else if run > i {
+                let mut whole = String::from(frame.text(i));
+                for j in i + 1..=run {
+                    whole.push_str(run_gap(frame, styles, tc, j).unwrap_or(""));
+                    whole.push_str(frame.text(j));
+                }
+                paint_text_line_as(p, tc, c, &whole, (b.origin.x, b.origin.y, b.size.height), None, hint);
+            } else if text == "\t" {
+                // a soft hyphen draws nothing, but a hyphen where a line ends at it (its box grew to hold one)
+                // a tab: its advance is its box
+            } else if text.contains(crate::linebreak::SOFT_HYPHEN) {
+                let mut shown: String = text.chars().filter(|&ch| ch != crate::linebreak::SOFT_HYPHEN).collect();
+                let w = tc.width(&shown, c.font_size, text::flags(c)) + c.letter_spacing * shown.chars().count() as f32;
+                if text.ends_with(crate::linebreak::SOFT_HYPHEN) && b.size.width > w + 0.5 {
+                    shown.push('\u{2010}');
+                }
+                paint_text_line_as(p, tc, c, &shown, (b.origin.x, b.origin.y, b.size.height), None, hint);
+            } else {
+                paint_text_line_as(p, tc, c, text, (b.origin.x, b.origin.y, b.size.height), None, hint);
+            }
         }
         // a text run as a flex/grid item (in line boxes its words paint instead)
         Content::Text(t) if n.taffy.is_some() || n.folded => {
@@ -2041,7 +2308,8 @@ fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, 
             let hidden_cell = c.empty_cells_hide && c.display == DisplayKind::TableCell
                 && !c.border_collapse && frame.is_empty(i);
             if !hidden_cell {
-                paint_box(n, c, p, vp, redundant_background(frame, styles, n));
+                let canvas = (i == 0 || n.parent == Some(0)) && canvas_background(frame, styles).0 == Some(i);
+                paint_box(n, c, p, vp, canvas || redundant_background(frame, styles, n));
             }
             let marker_img = n.marker.as_ref().and(c.list_image.as_deref()).and_then(background_file);
             if let Some(img) = marker_img.as_ref() {
@@ -2090,11 +2358,13 @@ fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, 
                         p.snap = false; // the canvas draws as it says, anti-aliased (as a browser canvas)
                         p.with_clip(inner, |p| f(inner, p, app));
                     }
+                    // a canvas nothing draws on is transparent, as is an <svg> (its shapes aren't drawn)
+                    Replaced::Placeholder("canvas" | "svg") => {}
                     Replaced::Placeholder(tag) => {
                         p.fill(inner, crate::color::rgb(0x282828));
                         let label = frame.attr(i, "alt").unwrap_or(tag);
                         let w = tc.width(label, c.font_size, 0);
-                        let base = text::baseline(inner.origin.y, inner.size.height, c.font_size);
+                        let base = text::baseline(inner.origin.y, inner.size.height, c.font_size, 0);
                         p.styled_text(inner.origin.x + (inner.size.width - w) / 2.0,
                                       text::item_top(base, c.font_size),
                                       label, c.font_size, 0, crate::color::rgb(0x8a8a8a));
@@ -2128,7 +2398,7 @@ pub(crate) fn each_run_line(tc: &mut TextCache, c: &Computed, t: &str, b: Bounds
                             mut f: impl FnMut(&mut TextCache, &RunLine)) {
     let flags = text::flags(c);
     let ellipsis = c.ellipsizes();
-    let align = |lw: f32| match c.text_align {
+    let align = |lw: f32| match c.text_align.physical(c.layout.direction == taffy::style::Direction::Rtl) {
         TextAlign::Center => b.origin.x + (b.size.width - lw) / 2.0,
         TextAlign::Right => b.origin.x + b.size.width - lw,
         _ => b.origin.x,
@@ -2206,9 +2476,15 @@ pub(crate) fn content_box(c: &Computed, b: Bounds<f32>) -> Bounds<f32> {
 #[allow(clippy::too_many_arguments)]
 fn paint_text_line(p: &mut Painter, tc: &mut TextCache, c: &Computed, s: &str, x: f32, y: f32, lh: f32,
                    width: Option<f32>) {
-    let flags = text::flags(c);
+    paint_text_line_as(p, tc, c, s, (x, y, lh), width, 0);
+}
+
+/// [`paint_text_line`] with extra font flags (`text::han_hint`).
+fn paint_text_line_as(p: &mut Painter, tc: &mut TextCache, c: &Computed, s: &str, (x, y, lh): (f32, f32, f32),
+                      width: Option<f32>, hint: i32) {
+    let flags = text::flags(c) | hint;
     let size = c.font_size;
-    let base = text::baseline(y, lh, size);
+    let base = text::baseline(y, lh, size, c.font_id);
     let s: std::borrow::Cow<str> = if c.small_caps { s.to_uppercase().into() } else { s.into() };
     let size_draw = if c.small_caps { size * 0.8 } else { size };
     let top = text::item_top(base, size_draw);
@@ -2238,7 +2514,7 @@ fn paint_text_line(p: &mut Painter, tc: &mut TextCache, c: &Computed, s: &str, x
             decoration(p, c.decoration_style, x, base - size * text::STRIKEOUT - thick / 2.0, w, thick, dc);
         }
         if c.overline {
-            decoration(p, c.decoration_style, x, text::ascent_top(base, size), w, thick, dc);
+            decoration(p, c.decoration_style, x, text::ascent_top(base, size, c.font_id), w, thick, dc);
         }
     }
 }
@@ -2289,42 +2565,105 @@ fn decoration(p: &mut Painter, style: DecoStyle, x: f32, y: f32, w: f32, t: f32,
 /// Shadows, background, borders and outline of an element box.
 fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_background: bool) {
     let b = n.bounds;
-    if matches!(c.display, DisplayKind::Contents) || b.size.width <= 0.0 && b.size.height <= 0.0 {
+    if matches!(c.display, DisplayKind::Contents) {
         return;
     }
     let r = radius_px(c, b, vp);
-    for s in c.shadows.iter().filter(|s| !s.inset) {
+    // outer shadows, the first on top (CSS Backgrounds 6.1); an empty box's spread still shows
+    for s in c.shadows.iter().rev().filter(|s| !s.inset) {
         let steps = (s.blur / 2.0).ceil().clamp(1.0, 8.0) as usize;
         for k in 0..steps {
             let grow = s.spread + s.blur * (k as f32 + 1.0) / (steps as f32 + 1.0);
             let a = s.color.a / steps as f32 * if s.blur > 0.0 { 1.0 } else { steps as f32 };
-            let sb = rect(b.origin.x + s.x - grow, b.origin.y + s.y - grow,
-                          b.size.width + 2.0 * grow, b.size.height + 2.0 * grow);
-            p.quad(sb, r + grow, s.color.alpha(a), Rgba::TRANSPARENT, 0.0);
+            let (w, h) = (b.size.width + 2.0 * grow, b.size.height + 2.0 * grow);
+            if w <= 0.0 || h <= 0.0 {
+                continue;
+            }
+            let sb = rect(b.origin.x + s.x - grow, b.origin.y + s.y - grow, w, h);
+            // square corners stay square under spread; the blur rounds them
+            let corner = if r > 0.0 { (r + grow).max(0.0) } else { (grow - s.spread).max(0.0) };
+            p.quad(sb, corner, s.color.alpha(a), Rgba::TRANSPARENT, 0.0);
         }
+    }
+    if b.size.width <= 0.0 && b.size.height <= 0.0 {
+        return;
     }
     // `background-clip`: the painting area; its radius shrinks with it
     let bw = border_widths(c, b.size.width);
+    // `background-attachment: local` on a scroll container: painted in its scrollport only, placed
+    // on its scrolled content (CSS Backgrounds 3.5)
+    let ov = c.layout.overflow;
+    let local = c.images.as_deref().is_some_and(|s| s.bg_local)
+        && (ov.x != taffy::style::Overflow::Visible || ov.y != taffy::style::Overflow::Visible);
     let clip_box = edge_box(c, b, c.bg_clip, &bw);
+    let clip_box = if local { clip_box.intersect(&edge_box(c, b, BoxEdge::Padding, &bw)) } else { clip_box };
     let clip_r = (r - (clip_box.origin.x - b.origin.x)).max(0.0);
-    match &c.gradient {
-        Some(g) if clip_r > 0.0 => with_rounded_clip(p, clip_box, clip_r, |p| paint_gradient(p, g, clip_box)),
-        Some(g) => p.with_clip(clip_box, |p| paint_gradient(p, g, clip_box)),
-        None if skip_background && c.bg_clip == BoxEdge::Border => {}
-        None => p.quad(clip_box, clip_r, c.background, Rgba::TRANSPARENT, 0.0),
+    let origin_area = |st: &crate::style::ImageStyle| {
+        if st.bg_fixed {
+            return rect(0.0, 0.0, vp.0, vp.1);
+        }
+        let a = edge_box(c, b, c.bg_origin, &bw);
+        if local {
+            let ((sx, sy), (rx, ry)) = (n.scroll_pos, n.scroll_range);
+            rect(a.origin.x - sx, a.origin.y - sy, a.size.width + rx, a.size.height + ry)
+        } else {
+            a
+        }
+    };
+    if !(skip_background && c.bg_clip == BoxEdge::Border) && !c.background.is_transparent() {
+        p.quad(clip_box, clip_r, c.background, Rgba::TRANSPARENT, 0.0);
+    }
+    if let Some(g) = &c.gradient {
+        // a gradient is an image with no natural size: sized, positioned and repeated as one
+        let plain;
+        let st = match c.images.as_deref() {
+            Some(st) => st,
+            None => {
+                plain = crate::style::ImageStyle::default();
+                &plain
+            }
+        };
+        let area = origin_area(st);
+        // one tile is painted as shapes; repeated ones draw it rasterized once
+        let one = !st.bg_repeat.0 && !st.bg_repeat.1;
+        let tiles = |p: &mut Painter| tile_background(p, st, area, clip_box, crate::style::Natural::default(), |p, t| {
+            match gradient_image(g, t.size.width, t.size.height).filter(|_| !one) {
+                Some(img) => p.image(t, &img),
+                None => p.with_clip(t, |p| paint_gradient(p, g, t)),
+            }
+        });
+        if clip_r > 0.0 { with_rounded_clip(p, clip_box, clip_r, tiles) } else { tiles(p) }
     }
     if let Some(st) = c.images.as_deref().filter(|st| st.bg_url.is_some()) {
         // `background-origin` positions the image, `-attachment: fixed` against the viewport
-        let area = if st.bg_fixed { rect(0.0, 0.0, vp.0, vp.1) } else { edge_box(c, b, c.bg_origin, &bw) };
+        let area = origin_area(st);
         let clip_to = if st.bg_fixed { clip_box } else { clip_box.intersect(&b) };
         paint_background_image(p, st, area, clip_to);
     }
-    for s in c.shadows.iter().filter(|s| s.inset) {
-        let w = s.blur.max(1.0) + s.spread;
-        p.with_clip(b, |p| {
-            p.quad(rect(b.origin.x + s.x, b.origin.y + s.y, b.size.width, b.size.height), r,
-                   Rgba::TRANSPARENT, s.color, w);
-        });
+    // inset shadows: the padding box outside its offset, spread-shrunk copy (the hole), painted as
+    // a ring wide enough to cover the box around the hole
+    let pad = rect(b.origin.x + bw[3], b.origin.y + bw[0], (b.size.width - bw[1] - bw[3]).max(0.0),
+                   (b.size.height - bw[0] - bw[2]).max(0.0));
+    let pad_r = (r - bw[0].max(bw[3])).max(0.0);
+    for s in c.shadows.iter().rev().filter(|s| s.inset) {
+        let ring = b.size.width + b.size.height + s.x.abs() + s.y.abs() + s.spread.abs() + s.blur;
+        let steps = (s.blur / 2.0).ceil().clamp(1.0, 8.0) as usize;
+        let paint = |p: &mut Painter| {
+            for k in 0..steps {
+                let shrink = s.spread + s.blur * ((k as f32 + 1.0) / (steps as f32 + 1.0) - 0.5);
+                let a = s.color.a / steps as f32 * if s.blur > 0.0 { 1.0 } else { steps as f32 };
+                let hole = rect(pad.origin.x + s.x + shrink, pad.origin.y + s.y + shrink,
+                                (pad.size.width - 2.0 * shrink).max(0.0), (pad.size.height - 2.0 * shrink).max(0.0));
+                let outer = rect(hole.origin.x - ring, hole.origin.y - ring, hole.size.width + 2.0 * ring, hole.size.height + 2.0 * ring);
+                let hr = if pad_r > 0.0 { (pad_r - shrink).max(0.0) } else { 0.0 };
+                p.quad(outer, hr + ring, Rgba::TRANSPARENT, s.color.alpha(a), ring);
+            }
+        };
+        if pad_r > 0.0 {
+            with_rounded_clip(p, pad, pad_r, paint);
+        } else {
+            p.with_clip(pad, paint);
+        }
     }
     let visible: Vec<usize> = (0..4).filter(|&k| bw[k] > 0.0 && c.border_drawn[k]
                                             && !c.border_color[k].is_transparent()).collect();
@@ -2341,9 +2680,8 @@ fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_ba
         let widths: [f32; 4] = std::array::from_fn(|k| if visible.contains(&k) { bw[k] } else { 0.0 });
         paint_edges(p, b, widths, c.border_color, styles);
     } else if uniform {
-        let h = bw[0] / 2.0;
-        p.quad(rect(b.origin.x + h, b.origin.y + h, b.size.width - bw[0], b.size.height - bw[0]),
-               (r - h).max(0.0), Rgba::TRANSPARENT, c.border_color[0], bw[0]);
+        // the kit draws an outline inside its rectangle, as a border is inside the border box
+        p.quad(b, r, Rgba::TRANSPARENT, c.border_color[0], bw[0]);
     } else {
         let (x, y, w, h) = (b.origin.x, b.origin.y, b.size.width, b.size.height);
         for k in visible {
@@ -2362,7 +2700,8 @@ fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_ba
         let ob = rect(b.origin.x - g, b.origin.y - g, b.size.width + 2.0 * g, b.size.height + 2.0 * g);
         paint_edges(p, ob, [ow; 4], [oc; 4], [c.outline_style; 4]);
     } else if ow > 0.0 && !oc.is_transparent() {
-        let g = off + ow / 2.0;
+        // drawn inside the rectangle `outline-offset` + its width out from the border box
+        let g = off + ow;
         p.quad(rect(b.origin.x - g, b.origin.y - g, b.size.width + 2.0 * g, b.size.height + 2.0 * g),
                r + g, Rgba::TRANSPARENT, oc, ow);
     }
@@ -2479,31 +2818,34 @@ fn paint_rounded_styled(p: &mut Painter, b: Bounds<f32>, r: f32, w: f32, col: Rg
 fn border_image_source(src: &crate::effects::ImageSource, w: f32, h: f32) -> Option<Arc<Image>> {
     match src {
         crate::effects::ImageSource::Url(u) => file_pixels(u),
-        crate::effects::ImageSource::Gradient(g) => {
-            thread_local! {
-                static GRADIENTS: std::cell::RefCell<HashMap<String, Arc<Image>>> =
-                    std::cell::RefCell::new(HashMap::new());
-            }
-            let (iw, ih) = (w.ceil().max(1.0) as usize, h.ceil().max(1.0) as usize);
-            let key = format!("{g:?}{iw}x{ih}");
-            if let Some(i) = GRADIENTS.with(|m| m.borrow().get(&key).cloned()) {
-                return Some(i);
-            }
-            let mut gp = Painter::new();
-            let area = rect(0.0, 0.0, iw as f32, ih as f32);
-            gp.with_clip(area, |gp| paint_gradient(gp, g, area));
-            let px = gp.rasterize(1.0, 0.0, 0.0, iw, ih)?;
-            let img = Arc::new(Image::from_argb(&px.to_argb())?);
-            GRADIENTS.with(|m| {
-                let mut m = m.borrow_mut();
-                if m.len() > 64 {
-                    m.clear();
-                }
-                m.insert(key, img.clone());
-            });
-            Some(img)
-        }
+        crate::effects::ImageSource::Gradient(g) => gradient_image(g, w, h),
     }
+}
+
+/// Gradient `g` rasterized at `w` x `h` (whole pixels), cached: drawn once for many tiles.
+fn gradient_image(g: &crate::style::Gradient, w: f32, h: f32) -> Option<Arc<Image>> {
+    thread_local! {
+        static GRADIENTS: std::cell::RefCell<HashMap<String, Arc<Image>>> =
+            std::cell::RefCell::new(HashMap::new());
+    }
+    let (iw, ih) = (w.ceil().max(1.0) as usize, h.ceil().max(1.0) as usize);
+    let key = format!("{g:?}{iw}x{ih}");
+    if let Some(i) = GRADIENTS.with(|m| m.borrow().get(&key).cloned()) {
+        return Some(i);
+    }
+    let mut gp = Painter::new();
+    let area = rect(0.0, 0.0, iw as f32, ih as f32);
+    gp.with_clip(area, |gp| paint_gradient(gp, g, area));
+    let px = gp.rasterize(1.0, 0.0, 0.0, iw, ih)?;
+    let img = Arc::new(Image::from_argb(&px.to_argb())?);
+    GRADIENTS.with(|m| {
+        let mut m = m.borrow_mut();
+        if m.len() > 64 {
+            m.clear();
+        }
+        m.insert(key, img.clone());
+    });
+    Some(img)
 }
 
 /// A sub-rectangle of an image (whole pixels), cached.
@@ -2752,25 +3094,19 @@ fn with_rounded_clip(p: &mut Painter, b: Bounds<f32>, r: f32, f: impl Fn(&mut Pa
     }
 }
 
-/// Colour at position `t` (0..1) along a gradient.
-fn gradient_at(g: &crate::style::Gradient, t: f32) -> Rgba {
-    let n = g.stops.len();
-    if n == 0 {
-        return Rgba::TRANSPARENT;
+/// Colour at position `t` (0..1) along a gradient's resolved `stops`.
+fn gradient_at(stops: &[(Rgba, f32)], t: f32) -> Rgba {
+    let Some(&(first, p0)) = stops.first() else { return Rgba::TRANSPARENT };
+    if t <= p0 {
+        return first;
     }
-    let pos: Vec<f32> = g.stops.iter().enumerate()
-        .map(|(k, (_, p))| p.unwrap_or(if n == 1 { 0.0 } else { k as f32 / (n - 1) as f32 }))
-        .collect();
-    if t <= pos[0] {
-        return g.stops[0].0;
-    }
-    for k in 1..n {
-        if t <= pos[k] {
-            let span = (pos[k] - pos[k - 1]).max(1e-6);
-            return mix(g.stops[k - 1].0, g.stops[k].0, (t - pos[k - 1]) / span);
+    for w in stops.windows(2) {
+        let ((c0, a), (c1, b)) = (w[0], w[1]);
+        if t <= b {
+            return if b - a < 1e-6 { c1 } else { mix(c0, c1, (t - a) / (b - a)) };
         }
     }
-    g.stops[n - 1].0
+    stops[stops.len() - 1].0
 }
 
 /// Gradients as bands: horizontal/vertical strips, or rings for radial ones.
@@ -2778,11 +3114,12 @@ fn paint_gradient(p: &mut Painter, g: &crate::style::Gradient, b: Bounds<f32>) {
     const BANDS: usize = 48;
     let (x, y, w, h) = (b.origin.x, b.origin.y, b.size.width, b.size.height);
     if g.radial {
+        let stops = g.resolved((w * w + h * h).sqrt() / 2.0);
         for k in (0..BANDS).rev() {
             let t = (k as f32 + 0.5) / BANDS as f32;
             let f = (k + 1) as f32 / BANDS as f32;
             let (rw, rh) = (w * f * std::f32::consts::SQRT_2, h * f * std::f32::consts::SQRT_2);
-            p.oval(rect(x + (w - rw) / 2.0, y + (h - rh) / 2.0, rw, rh), gradient_at(g, t),
+            p.oval(rect(x + (w - rw) / 2.0, y + (h - rh) / 2.0, rw, rh), gradient_at(&stops, t),
                    Rgba::TRANSPARENT, 0.0);
         }
         return;
@@ -2792,11 +3129,10 @@ fn paint_gradient(p: &mut Painter, g: &crate::style::Gradient, b: Bounds<f32>) {
     let (dx, dy) = (a.sin(), -a.cos());
     let len = (w * dx.abs() + h * dy.abs()).max(1.0);
     let (cx, cy) = (x + w / 2.0, y + h / 2.0);
-    for k in 0..BANDS {
-        let t0 = k as f32 / BANDS as f32;
-        let t1 = (k + 1) as f32 / BANDS as f32;
-        let col = gradient_at(g, (t0 + t1) / 2.0);
-        // a band perpendicular to the gradient line, long enough to cover the box
+    let stops = g.resolved(len);
+    // a band perpendicular to the gradient line from `t0` to `t1` (fractions of it), long enough to
+    // cover the box
+    let mut band = |t0: f32, t1: f32, col: Rgba| {
         let (s0, s1) = ((t0 - 0.5) * len, (t1 - 0.5) * len + 0.6);
         let (px, py) = (-dy, dx);
         let span = w + h;
@@ -2807,6 +3143,37 @@ fn paint_gradient(p: &mut Painter, g: &crate::style::Gradient, b: Bounds<f32>) {
             (cx + dx * s0 - px * span, cy + dy * s0 - py * span),
         ];
         p.polygon(&pts, col);
+    };
+    let Some(&(first, start)) = stops.first() else { return };
+    let (last, end) = stops[stops.len() - 1];
+    // the first and last colours fill the line before and after the stops; each segment between
+    // two stops is one band when they share a colour (a hard stop's edge stays hard), else bands
+    // 2px wide or more
+    if start > 0.0 {
+        band(0.0, start, first);
+    }
+    for pair in stops.windows(2) {
+        let ((c0, t0), (c1, t1)) = (pair[0], pair[1]);
+        let t1 = t1.min(1.0);
+        if t1 <= t0.max(0.0) {
+            continue;
+        }
+        let t0 = t0.max(0.0);
+        if c0 == c1 {
+            band(t0, t1, c0);
+            continue;
+        }
+        // bands on a 2px grid along the line (wider for long segments), so stops a hair apart paint alike
+        let step = 2.0f32.max((t1 - t0) * len / BANDS as f32);
+        let mut at = (t0 * len / step).floor() * step;
+        while at < t1 * len {
+            let (a, b) = ((at / len).max(t0), ((at + step) / len).min(t1));
+            band(a, b, gradient_at(&stops, (a + b) / 2.0));
+            at += step;
+        }
+    }
+    if end < 1.0 {
+        band(end.max(0.0), 1.0, last);
     }
 }
 
@@ -2871,29 +3238,57 @@ fn file_pixels(url: &str) -> Option<Arc<Image>> {
 fn paint_background_image(p: &mut Painter, st: &crate::style::ImageStyle, area: Bounds<f32>,
                           clip_to: Bounds<f32>) {
     let Some(img) = st.bg_url.as_deref().and_then(background_file) else { return };
+    tile_background(p, st, area, clip_to, img.natural(), |p, t| p.image_file(t, &img.src));
+}
+
+/// The tiles of a background image of natural size `natural` (CSS Backgrounds 3.6 to 3.9): sized by
+/// `background-size` and placed by `background-position` in positioning area `area`, repeated by
+/// `background-repeat` over painting area `clip_to`; `draw` paints one.
+fn tile_background(p: &mut Painter, st: &crate::style::ImageStyle, area: Bounds<f32>, clip_to: Bounds<f32>,
+                   natural: crate::style::Natural, draw: impl Fn(&mut Painter, Bounds<f32>)) {
+    use crate::style::{REPEAT_ROUND, REPEAT_SPACE};
     let (ax, ay, aw, ah) = (area.origin.x, area.origin.y, area.size.width, area.size.height);
-    let (tw, th) = st.tile((aw, ah), (img.width as f32, img.height as f32));
+    let (mut tw, mut th) = st.tile((aw, ah), natural);
     if tw < 0.5 || th < 0.5 || aw <= 0.0 || ah <= 0.0 {
         return;
     }
-    let x0 = ax + st.bg_position[0].at(aw - tw);
-    let y0 = ay + st.bg_position[1].at(ah - th);
-    // first tile at or before the area's start, when repeating
-    let sx = if st.bg_repeat.0 { x0 - ((x0 - ax) / tw).ceil() * tw } else { x0 };
-    let sy = if st.bg_repeat.1 { y0 - ((y0 - ay) / th).ceil() * th } else { y0 };
-    // repeated tiles cover the painting area, which may reach past the positioning area
-    let (ex, ey) = (clip_to.origin.x + clip_to.size.width, clip_to.origin.y + clip_to.size.height);
-    let sx = if st.bg_repeat.0 && clip_to.origin.x < sx { sx - ((sx - clip_to.origin.x) / tw).ceil() * tw } else { sx };
-    let sy = if st.bg_repeat.1 && clip_to.origin.y < sy { sy - ((sy - clip_to.origin.y) / th).ceil() * th } else { sy };
-    let nx = if st.bg_repeat.0 { ((ex.max(ax + aw) - sx) / tw).ceil() as usize } else { 1 };
-    let ny = if st.bg_repeat.1 { ((ey.max(ay + ah) - sy) / th).ceil() as usize } else { 1 };
+    // `round`: a whole number of tiles fills the area (CSS Backgrounds 3.4)
+    if st.bg_repeat.0 && st.bg_spacing[0] == REPEAT_ROUND {
+        tw = aw / (aw / tw).round().max(1.0);
+    }
+    if st.bg_repeat.1 && st.bg_spacing[1] == REPEAT_ROUND {
+        th = ah / (ah / th).round().max(1.0);
+    }
+    // each axis: where the tiles start, their pitch, how many: one where `background-position` puts
+    // it; repeated (from before the painting area's start to past its end); or `space`d, as many
+    // whole tiles as fit with the rest shared between them (one alone where it is placed)
+    let axis = |repeat: bool, spacing: u8, t: f32, a0: f32, alen: f32, pos: crate::style::Pos, c0: f32, clen: f32| {
+        let at = a0 + pos.at(alen - t);
+        if !repeat {
+            return (at, t, 1usize);
+        }
+        let (start, pitch) = if spacing == REPEAT_SPACE {
+            let n = (alen / t).floor();
+            if n < 2.0 {
+                return (at, t, usize::from(n >= 1.0));
+            }
+            (a0, t + (alen - n * t) / (n - 1.0))
+        } else {
+            (at, t)
+        };
+        let first = start - ((start - a0.min(c0)) / pitch).ceil() * pitch;
+        let n = (((c0 + clen).max(a0 + alen) - first) / pitch).ceil() as usize;
+        (first, pitch, n)
+    };
+    let (sx, px, nx) = axis(st.bg_repeat.0, st.bg_spacing[0], tw, ax, aw, st.bg_position[0], clip_to.origin.x, clip_to.size.width);
+    let (sy, py, ny) = axis(st.bg_repeat.1, st.bg_spacing[1], th, ay, ah, st.bg_position[1], clip_to.origin.y, clip_to.size.height);
     if nx.saturating_mul(ny) > 4096 {
         return; // tiny tiles over a huge box: not worth thousands of quads
     }
     p.with_clip(clip_to, |p| {
         for j in 0..ny {
             for i in 0..nx {
-                p.image_file(rect(sx + i as f32 * tw, sy + j as f32 * th, tw, th), &img.src);
+                draw(p, rect(sx + i as f32 * px, sy + j as f32 * py, tw, th));
             }
         }
     });

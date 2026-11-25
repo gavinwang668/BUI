@@ -1316,7 +1316,8 @@ PyMODINIT_FUNC PyInit_buipy(void)
     return NULL;
   }
   if (PyModule_AddObjectRef(m, "Raster", (PyObject *)&BuiPyRaster_Type) < 0 ||
-      buipy_kit_init(m) < 0 || buipy_video_init(m) < 0 || buipy_anim_init(m) < 0
+      buipy_kit_init(m) < 0 || buipy_video_init(m) < 0 || buipy_anim_init(m) < 0 ||
+      buipy_shell_init(m) < 0
 #ifdef BUI_PY_IMGUI
       || buipy_imgui_init(m) < 0
 #endif

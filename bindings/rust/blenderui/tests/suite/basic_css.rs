@@ -99,6 +99,38 @@ fn background_clip_and_origin() {
     });
 }
 
+/// A gradient is sized, placed and repeated as a background image (no natural size).
+#[test]
+fn gradient_backgrounds_tile() {
+    Application::headless().run(|cx| {
+        let (_, at) = page(cx, 200.0, 100.0, "
+            html, body { margin: 0; background: #000 }
+            #a { width: 80px; height: 40px; background: linear-gradient(#f00, #f00) 0 0/20px 20px no-repeat }
+            #b { width: 80px; height: 40px; background: linear-gradient(#00f, #00f) 10px 0/20px 20px repeat-x }
+        ", || body().child(div().id("a")).child(div().id("b")));
+        assert_eq!(at(5.0, 5.0), 0xff0000);
+        assert_eq!(at(30.0, 5.0), BG, "past the one tile");
+        assert_eq!(at(5.0, 30.0), BG, "below the one tile");
+        assert_eq!(at(5.0, 45.0), 0x0000ff, "repeated to the left of its position");
+        assert_eq!(at(75.0, 45.0), 0x0000ff, "and to the right");
+        assert_eq!(at(5.0, 65.0), BG, "not down");
+    });
+}
+
+/// Text in an inline box draws as the same text outside one: its words are one run.
+#[test]
+fn words_in_a_span_draw_as_one_run() {
+    Application::headless().run(|cx| {
+        let (_, a) = page(cx, 300.0, 60.0, "html, body { margin: 0; background: #fff } div { color: #000 }",
+                          || body().child(div().child(span().child("This should be green"))));
+        let (_, b) = page(cx, 300.0, 60.0, "html, body { margin: 0; background: #fff } div { color: #000 }",
+                          || body().child(div().child("This should be green")));
+        let differ: Vec<(u32, u32)> = (0..30).flat_map(|y| (0..300).map(move |x| (x, y)))
+            .filter(|&(x, y)| a(x as f32, y as f32) != b(x as f32, y as f32)).collect();
+        assert!(differ.is_empty(), "{} pixels differ, first {:?}", differ.len(), differ.first());
+    });
+}
+
 #[test]
 fn clip_rect_on_absolute_boxes() {
     Application::headless().run(|cx| {

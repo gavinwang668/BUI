@@ -28,6 +28,24 @@ fn every_format_decodes() {
     assert!(Image::from_rgba(4, 4, &[0; 8]).is_none(), "short pixels rejected at the boundary");
 }
 
+/// The optional formats (features.json): with its feature, a format's files decode; without
+/// it, they are no image. HEIC is the OS's (tests/image_test.c checks it where it decodes).
+#[test]
+fn optional_formats_decode_when_built() {
+    let formats: [(bool, &[&str]); 4] = [
+        (cfg!(feature = "tiff"), &["quad.tif", "quad_jpeg.tif", "quad_alpha.tif"]),
+        (cfg!(feature = "exr"), &["quad.exr", "quad_alpha.exr", "gray_tiled.exr"]),
+        (cfg!(feature = "avif"), &["quad.avif", "anim.avif"]),
+        (cfg!(feature = "jxl"), &["quad.jxl", "anim.jxl"]),
+    ];
+    for (on, names) in formats {
+        for &name in names {
+            let img = Image::open(&fixture(name));
+            assert_eq!(img.map(|i| (i.width, i.height)), on.then_some((8, 6)), "{name}");
+        }
+    }
+}
+
 struct Files;
 impl Render for Files {
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
@@ -260,4 +278,27 @@ fn resizing_an_img_reuses_its_decode() {
         unsafe { sys::BK_image_stats(&raw mut st) };
         assert_eq!(st.decoded, decoded + 1, "a decode for a much smaller box");
     });
+}
+
+/// An SVG decoded on its own fits within the box and is never upscaled; its header says which of
+/// its size is natural (a `viewBox` alone gives only the ratio).
+#[test]
+fn svg_headers_say_what_size_is_natural() {
+    let bytes = std::fs::read(fixture("halves.svg")).unwrap();
+    let img = Image::decode(&bytes, 32, 32).unwrap();
+    assert_eq!((img.width, img.height), (16, 12), "fit within, not upscaled");
+    let probe = |svg: &[u8]| {
+        let mut info = sys::BKImageInfo::default();
+        // SAFETY: the kit reads `svg.len()` bytes and writes `info`.
+        assert!(unsafe { sys::BK_image_probe(svg.as_ptr().cast(), svg.len(), &raw mut info) } != 0);
+        info
+    };
+    let sized = probe(&bytes);
+    assert_eq!(sized.flags, sys::BK_IMAGE_INFO_VECTOR);
+    let ratio = probe(br#"<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 4 64"><rect width="4" height="64"/></svg>"#);
+    assert_eq!((ratio.width, ratio.height), (4, 64), "the viewBox stands in, for its ratio");
+    assert_eq!(ratio.flags, sys::BK_IMAGE_INFO_VECTOR | sys::BK_IMAGE_INFO_NO_WIDTH | sys::BK_IMAGE_INFO_NO_HEIGHT);
+    let none = probe(br#"<svg xmlns="http://www.w3.org/2000/svg" width="50%"><rect width="4" height="4"/></svg>"#);
+    assert_eq!((none.width, none.height), (300, 150));
+    assert_ne!(none.flags & sys::BK_IMAGE_INFO_NO_RATIO, 0);
 }

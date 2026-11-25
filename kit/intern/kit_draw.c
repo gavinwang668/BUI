@@ -1457,6 +1457,13 @@ static const BKImBuf *svg_bitmap(int idx, int size, const float c[4])
   }
 }
 
+BKImBuf *bk_icon_image(const char *name, int size, const float color[4])
+{
+  const int idx = name ? svg_lookup(name) : -1;
+  const BKImBuf *ib = idx >= 0 ? svg_bitmap(idx, BK_MAX(1, size), color) : NULL;
+  return ib ? BK_imbuf_from_argb(ib->rect, ib->x, ib->y) : NULL;
+}
+
 static void svg_icon_draw(int idx, float cx, float cy, const float c[4], float s)
 {
   const int size = BK_MAX(1, (int)(s + 0.5f));

@@ -408,3 +408,102 @@ fn the_payload_travels_through_the_page() {
     assert_eq!(page.record(4).unwrap().data, &[4, 4, 4, 4]);
     assert!(page.record(0).is_none());
 }
+
+#[test]
+fn a_drag_past_the_top_stretches_and_lets_go_when_the_finger_lifts() {
+    let style = ChatStyle::new(Palette::blender_dark());
+    let opts = Options { overscroll: true, ..Options::default() };
+    let mut v = ListView::uniform(1000, 24.0, &style, 600.0, 480.0, opts).unwrap();
+    v.drag(-200.0); // the finger pulls the first item down past the top
+    assert!(v.stretch() > 0.0 && v.stretch() < 200.0, "a rubber band, not 1:1: {}", v.stretch());
+    assert_eq!(v.scroll_extent().0, 0.0, "the content stayed at its end");
+    // the finger holds still: nothing relaxes while it is down
+    let held = v.stretch();
+    v.tick(1.0);
+    assert_eq!(v.stretch(), held);
+    v.release();
+    for _ in 0..60 {
+        v.tick(1.0 / 60.0);
+    }
+    assert_eq!(v.stretch(), 0.0, "it springs back");
+}
+
+#[test]
+fn overscroll_is_off_unless_asked_for() {
+    let style = ChatStyle::new(Palette::blender_dark());
+    let mut v = ListView::uniform(1000, 24.0, &style, 600.0, 480.0, Options::default()).unwrap();
+    v.drag(-200.0);
+    assert_eq!(v.stretch(), 0.0);
+}
+
+#[test]
+fn smooth_wheel_eases_a_notch_in_and_the_default_does_not() {
+    let style = ChatStyle::new(Palette::blender_dark());
+    let mut at_once = ListView::uniform(1000, 24.0, &style, 600.0, 480.0, Options::default()).unwrap();
+    at_once.wheel(57.0, true);
+    assert!((at_once.scroll_extent().0 - 57.0).abs() < 0.5);
+    let mut eased = ListView::uniform(1000, 24.0, &style, 600.0, 480.0, Options { smooth_wheel: true, ..Options::default() }).unwrap();
+    eased.wheel(57.0, false);
+    assert!(eased.scroll_extent().0 < 1.0, "nothing moves until a frame ticks");
+    for _ in 0..60 {
+        eased.tick(1.0 / 60.0);
+    }
+    assert!((eased.scroll_extent().0 - 57.0).abs() < 1.0);
+}
+
+/// How far the content really moved (the shared item's `y`) when asked to scroll `dy` from the middle.
+fn moved_by(dy: f64) -> f64 {
+    let mut c = chat(200_000, Options::default());
+    c.view.scroll_to_offset(3.0e6);
+    c.layout(&mut tw);
+    let before = c.view.placed().iter().map(|p| (p.item, p.y)).collect::<Vec<_>>();
+    c.view.scroll_by(dy);
+    c.layout(&mut tw);
+    let after = c.view.placed();
+    let (item, y0) = before.iter().find(|(i, _)| after.iter().any(|p| p.item == *i)).copied().unwrap();
+    let y1 = after.iter().find(|p| p.item == item).unwrap().y;
+    f64::from(y0 - y1)
+}
+
+#[test]
+fn scrolling_moves_the_content_as_far_as_asked_in_both_directions() {
+    for dy in [60.0, 300.0, 420.0] {
+        let (down, up) = (moved_by(dy), -moved_by(-dy));
+        eprintln!("dy {dy}: down moved {down:.1}, up moved {up:.1}");
+        assert!((down - dy).abs() < 1.5, "down {dy}: {down}");
+        assert!((up - dy).abs() < 1.5, "up {dy}: {up}");
+    }
+}
+
+#[test]
+fn a_fling_into_the_top_stretches_once_and_the_rest_of_it_is_dropped() {
+    let style = ChatStyle::new(Palette::blender_dark());
+    let opts = Options { overscroll: true, ..Options::default() };
+    let mut v = ListView::uniform(1000, 24.0, &style, 600.0, 480.0, opts).unwrap();
+    v.fling(-40.0); // arrives at the top at 40 px a frame
+    let once = v.stretch();
+    assert!(once > 0.0, "the momentum went into the band");
+    for _ in 0..90 {
+        v.fling(-40.0); // the rest of the coast
+        v.tick(1.0 / 90.0);
+    }
+    assert!(v.stretch() < once * 0.1, "it relaxed while the fling ran on: {} of {once}", v.stretch());
+    // the band is back within about a third of a second of the fling's arrival
+    let mut v = ListView::uniform(1000, 24.0, &style, 600.0, 480.0, opts).unwrap();
+    v.fling(-40.0);
+    for _ in 0..30 {
+        v.tick(1.0 / 90.0);
+    }
+    assert!(v.stretch().abs() < 3.0, "{}", v.stretch());
+}
+
+#[test]
+fn dragging_back_out_of_a_stretch_follows_the_finger() {
+    let style = ChatStyle::new(Palette::blender_dark());
+    let opts = Options { overscroll: true, ..Options::default() };
+    let mut v = ListView::uniform(1000, 24.0, &style, 600.0, 480.0, opts).unwrap();
+    v.drag(-300.0);
+    let before = v.stretch();
+    v.drag(50.0); // the finger comes back 50 px
+    assert!((v.stretch() - before + 50.0).abs() < 0.5, "{before} -> {}", v.stretch());
+}

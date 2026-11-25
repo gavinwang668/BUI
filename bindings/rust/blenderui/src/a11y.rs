@@ -219,7 +219,7 @@ impl Accessibility {
         let f = page.frame;
         let n = &f.nodes[i];
         match &n.content {
-            Content::Word { .. } | Content::LineBreak => {}
+            Content::Word { .. } | Content::LineBreak | Content::Edge(_) => {}
             Content::Anon => self.walk_kids(page, i, parent),
             Content::Text(run) => {
                 if n.visible && !run.trim().is_empty() {

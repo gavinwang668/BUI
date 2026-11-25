@@ -16,6 +16,7 @@ add_library(bui_kit STATIC
   intern/kit_menus.c
   intern/kit_color.c
   intern/kit_frame.c
+  intern/kit_fling.c
   intern/kit_textarea.c
   intern/kit_ime.c
   intern/kit_ime_win32.c
@@ -113,6 +114,23 @@ else()
   target_sources(bui_kit PRIVATE intern/a11y/a11y_off.c)
 endif()
 
+# The desktop shell (intern/shell: tray icons, notifications, taskbar progress, recent files):
+# this system's backend, which loads what it uses at run time (shell32, libdbus-1, ...), or the
+# API alone (BUI_SHELL off, or a system without one).
+set(_bui_shell intern/shell/shell_off.c)
+if(BUI_SHELL)
+  if(WIN32)
+    set(_bui_shell intern/shell/shell.c intern/shell/shell_win32.c)
+  elseif(APPLE)
+    set(_bui_shell intern/shell/shell.c intern/shell/shell_cocoa.m)
+    set_source_files_properties(intern/shell/shell_cocoa.m PROPERTIES COMPILE_OPTIONS "-fno-objc-arc")
+  elseif(CMAKE_SYSTEM_NAME MATCHES "Linux|FreeBSD|NetBSD|OpenBSD|DragonFly" AND NOT ANDROID)
+    set(_bui_shell intern/shell/shell.c intern/shell/shell_dbus.c)
+    target_link_libraries(bui_kit PUBLIC ${CMAKE_DL_LIBS})
+  endif()
+endif()
+target_sources(bui_kit PRIVATE ${_bui_shell})
+
 if(BUI_FILEBROWSER) # Blender's File Browser (editors/space_file)
   target_sources(bui_kit PRIVATE
     intern/kit_filebrowser_paths.c
@@ -188,6 +206,121 @@ if(BUI_IMAGE_WEBP) # libwebp 1.6.0: decoder + demux
   target_compile_options(bui_webp PRIVATE ${_bui_quiet} $<$<NOT:$<C_COMPILER_ID:MSVC>>:-O2>)
   target_sources(bui_kit PRIVATE intern/image/format_webp.c $<TARGET_OBJECTS:bui_webp>)
   target_include_directories(bui_kit PRIVATE extern/libwebp)
+endif()
+if(BUI_IMAGE_TIFF) # libtiff 4.7.2 (its decoders; JPEG with the libjpeg-turbo above) + zlib 1.4's inflate
+  # zlib's symbols are prefixed (z_inflate, ...): a host that links its own zlib keeps it
+  add_library(bui_zlib OBJECT extern/zlib/adler32.c extern/zlib/crc32.c extern/zlib/inffast.c
+    extern/zlib/inflate.c extern/zlib/inftrees.c extern/zlib/zutil.c)
+  target_compile_definitions(bui_zlib PUBLIC Z_PREFIX)
+  # Z_PREFIX leaves zlib's one internal global, z_errmsg, as every zlib names it: the copy in a host
+  # (D's Phobos, say) would be a second definition
+  target_compile_definitions(bui_zlib PRIVATE z_errmsg=bui_z_errmsg)
+  target_compile_options(bui_zlib PRIVATE ${_bui_quiet} $<$<NOT:$<C_COMPILER_ID:MSVC>>:-O2>)
+  set(_bui_tiff_names aux close codec color compress dir dirinfo dirread dirwrite dumpmode error
+    extension fax3 fax3sm flush getimage hash_set luv lzw next open packbits predict print read
+    strip swab thunder tile version warning write zip)
+  if(BUI_IMAGE_JPEG)
+    list(APPEND _bui_tiff_names jpeg)
+  endif()
+  list(TRANSFORM _bui_tiff_names REPLACE "(.+)" "extern/libtiff/libtiff/tif_\\1.c")
+  add_library(bui_tiff OBJECT ${_bui_tiff_names} extern/libtiff/bui/tif_bui.c
+    extern/libtiff/bui/tif_decode_only.c)
+  target_include_directories(bui_tiff PRIVATE extern/libtiff/bui extern/libtiff/libtiff extern/zlib
+    extern/libjpeg-turbo/bui extern/libjpeg-turbo/src ${BUI_SOURCE_DIR}/core/include)
+  target_link_libraries(bui_tiff PRIVATE bui_zlib) # Z_PREFIX
+  bui_features(bui_tiff) # BUI_IMAGE_JPEG: JPEG_SUPPORT (bui/tiffconf.h)
+  if(MINGW)
+    # tif_jpeg.c's longjmp out of libjpeg: MinGW's SEH-unwinding longjmp fails there with
+    # STATUS_BAD_STACK (GCC's frame address is not the SEH establisher frame); C needs no unwind
+    target_compile_definitions(bui_tiff PRIVATE __USE_MINGW_SETJMP_NON_SEH)
+  endif()
+  target_compile_options(bui_tiff PRIVATE ${_bui_quiet} $<$<NOT:$<C_COMPILER_ID:MSVC>>:-O2>)
+  target_sources(bui_kit PRIVATE intern/image/format_tiff.c $<TARGET_OBJECTS:bui_tiff>
+    $<TARGET_OBJECTS:bui_zlib>)
+  target_include_directories(bui_kit PRIVATE extern/libtiff/bui extern/libtiff/libtiff)
+endif()
+if(BUI_IMAGE_EXR) # OpenEXRCore 3.5.5 (C) with the libdeflate 1.26 it ships; no zstd, no HTJ2K
+  file(GLOB _bui_exr_src extern/openexr/src/lib/OpenEXRCore/*.c)
+  add_library(bui_exr OBJECT ${_bui_exr_src} extern/openexr/bui/exr_bui.c)
+  target_include_directories(bui_exr PRIVATE extern/openexr/bui extern/openexr/src/lib/OpenEXRCore)
+  target_compile_options(bui_exr PRIVATE ${_bui_quiet} $<$<NOT:$<C_COMPILER_ID:MSVC>>:-O2>)
+  target_sources(bui_kit PRIVATE intern/image/format_exr.c $<TARGET_OBJECTS:bui_exr>)
+  target_include_directories(bui_kit PRIVATE extern/openexr/bui extern/openexr/src/lib/OpenEXRCore)
+endif()
+if(BUI_IMAGE_AVIF) # libavif 1.4.2 (decoder, its bundled libyuv subset) + dav1d 1.5.5 (C, no asm)
+  set(_bui_dav1d_inc extern/dav1d/bui extern/dav1d extern/dav1d/include extern/dav1d/include/dav1d)
+  if(MSVC)
+    list(APPEND _bui_dav1d_inc extern/dav1d/include/compat/msvc) # stdatomic.h
+  endif()
+  file(GLOB _bui_dav1d_src extern/dav1d/src/*.c)
+  set(_bui_dav1d_tmpl ${_bui_dav1d_src})
+  list(FILTER _bui_dav1d_src EXCLUDE REGEX "_tmpl\\.c$")
+  list(FILTER _bui_dav1d_tmpl INCLUDE REGEX "_tmpl\\.c$")
+  if(WIN32)
+    list(APPEND _bui_dav1d_src extern/dav1d/src/win32/thread.c) # pthreads on Win32 threads
+  endif()
+  # dav1d's *_tmpl.c are compiled once per pixel depth (meson: libdav1d_bitdepth_objs)
+  add_library(bui_dav1d OBJECT ${_bui_dav1d_src})
+  add_library(bui_dav1d_8 OBJECT ${_bui_dav1d_tmpl})
+  add_library(bui_dav1d_16 OBJECT ${_bui_dav1d_tmpl})
+  target_compile_definitions(bui_dav1d_8 PRIVATE BITDEPTH=8)
+  target_compile_definitions(bui_dav1d_16 PRIVATE BITDEPTH=16)
+  file(GLOB _bui_avif_src extern/libavif/src/*.c extern/libavif/third_party/libyuv/source/*.c)
+  add_library(bui_avif OBJECT ${_bui_avif_src})
+  target_compile_definitions(bui_avif PRIVATE AVIF_CODEC_DAV1D=1)
+  target_include_directories(bui_avif PRIVATE extern/libavif/include
+    extern/libavif/third_party/libyuv/include extern/dav1d/include)
+  foreach(_t bui_dav1d bui_dav1d_8 bui_dav1d_16 bui_avif)
+    if(NOT _t STREQUAL "bui_avif")
+      target_include_directories(${_t} PRIVATE ${_bui_dav1d_inc})
+    endif()
+    set_target_properties(${_t} PROPERTIES C_STANDARD 11)
+    target_compile_options(${_t} PRIVATE ${_bui_quiet} $<$<NOT:$<C_COMPILER_ID:MSVC>>:-O2>)
+    target_compile_definitions(${_t} PRIVATE $<$<C_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
+    target_sources(bui_kit PRIVATE $<TARGET_OBJECTS:${_t}>)
+  endforeach()
+  target_sources(bui_kit PRIVATE intern/image/format_avif.c)
+  target_include_directories(bui_kit PRIVATE extern/libavif/include)
+endif()
+if(BUI_IMAGE_JXL) # libjxl 0.13.0's decoder (jxl_dec: no boxes, no JPEG reconstruction) + Highway 1.4.0
+  file(GLOB_RECURSE _bui_jxl_src extern/libjxl/lib/jxl/*.cc)
+  add_library(bui_jxl OBJECT ${_bui_jxl_src} extern/highway/hwy/abort.cc
+    extern/highway/hwy/aligned_allocator.cc extern/highway/hwy/per_target.cc
+    extern/highway/hwy/print.cc extern/highway/hwy/targets.cc extern/highway/hwy/timer.cc)
+  target_include_directories(bui_jxl PRIVATE extern/libjxl/bui extern/libjxl
+    extern/libjxl/lib/include extern/highway)
+  # libjxl's CMake: its static build's defines, and the SIMD targets it builds by default
+  # (Highway dispatches at run time to the best the CPU has)
+  target_compile_definitions(bui_jxl PRIVATE JXL_STATIC_DEFINE JXL_INTERNAL_LIBRARY_BUILD
+    HWY_STATIC_DEFINE JPEGXL_ENABLE_TRANSCODE_JPEG=0 JPEGXL_ENABLE_BOXES=0
+    "HWY_DISABLED_TARGETS=(HWY_AVX3|HWY_AVX3_SPR|HWY_AVX3_ZEN4|HWY_RVV|HWY_SSSE3|HWY_SVE_256|HWY_SVE|HWY_SVE2|HWY_SVE2_128)"
+    $<$<CXX_COMPILER_ID:MSVC>:_CRT_SECURE_NO_WARNINGS>)
+  set_target_properties(bui_jxl PROPERTIES CXX_STANDARD 17 CXX_VISIBILITY_PRESET hidden
+    VISIBILITY_INLINES_HIDDEN ON)
+  target_compile_options(bui_jxl PRIVATE ${_bui_quiet}
+    $<$<NOT:$<CXX_COMPILER_ID:MSVC>>:-O2 -fno-rtti -fno-exceptions>)
+  target_sources(bui_kit PRIVATE intern/image/format_jxl.c $<TARGET_OBJECTS:bui_jxl>)
+  target_include_directories(bui_kit PRIVATE extern/libjxl/bui extern/libjxl/lib/include)
+  target_compile_definitions(bui_kit PRIVATE JXL_STATIC_DEFINE)
+endif()
+# HEIC: the OS decoder, loaded at run time like video above (nothing vendored: HEVC patents)
+if(BUI_IMAGE_HEIC)
+  target_sources(bui_kit PRIVATE intern/image/format_heic.c)
+  if(WIN32)
+    target_sources(bui_kit PRIVATE intern/image/heic_wic.c)
+    target_compile_definitions(bui_kit PRIVATE BUI_HEIC_WIC)
+  elseif(APPLE)
+    target_sources(bui_kit PRIVATE intern/image/heic_imageio.c)
+    target_compile_definitions(bui_kit PRIVATE BUI_HEIC_IMAGEIO)
+    target_link_libraries(bui_kit PUBLIC "-Wl,-weak_framework,ImageIO" "-framework CoreFoundation")
+  elseif(CMAKE_SYSTEM_NAME MATCHES "Linux|FreeBSD|NetBSD|OpenBSD|DragonFly")
+    target_sources(bui_kit PRIVATE intern/image/heic_libheif.c)
+    target_compile_definitions(bui_kit PRIVATE BUI_HEIC_LIBHEIF)
+    find_package(Threads REQUIRED)
+    target_link_libraries(bui_kit PUBLIC ${CMAKE_DL_LIBS} Threads::Threads)
+  else()
+    target_compile_definitions(bui_kit PRIVATE BUI_HEIC_NO_BACKEND) # HEIC reads as missing
+  endif()
 endif()
 # worker threads: bui_core links the platform's threads (Threads::Threads)
 target_include_directories(bui_kit PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)

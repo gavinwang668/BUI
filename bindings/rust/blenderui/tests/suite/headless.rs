@@ -398,7 +398,8 @@ fn canvas_image_and_video_sources() {
     struct Pic;
     impl Render for Pic {
         fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-            body().m_0().child(img().id("pic").w(px(4.0)).h(px(4.0)).image_rgba(1, 1, [0u8, 0, 255, 255]))
+            // a block (inline, it would sit on the line's baseline, under the strut's ascent)
+            body().m_0().child(img().id("pic").style("display: block").w(px(4.0)).h(px(4.0)).image_rgba(1, 1, [0u8, 0, 255, 255]))
         }
     }
     Application::headless().run(|cx| {

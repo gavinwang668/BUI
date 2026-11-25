@@ -903,6 +903,9 @@ BUI_LUA_ENTRY int luaopen_bui(lua_State *L) {
   lua_pushinteger(L, BK_IMAGE_HDR); lua_setfield(L, -2, "IMAGE_HDR");   lua_pushinteger(L, BK_IMAGE_PNM); lua_setfield(L, -2, "IMAGE_PNM");
   lua_pushinteger(L, BK_IMAGE_SVG); lua_setfield(L, -2, "IMAGE_SVG");
   lua_pushinteger(L, BK_IMAGE_VIDEO); lua_setfield(L, -2, "IMAGE_VIDEO");
+  lua_pushinteger(L, BK_IMAGE_TIFF); lua_setfield(L, -2, "IMAGE_TIFF");  lua_pushinteger(L, BK_IMAGE_EXR); lua_setfield(L, -2, "IMAGE_EXR");
+  lua_pushinteger(L, BK_IMAGE_AVIF); lua_setfield(L, -2, "IMAGE_AVIF");  lua_pushinteger(L, BK_IMAGE_JXL); lua_setfield(L, -2, "IMAGE_JXL");
+  lua_pushinteger(L, BK_IMAGE_HEIC); lua_setfield(L, -2, "IMAGE_HEIC");
 
   /* Object-fit */
   lua_pushinteger(L, BK_FIT_FILL); lua_setfield(L, -2, "FIT_FILL");    lua_pushinteger(L, BK_FIT_CONTAIN); lua_setfield(L, -2, "FIT_CONTAIN");

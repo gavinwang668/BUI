@@ -103,6 +103,43 @@ pub struct LayerShellConfig {
     pub keyboard: Option<String>,
 }
 
+/// A tray menu item (Electron's `MenuItem` options): `type` "normal" (default), "checkbox",
+/// "separator" or "submenu".
+#[napi(object)]
+pub struct TrayMenuItem {
+    /// What the `traymenu` event reports (chosen by JavaScript).
+    pub id: u32,
+    pub label: Option<String>,
+    #[napi(js_name = "type")]
+    pub kind: Option<String>,
+    pub checked: Option<bool>,
+    pub enabled: Option<bool>,
+    pub submenu: Option<Vec<TrayMenuItem>>,
+}
+
+/// What this build and system have of the desktop shell.
+#[napi(object)]
+pub struct ShellFeatures {
+    pub tray: bool,
+    pub notifications: bool,
+    pub progress: bool,
+    pub recent_documents: bool,
+}
+
+fn tray_items(items: Vec<TrayMenuItem>) -> Result<Vec<view::shell::TrayItem>> {
+    items.into_iter().map(|it| {
+        let kind = match it.kind.as_deref() {
+            None => view::shell::TrayItemKind::Normal,
+            Some(k) => view::shell::TrayItemKind::parse(k)
+                .ok_or_else(|| Error::from_reason(format!("unknown menu item type {k:?}")))?,
+        };
+        Ok(view::shell::TrayItem {
+            id: it.id, label: it.label.unwrap_or_default(), kind, checked: it.checked.unwrap_or(false),
+            enabled: it.enabled.unwrap_or(true), submenu: tray_items(it.submenu.unwrap_or_default())?,
+        })
+    }).collect()
+}
+
 #[napi(object)]
 pub struct Rect {
     pub x: f64,
@@ -283,6 +320,12 @@ impl NativeApp {
         self.link.send(move |cx| view::request_frame(cx, window));
     }
 
+    /// Picture window `window` for a view transition to what the next commit renders.
+    #[napi]
+    pub fn start_view_transition(&self, window: u32) {
+        self.link.send(move |cx| view::start_view_transition(cx, window));
+    }
+
     #[napi]
     pub fn close_window(&self, window: u32) {
         self.link.send(move |cx| view::close_window(cx, window));
@@ -368,6 +411,95 @@ impl NativeApp {
             let ok = blenderui::set_theme_value(&key, value);
             cx.notify_all();
             deferred.resolve(move |_| Ok(ok));
+        });
+        Ok(promise)
+    }
+
+    /// Tray icon `id` (chosen by JS): resolves false where the system has no tray.
+    #[napi(ts_return_type = "Promise<boolean>")]
+    pub fn tray_new(&self, env: Env, id: u32, icon: Option<String>, tooltip: String) -> Result<JsObject> {
+        let (deferred, promise) = env.create_deferred()?;
+        self.link.send(move |cx| {
+            let ok = view::shell::tray_new(cx, id, icon.as_deref(), &tooltip);
+            deferred.resolve(move |_| Ok(ok));
+        });
+        Ok(promise)
+    }
+
+    /// An image file or a Blender icon's name; null: the app's icon.
+    #[napi]
+    pub fn tray_set_icon(&self, id: u32, icon: Option<String>) {
+        self.link.send(move |cx| {
+            view::shell::tray_set_icon(cx, id, icon.as_deref());
+        });
+    }
+
+    #[napi]
+    pub fn tray_set_tooltip(&self, id: u32, tooltip: String) {
+        self.link.send(move |cx| {
+            view::shell::tray_set_tooltip(cx, id, &tooltip);
+        });
+    }
+
+    /// Its menu; chosen items come back as `traymenu` events with their `id`.
+    #[napi]
+    pub fn tray_set_menu(&self, id: u32, items: Vec<TrayMenuItem>) -> Result<()> {
+        let items = tray_items(items)?;
+        self.link.send(move |cx| {
+            view::shell::tray_set_menu(cx, id, &items);
+        });
+        Ok(())
+    }
+
+    #[napi]
+    pub fn tray_free(&self, id: u32) {
+        self.link.send(move |cx| view::shell::tray_free(cx, id));
+    }
+
+    /// A desktop notification: resolves with its id (its clicks are `notification` events), or
+    /// null when it can't show.
+    #[napi(ts_return_type = "Promise<number | null>")]
+    pub fn notify(&self, env: Env, title: String, body: String, icon: Option<String>) -> Result<JsObject> {
+        let (deferred, promise) = env.create_deferred()?;
+        self.link.send(move |cx| {
+            let id = view::shell::notify(cx, &title, &body, icon.as_deref());
+            deferred.resolve(move |_| Ok(id));
+        });
+        Ok(promise)
+    }
+
+    /// Window `window`'s taskbar progress (`mode`: normal, indeterminate, paused, error, none).
+    #[napi]
+    pub fn set_progress(&self, window: u32, mode: String, value: f64) {
+        self.link.send(move |cx| {
+            view::shell::set_progress(cx, window, &mode, value);
+        });
+    }
+
+    /// Adds a file to the system's recent documents: resolves with whether it was added.
+    #[napi(ts_return_type = "Promise<boolean>")]
+    pub fn add_recent_document(&self, env: Env, path: String) -> Result<JsObject> {
+        let (deferred, promise) = env.create_deferred()?;
+        self.link.send(move |_| {
+            let ok = blenderui::shell::add_recent_document(&path);
+            deferred.resolve(move |_| Ok(ok));
+        });
+        Ok(promise)
+    }
+
+    /// Windows' AppUserModelID, the desktop file's id on Linux.
+    #[napi]
+    pub fn set_app_id(&self, id: String) {
+        self.link.send(move |_| blenderui::shell::set_app_id(&id));
+    }
+
+    /// What this build and system have of the desktop shell.
+    #[napi(ts_return_type = "Promise<ShellFeatures>")]
+    pub fn shell_features(&self, env: Env) -> Result<JsObject> {
+        let (deferred, promise) = env.create_deferred()?;
+        self.link.send(move |_| {
+            let [tray, notifications, progress, recent_documents] = view::shell::features();
+            deferred.resolve(move |_| Ok(ShellFeatures { tray, notifications, progress, recent_documents }));
         });
         Ok(promise)
     }

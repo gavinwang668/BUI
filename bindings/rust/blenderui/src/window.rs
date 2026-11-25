@@ -479,6 +479,8 @@ pub struct App {
     closed_later: Option<VecDeque<usize>>,
     /// Called when a window gets or loses the keyboard focus.
     activation_hooks: Vec<Box<dyn FnMut(WindowId, bool, &mut App)>>,
+    /// Called with the desktop shell's events (`crate::shell`).
+    pub(crate) shell_hooks: Vec<Box<dyn FnMut(&crate::shell::ShellEvent, &mut App)>>,
     /// Counts `notify_all` calls (see `WindowHandle::update`).
     notified: u64,
     /// [`shutdown`](App::shutdown) was asked while a window was lent to a
@@ -529,7 +531,7 @@ impl App {
         crate::motion::start_clock(real_clock);
         App { windows: Vec::new(), entities: Vec::new(), headless, real_clock, globals: HashMap::new(), propagate: true,
               default_prevented: false, remote: None, close_hooks: Vec::new(), closed_later: None,
-              activation_hooks: Vec::new(), notified: 0, shutdown_later: false,
+              activation_hooks: Vec::new(), shell_hooks: Vec::new(), notified: 0, shutdown_later: false,
               theme_seen: crate::theme_generation() }
     }
 
@@ -767,6 +769,7 @@ impl App {
 
     /// Handle queued kit events, then re-render what changed.
     fn drain(&mut self) {
+        crate::shell::drain(self);
         while let Some(ev) = queue_pop() {
             // a closed window's queued events go with it (its handlers and hooks are done)
             if self.window(WindowId(ev.window)).is_some_and(|w| w.life == Life::Open) {
@@ -1235,7 +1238,7 @@ unsafe extern "C" fn on_hit_test(data: *mut c_void, _win: *mut sys::BKWindow, x:
 }
 
 /// Call each hook; hooks a hook adds run from the next call.
-fn run_hooks<H: ?Sized>(app: &mut App, list: fn(&mut App) -> &mut Vec<Box<H>>,
+pub(crate) fn run_hooks<H: ?Sized>(app: &mut App, list: fn(&mut App) -> &mut Vec<Box<H>>,
                         mut call: impl FnMut(&mut H, &mut App)) {
     let mut hooks = std::mem::take(list(app));
     hooks.iter_mut().for_each(|h| call(h, app));
@@ -1245,7 +1248,7 @@ fn run_hooks<H: ?Sized>(app: &mut App, list: fn(&mut App) -> &mut Vec<Box<H>>,
 
 /// Run `f` with the app, unless there is none (before the loop, headless)
 /// or a callback further up the stack already holds it.
-fn with_running_app(f: impl FnOnce(&mut App)) -> bool {
+pub(crate) fn with_running_app(f: impl FnOnce(&mut App)) -> bool {
     let app = APP.with(Cell::get);
     if app.is_null() || BUSY.with(Cell::get) {
         return false;
@@ -1313,6 +1316,8 @@ pub struct Window {
     scale: f32,
     view: Option<ViewFn>,
     frame: Option<Frame>,
+    /// A view transition starting or running (`crate::transition`).
+    transition: Option<crate::transition::Transition>,
     /// While `emit` lends the frame to listeners: the bounds of the event's
     /// path (the target and its ancestors), so `bounds_of` still answers for
     /// them. Reused, so an event allocates nothing once it has grown.
@@ -1417,6 +1422,7 @@ impl Window {
                 scale: 1.0,
                 view: None,
                 frame: None,
+                transition: None,
                 lent_bounds: Vec::new(),
                 caches: LayoutCaches::default(),
                 painter: Painter::new(),
@@ -1501,6 +1507,24 @@ impl Window {
     /// Window id.
     pub fn window_handle(&self) -> WindowId {
         WindowId(self.id)
+    }
+
+    /// The kit's native window, `None` off screen.
+    pub(crate) const fn native(&self) -> Option<*mut sys::BKWindow> {
+        self.native
+    }
+
+    /// Starts a view transition (CSS View Transitions): the page as it is now is pictured, and the
+    /// state the next render shows is animated to: boxes with a `view-transition-name` move and
+    /// resize from where they were while their old pictures fade out, and the rest of the page
+    /// cross-fades. Call it before changing the state (in the same event handler). A window that
+    /// hasn't rendered yet has nothing to animate from: it does nothing.
+    pub fn start_view_transition(&mut self, cx: &App) {
+        let vp = self.viewport();
+        let Some(frame) = self.frame.as_ref() else { return };
+        let mut shot = crate::transition::Shot { frame, styles: &self.caches.styles, text: &mut self.caches.text,
+                                                 vp, scale: self.scale, app: cx };
+        self.transition = Some(crate::transition::Transition::capture(&mut shot));
     }
 
     /// Re-render on the next turn.
@@ -1690,12 +1714,30 @@ impl Window {
     }
 
     /// Focus the element with `.id(id)` (keyboard events go to it).
+    /// Its ancestors in the last frame are within focus (`:focus-within`), as a press makes them.
     pub fn focus_id(&mut self, id: &str) {
         let key = id_key(id);
-        self.state.focused = Some(key);
-        self.state.focus_path = [key].into_iter().collect();
+        let mut path = vec![key];
+        if let Some(f) = self.frame.as_ref() {
+            let mut at = f.by_key().get(&key).and_then(|&i| f.nodes[i].parent);
+            while let Some(p) = at {
+                path.push(f.nodes[p].key);
+                at = f.nodes[p].parent;
+            }
+        }
+        path.reverse();
+        self.set_focus(&path);
         self.state.focused_id = Some(id.to_owned());
         self.dirty = true;
+    }
+
+    /// Show (or hide) the popover with `.id(id)` (an element with a `popover` attribute): it
+    /// matches `:popover-open`, which the user-agent sheet shows in the top layer. An open
+    /// `<dialog>` shown so is modal (`:modal`).
+    pub fn show_popover(&mut self, id: &str, show: bool) {
+        let key = id_key(id);
+        let changed = if show { self.state.popover_open.insert(key) } else { self.state.popover_open.remove(&key) };
+        self.dirty |= changed;
     }
 
     /// Is the element with `.id(id)` hovered?
@@ -2185,7 +2227,7 @@ impl Window {
 
     /// Paint `frame` and show it (the widgets placed, the hover updated).
     /// `dirty`: a redraw's boxes to paint again (the rest kept), when it can.
-    fn present(&mut self, app: &mut App, frame: Frame, dirty: Option<&[bool]>) {
+    fn present(&mut self, app: &mut App, mut frame: Frame, dirty: Option<&[bool]>) {
         FRAMES_PRESENTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.sel_repaint = false; // whatever is painted has the selection
         let vp = self.viewport();
@@ -2200,10 +2242,36 @@ impl Window {
             let gpu = self.is_gpu();
             let p = &mut self.painter;
             p.set_gpu(gpu);
-            let kept = dirty.is_some_and(|d| p.repaint(&frame, &self.caches.styles, &mut self.caches.text, d, vp, app));
+            // a view transition paints the frame whole, its named boxes hidden under its pictures
+            let mut hide = Vec::new();
+            let now = self.clock.now();
+            let moving = self.transition.as_mut().is_some_and(|t| {
+                let mut shot = crate::transition::Shot { frame: &frame, styles: &self.caches.styles,
+                                                         text: &mut self.caches.text, vp, scale, app };
+                t.paint(&mut shot, &self.caches.author.sheet.transitions, now, &mut hide)
+            });
+            if !moving {
+                self.transition = None;
+            }
+            for &i in &hide {
+                frame.nodes[i].visible = false;
+            }
+            let kept = !moving
+                && dirty.is_some_and(|d| p.repaint(&frame, &self.caches.styles, &mut self.caches.text, d, vp, app));
             if !kept {
                 p.reset();
                 paint_frame(&frame, &self.caches.styles, &mut self.caches.text, p, vp, self.scale, app);
+            }
+            if let Some(t) = self.transition.as_ref().filter(|_| moving) {
+                t.draw(p, now);
+            }
+            for &i in &hide {
+                frame.nodes[i].visible = true;
+            }
+            if moving {
+                // the next frame of the transition: the same frame, painted again
+                self.sel_repaint = true;
+                self.animation_frame = true;
             }
         }
         {
@@ -2223,10 +2291,10 @@ impl Window {
             }
         }
         self.widgets.place(&at, &self.canvases, scale);
-        // an opaque <html> background covers the window: the kit can skip its clear
+        // an opaque canvas background covers the window: the kit can skip its clear
         let styles = &self.caches.styles;
-        let opaque = frame.nodes.first()
-            .is_some_and(|h| styles[h.style].background.a >= 1.0 && styles[h.style].opacity >= 1.0);
+        let opaque = frame.nodes.first().is_some_and(|h| styles[h.style].opacity >= 1.0)
+            && crate::paint::canvas_background(&frame, styles).1.a >= 1.0;
         if opaque != self.opaque {
             self.opaque = opaque;
             unsafe { sys::BK_set_num(self.root, c"opaque".as_ptr(), opaque as i32 as f64) };
@@ -2532,10 +2600,12 @@ impl Window {
             }
             sys::BK_EV_WHEEL => {
                 let (modifiers, _) = self.pointer_event(&ev.text);
+                // the third number of the text: how the scroll came (BK_scroll_phase)
+                let phase = ScrollPhase::from_kit(ev.text.split_whitespace().nth(2).and_then(|v| v.parse().ok()).unwrap_or(0));
                 let (px_, py_) = self.pointer;
                 // `b`: the exact device pixels of a touch drag (BK_scroll_px), 0 for a wheel notch
                 let pixels = (ev.b != 0.0).then(|| ev.b as f32 / self.scale);
-                let e = ScrollWheelEvent { position: point(px(px_), px(py_)), delta: ev.a as f32, pixels, modifiers };
+                let e = ScrollWheelEvent { position: point(px(px_), px(py_)), delta: ev.a as f32, pixels, phase, modifiers };
                 let path = self.path_at(px_, py_);
                 if let Some(&deepest) = path.last() {
                     self.emit(app, deepest, &e, |l| l.scroll.iter().collect());

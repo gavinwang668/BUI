@@ -155,6 +155,12 @@ fn main() {
                     println!("cargo:rustc-link-lib=framework={fw}");
                 }
             }
+            // HEIC through ImageIO (kit/intern/image/heic_imageio.c)
+            if std::env::var_os("CARGO_FEATURE_HEIC").is_some() {
+                for fw in ["ImageIO", "CoreFoundation"] {
+                    println!("cargo:rustc-link-lib=framework={fw}");
+                }
+            }
             println!("cargo:rustc-link-lib=objc");
         }
         println!("cargo:rustc-link-lib=m");

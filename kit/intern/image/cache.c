@@ -519,7 +519,8 @@ int BK_image_poll(void)
         if (e->ib) {
           C.stats.decoded++;
           if (e->source->info_state <= 0) { /* free intrinsic size for layout (or a file that came later) */
-            e->source->info = (BKImageInfo){e->ib->ftype, e->ib->src_x, e->ib->src_y, e->ib->frames};
+            e->source->info = (BKImageInfo){e->ib->ftype, e->ib->src_x, e->ib->src_y, e->ib->frames,
+                                            e->ib->src_flags};
             e->source->info_state = 1;
           }
         }
@@ -732,8 +733,12 @@ void bk_image_entry_free(BKImEntry *e)
 /* Decoding at about the size drawn: a box much bigger, or much smaller, than
  * what the decoder makes asks for another size (resizing within that is
  * scaled when drawn, so a window resize doesn't reopen the decoder). */
-static bool retarget_wanted(const BKImageFit *had, const BKImageFit *want)
+static bool retarget_wanted(const BKImageFit *had, const BKImageFit *want, const bool vector)
 {
+  /* a vector draws at its size exactly (imb_whole_fit): any other size is another raster */
+  if (vector && (want->box_w != had->box_w || want->box_h != had->box_h)) {
+    return true;
+  }
   return had->fit != want->fit || want->box_w * 4 > had->box_w * 5 ||
          want->box_h * 4 > had->box_h * 5 || want->box_w * 2 < had->box_w ||
          want->box_h * 2 < had->box_h;
@@ -743,7 +748,8 @@ const BKImBuf *bk_image_entry_get(BKImEntry *e, const BKImageFit *target, const 
 {
   const bool loaded = imb_play_state(e->play) != BK_PLAY_LOADING;
   if ((!loaded && !e->req && imb_play_state(e->play) != BK_PLAY_ERROR) ||
-      retarget_wanted(&e->target, target))
+      retarget_wanted(&e->target, target,
+                      e->source->info_state == 1 && (e->source->info.flags & BK_IMAGE_INFO_VECTOR)))
   {
     e->target = *target; /* the first load, or the next step, decodes at this size */
   }

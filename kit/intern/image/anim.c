@@ -1,6 +1,7 @@
 /* Animated media, one frame at a time, at the size drawn: GIF, animated
- * WebP and video behind one codec interface (BKImAnimCodec: Blender's
- * MovieReader shape, open / next / seek / close). In-memory codecs composite
+ * WebP, AVIF sequences, animated JPEG XL and video behind one codec
+ * interface (BKImAnimCodec: Blender's MovieReader shape, open / next / seek /
+ * close). In-memory codecs composite
  * frames (GIF disposal and blending, WebP's canvas) into a full-size
  * premultiplied canvas, fitted here with the plan of stills (imb_plan /
  * imb_finish); streamed codecs (movie.c: the OS decoders)
@@ -40,6 +41,12 @@ static const BKImAnimCodec *const anim_codecs[] = {
 #endif
 #ifdef BUI_IMAGE_WEBP
     &imb_webp_codec,
+#endif
+#ifdef BUI_IMAGE_AVIF
+    &imb_avif_codec,
+#endif
+#ifdef BUI_IMAGE_JXL
+    &imb_jxl_codec,
 #endif
     NULL,
 };
@@ -81,7 +88,7 @@ BKImAnim *imb_anim_open(uint8_t *file, size_t size, const BKImageFit *target)
   a->size = size;
   a->frames = BK_MAX(1, info.frames);
   a->state = codec->open(NULL, file, size, &a->info);
-  if (!a->state || !imb_plan(target, a->info.w, a->info.h, 1, &a->plan)) {
+  if (!a->state || !imb_plan(target, a->info.w, a->info.h, 1, false, &a->plan)) {
     imb_anim_free(a); /* frees `file` too */
     return NULL;
   }
@@ -94,7 +101,7 @@ static bool movie_output(BKImAnim *a)
 {
   BKImPlan plan;
   BKImAnimInfo info = a->info;
-  if (!imb_plan(&a->target, info.src_w, info.src_h, 1, &plan) ||
+  if (!imb_plan(&a->target, info.src_w, info.src_h, 1, false, &plan) ||
       !a->codec->output(a->state, plan.fw, plan.fh, &info) || info.w <= 0 || info.h <= 0 ||
       (info.w | info.h) & 1 || info.w > BK_IMB_MAX_SIDE || info.h > BK_IMB_MAX_SIDE ||
       (info.format != BUI_PIXMAP_NV12_BT601 && info.format != BUI_PIXMAP_NV12_BT709))
@@ -181,7 +188,7 @@ bool imb_anim_retarget(BKImAnim *a, const BKImageFit *target)
   a->target = *target;
   if (!a->codec->streamed) {
     BKImPlan plan;
-    if (imb_plan(target, a->info.w, a->info.h, 1, &plan)) {
+    if (imb_plan(target, a->info.w, a->info.h, 1, false, &plan)) {
       a->plan = plan;
       return true;
     }

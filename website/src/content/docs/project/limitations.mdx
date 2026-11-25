@@ -30,9 +30,9 @@ BUI looks like Blender. It has Blender's Dark and Light themes (other Blender th
 ## Rendering
 
 - The **CPU rasterizer** is the default. It works everywhere and needs no GPU.
-- The optional **GPU renderer** is Direct3D 11 on Windows and OpenGL 3.3 on Linux.
+- The optional **GPU renderer** is Direct3D 11 on Windows (Direct3D 12 opt-in: `BUI_GPU_API=d3d12`) and OpenGL 3.3 on Linux.
 - **macOS has no GPU renderer** (no Metal), so it always draws on the CPU.
-- Direct3D 12, Vulkan, Metal and WebGPU backends don't exist yet.
+- Vulkan, Metal and WebGPU backends don't exist yet.
 
 ## Platforms
 
@@ -61,7 +61,7 @@ BUI's widget drawing and interaction are ported from Blender's UI sources, with 
 - **Qt syntax** covers 57% of Qt's methods on the core widget classes (`tools/qt_coverage.py`), and a few setters are accepted and ignored.
 - **CSS:** 261 of 745 W3C properties render.
 - **Video** sound is tested on Windows only: the macOS and Linux audio outputs, and the macOS video backend, are untried.
-- **Images:** AVIF, EXR, TIFF, JPEG XL and HEIC aren't supported.
+- **Images:** OpenEXR, AVIF and JPEG XL are built only when asked for (the `exr`, `avif` and `jxl` features, off by default: each adds about 1 MB). HEIC decodes through the operating system, so it is there only where the system has a decoder (Windows: the HEIF Image and HEVC Video Extensions), and its macOS (ImageIO) and Linux (libheif) backends are untried.
 
 ## License
 

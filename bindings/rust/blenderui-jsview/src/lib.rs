@@ -16,6 +16,7 @@ use std::sync::Arc;
 use blenderui::prelude::*;
 
 pub mod motion;
+pub mod shell;
 
 /// An event from a window (`kind`: click, mousedown, mouseup, mousemove,
 /// mouseenter, mouseleave, wheel, keydown, keyup, change, input, frame,
@@ -647,6 +648,14 @@ pub fn request_frame(cx: &mut App, window: u32) {
                 w.request_animation_frame();
             }
         });
+    }
+}
+
+/// Start a view transition in window `window` (`Window::start_view_transition`): its page as it is
+/// now animates to what the next commit renders.
+pub fn start_view_transition(cx: &mut App, window: u32) {
+    if let Some(handle) = cx.global::<UiState>().windows.get(&window).cloned() {
+        handle.update(cx, |_, w, cx| w.start_view_transition(cx));
     }
 }
 

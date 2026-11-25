@@ -13,6 +13,19 @@ pub(crate) fn flags(c: &Computed) -> i32 {
         | ((c.font_id as i32) << FAMILY_SHIFT)
 }
 
+/// The language flag (`BUI_FONT_HAN_JA` / `_KO`) for Han characters drawn out of `paragraph`'s
+/// text: Japanese when it has kana, Korean with Hangul (as the engine would find drawing it whole).
+pub(crate) fn han_hint(paragraph: &str) -> i32 {
+    for c in paragraph.chars() {
+        match c as u32 {
+            0x3040..=0x30ff | 0x31f0..=0x31ff | 0xff65..=0xff9f => return sys::BUI_FONT_HAN_JA,
+            0x1100..=0x11ff | 0x3130..=0x318f | 0xa960..=0xa97f | 0xac00..=0xd7ff => return sys::BUI_FONT_HAN_KO,
+            _ => {}
+        }
+    }
+    0
+}
+
 /// Where lines may break inside words: `overflow-wrap: anywhere` /
 /// `break-word` ([`BREAK_ANYWHERE`]) or `word-break: break-all` ([`BREAK_ALL`]).
 pub(crate) fn break_mode(c: &Computed) -> u8 {
@@ -25,8 +38,25 @@ pub(crate) const BREAK_ALL: u8 = 2;
 /// Font flags live in the low byte; the family id above it.
 pub(crate) const FAMILY_SHIFT: i32 = 8;
 
-/// Families by id (0 = the UI font, ""), leaked: canvas items point at them.
-static FAMILIES: std::sync::Mutex<Vec<&'static std::ffi::CStr>> = std::sync::Mutex::new(Vec::new());
+/// A family of [`FAMILIES`]: its name (leaked: canvas items point at it) and
+/// the vertical metrics of the face it draws with, read on first use.
+struct Family {
+    name: &'static std::ffi::CStr,
+    metrics: Option<VMetrics>,
+    /// Advances of "0" (`ch`) by size: (size bits, px).
+    zero: Option<Vec<(u32, f32)>>,
+}
+
+/// Families by id (0 = the UI font, "").
+static FAMILIES: std::sync::Mutex<Vec<Family>> = std::sync::Mutex::new(Vec::new());
+
+/// A face's vertical metrics in em: ascent and descent (both positive) and line gap.
+#[derive(Clone, Copy)]
+struct VMetrics {
+    ascent: f32,
+    descent: f32,
+    gap: f32,
+}
 
 /// The id of a `font-family` list. The kit gets the list itself ("A,B,C"):
 /// the first family it finds (registered, installed by its own name, or
@@ -48,16 +78,16 @@ pub(crate) fn font_id(list: &str) -> u16 {
     }
     let mut f = FAMILIES.lock().unwrap_or_else(|e| e.into_inner());
     if f.is_empty() {
-        f.push(c"");
+        f.push(Family { name: c"", metrics: None, zero: None });
     }
-    if let Some(i) = f.iter().position(|c| c.to_bytes().eq_ignore_ascii_case(pick.as_bytes())) {
+    if let Some(i) = f.iter().position(|c| c.name.to_bytes().eq_ignore_ascii_case(pick.as_bytes())) {
         return i as u16;
     }
     if f.len() >= 0x7fff {
         return 0;
     }
     let c = std::ffi::CString::new(pick).unwrap_or_default();
-    f.push(Box::leak(c.into_boxed_c_str()));
+    f.push(Family { name: Box::leak(c.into_boxed_c_str()), metrics: None, zero: None });
     (f.len() - 1) as u16
 }
 
@@ -69,7 +99,76 @@ pub(crate) fn family(flags: i32) -> (*const std::os::raw::c_char, i32) {
         return (c"".as_ptr(), low);
     }
     let f = FAMILIES.lock().unwrap_or_else(|e| e.into_inner());
-    (f.get(id).map_or(c"".as_ptr(), |c| c.as_ptr()), low)
+    (f.get(id).map_or(c"".as_ptr(), |c| c.name.as_ptr()), low)
+}
+
+/// The vertical metrics of family `font` (a `font_id` other than the UI
+/// font's), in whole pixels at `size` as browsers place lines: ascent,
+/// descent and line gap each rounded. `None` when the family has no face.
+fn font_px(font: u16, size: f32) -> Option<(f32, f32, f32)> {
+    if font == 0 {
+        return None;
+    }
+    let mut f = FAMILIES.lock().unwrap_or_else(|e| e.into_inner());
+    let fam = f.get_mut(font as usize)?;
+    let m = *fam.metrics.get_or_insert_with(|| {
+        let (mut ascent, mut descent, mut gap) = (0.0, 0.0, 0.0);
+        // SAFETY: the name is a static C string; the outputs are valid for the call.
+        unsafe { sys::BUI_text_vmetrics(fam.name.as_ptr(), 0, &mut ascent, &mut descent, &mut gap) };
+        VMetrics { ascent, descent, gap }
+    });
+    (m.ascent + m.descent > 0.0).then(|| ((m.ascent * size).round(), (m.descent * size).round(), (m.gap * size).round()))
+}
+
+/// Forget the faces' metrics: a family may draw with another face now (a font was added).
+pub(crate) fn fonts_changed() {
+    for f in FAMILIES.lock().unwrap_or_else(|e| e.into_inner()).iter_mut() {
+        f.metrics = None;
+        f.zero = None;
+    }
+}
+
+/// The `ch` unit of `size` px text of family `font`: the advance of "0" in its face (CSS Values 4
+/// §6.1.1), half an em without a text engine.
+pub(crate) fn ch(font: u16, size: f32) -> f32 {
+    let mut f = FAMILIES.lock().unwrap_or_else(|e| e.into_inner());
+    if f.is_empty() {
+        f.push(Family { name: c"", metrics: None, zero: None });
+    }
+    let Some(fam) = f.get_mut(font as usize) else { return size * 0.5 };
+    // measured at the size itself, as the text is (a face's advances are whole pixels at some sizes)
+    let sizes = fam.zero.get_or_insert_with(Vec::new);
+    if let Some(&(_, w)) = sizes.iter().find(|(s, _)| *s == size.to_bits()) {
+        return w;
+    }
+    let mut w = 0.0f32;
+    // SAFETY: the name is a static C string; the text and output are valid for the call.
+    let ok = unsafe { sys::BUI_text_measure(fam.name.as_ptr(), 0, size, c"0".as_ptr(), 1, &mut w) };
+    let w = if ok == 0 || w <= 0.0 { size * 0.5 } else { w };
+    if sizes.len() >= 64 {
+        sizes.clear();
+    }
+    sizes.push((size.to_bits(), w));
+    w
+}
+
+/// The line box height `line-height: normal` gives `size` px text of family
+/// `font`: the face's ascent + descent + line gap (CSS Inline 3 §4.1); the UI
+/// font's (and a family without a face) is 1.3 em, Blender's spacing.
+pub(crate) fn normal_line(font: u16, size: f32) -> f32 {
+    match font_px(font, size) {
+        Some((a, d, g)) => a + d + g,
+        None => (size * 1.3).round(),
+    }
+}
+
+/// The ascent and descent of `size` px text of family `font`: the UI font's exact, other
+/// faces' in whole pixels.
+fn content_area(font: u16, size: f32) -> (f32, f32) {
+    match font_px(font, size) {
+        Some((a, d, _)) => (a, d),
+        None => (ASCENT * size, DESCENT * size),
+    }
 }
 
 // Vertical font metrics, in em, of the UI font (the embedded Inter,
@@ -90,16 +189,26 @@ pub(crate) const STRIKEOUT: f32 = (671.0 - 140.0 / 2.0) / 2048.0;
 /// item (kit_frame.c, BK_ITEM_TEXT: the cap height, 0.72 em).
 const KIT_ITEM_BASELINE: f32 = 0.72;
 
-/// The baseline of `size` px text in a line box of height `lh` at `y`: like
-/// a browser, the font's content area (ascent + descent) is centred in the
-/// line box (CSS 2 §10.8.1, half-leading; negative when `lh` is smaller).
-pub(crate) const fn baseline(y: f32, lh: f32, size: f32) -> f32 {
-    y + (lh - (ASCENT + DESCENT) * size) / 2.0 + ASCENT * size
+/// The baseline of `size` px text of family `font` in a line box of height
+/// `lh` at `y`: like a browser, the font's content area (ascent + descent) is
+/// centred in the line box (CSS 2 §10.8.1, half-leading; negative when `lh`
+/// is smaller), on a whole pixel for a face other than the UI font.
+pub(crate) fn baseline(y: f32, lh: f32, size: f32, font: u16) -> f32 {
+    let (a, d) = content_area(font, size);
+    let half = (lh - a - d) / 2.0;
+    y + if font == 0 { half } else { half.trunc() } + a
 }
 
-/// The top of the content area of `size` px text on `baseline` (`overline`).
-pub(crate) const fn ascent_top(baseline: f32, size: f32) -> f32 {
-    baseline - ASCENT * size
+/// The top and bottom of the content area of `size` px text of family `font` on `baseline` (what
+/// an inline box's background and borders go round).
+pub(crate) fn content_box(baseline: f32, size: f32, font: u16) -> (f32, f32) {
+    let (a, d) = content_area(font, size);
+    (baseline - a, baseline + d)
+}
+
+/// The top of the content area of `size` px text of family `font` on `baseline` (`overline`).
+pub(crate) fn ascent_top(baseline: f32, size: f32, font: u16) -> f32 {
+    baseline - content_area(font, size).0
 }
 
 /// The y of a north-anchored kit text item of `size` px whose baseline is
@@ -320,6 +429,16 @@ fn class(c: char) -> Class {
     } else {
         Class::Neutral
     }
+}
+
+/// The direction of `s`'s first strong character (`true`: right-to-left), as `dir=auto` resolves
+/// it (UAX #9 P2/P3); `None` when it has none.
+pub(crate) fn first_strong(s: &str) -> Option<bool> {
+    s.chars().find_map(|c| match class(c) {
+        Class::R => Some(true),
+        Class::L => Some(false),
+        _ => None,
+    })
 }
 
 /// `s` in visual (left-to-right display) order. `rtl`: the paragraph's

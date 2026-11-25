@@ -107,7 +107,9 @@ impl<S: ItemSource, P: Measurer + ItemPainter> ListState<S, P> {
     /// Draw the laid-out frame into `p` (logical px, `b` = the element's box).
     pub(crate) fn draw(&self, b: Bounds<f32>, p: &mut crate::Painter, scale: f32) {
         if has_area(self.bounds) {
-            with_sink(p, b.origin, scale, |sink| self.list.paint(sink));
+            // a stretch (a drag or fling past an end) shifts the whole content, as a rubber band
+            let origin = crate::geometry::point(b.origin.x, b.origin.y + self.list.view.stretch() as f32);
+            with_sink(p, origin, scale, |sink| self.list.paint(sink));
         }
     }
 }

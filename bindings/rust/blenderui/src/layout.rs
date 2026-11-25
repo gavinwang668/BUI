@@ -15,8 +15,10 @@
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
+mod inline;
+
 use taffy::prelude::*;
-use taffy::style::Overflow;
+use taffy::style::{Direction, Overflow};
 
 use crate::css::{Decl, Prop, Rule, Stylesheet, Subject};
 use crate::element::{recycle_children, recycle_decls, AnyElement, Div, Listeners, PaintFn, ParentElement, ReplacedSource, SharedString};
@@ -25,7 +27,7 @@ use crate::html::{tag_kind, ua_styled_stylesheet, ua_stylesheet, TagKind};
 use crate::paint::{Image, ImageCache, ImageFile};
 use crate::prof::{span, Phase};
 use crate::style::ContentPart;
-use crate::style::{apply, key_hasher, Computed, DisplayKind, KeyMap, KeySet, TextAlign, TextTransform, VAlign, WhiteSpace};
+use crate::style::{apply, key_hasher, Computed, DisplayKind, KeyMap, KeySet, TextAlign, VAlign, WhiteSpace};
 use crate::text::{self, TextCache};
 use crate::tree::StyleIx;
 use crate::widgets::{WidgetAsk, WidgetSpec};
@@ -69,6 +71,8 @@ pub(crate) struct UiState {
     /// The `.id()` of the focused element.
     pub focused_id: Option<String>,
     pub details_open: KeyMap<Key, bool>,
+    /// Popovers and modal dialogs shown (`:popover-open`, `:modal`), by `Window::show_popover`.
+    pub popover_open: KeySet<Key>,
     pub scroll: KeyMap<Key, (f32, f32)>,
     pub checked: KeyMap<Key, bool>,
 }
@@ -170,15 +174,19 @@ impl StyleStore {
 
 /// The author stylesheet (all `<style>` elements), reparsed only when its text changes.
 /// Tailwind classes seen so far, compiled to CSS (like Tailwind's JIT):
-/// each distinct `class` attribute is scanned once.
+/// each distinct `class` attribute is scanned once. A class the page's own
+/// CSS styles (`.hidden { ... }`) is the page's, not also a utility.
 #[derive(Default)]
 pub(crate) struct TwJit {
     on: bool,
     seen: KeyMap<u64, ()>,
     known: KeyMap<String, ()>,
-    rules: Vec<((u32, u32), usize, String)>,
+    /// (Tailwind's order, first seen, CSS, class)
+    rules: Vec<((u32, u32), usize, String, String)>,
     css: String,
     dirty: bool,
+    /// The hash of the page CSS `css` was made for.
+    author: u64,
 }
 
 /// Whether class names compile as Tailwind utilities (on by default).
@@ -197,31 +205,40 @@ impl TwJit {
             self.known.insert(c.to_string(), ());
             if let Some(r) = crate::tailwind::compile(c) {
                 let n = self.rules.len();
-                self.rules.push((r.sort, n, r.css));
+                self.rules.push((r.sort, n, r.css, c.to_string()));
                 self.dirty = true;
             }
         }
     }
 
-    /// The utilities, in Tailwind's order.
-    fn css(&mut self) -> &str {
-        if self.dirty {
+    /// The utilities, in Tailwind's order, but for the classes `author` (the page's CSS) styles.
+    fn css(&mut self, author: &str) -> &str {
+        let h = hash_parts(&[author.as_bytes()]);
+        if self.dirty || h != self.author {
             self.rules.sort_by_key(|r| (r.0, r.1));
             self.css.clear();
-            for r in &self.rules {
+            for r in self.rules.iter().filter(|r| !styles_class(author, &r.3)) {
                 self.css.push_str(&r.2);
                 self.css.push('\n');
             }
-            self.dirty = false;
+            (self.dirty, self.author) = (false, h);
         }
         &self.css
     }
 }
 
+/// Whether CSS `css` has a selector with class `name` (`.name`, not followed by more of a name).
+fn styles_class(css: &str, name: &str) -> bool {
+    css.match_indices(name).any(|(at, _)| {
+        let after = css[at + name.len()..].chars().next();
+        css[..at].ends_with('.') && !after.is_some_and(|c| c.is_alphanumeric() || matches!(c, '-' | '_' | '\\'))
+    })
+}
+
 #[derive(Default)]
 pub(crate) struct AuthorSheet {
     hash: u64,
-    sheet: Stylesheet,
+    pub(crate) sheet: Stylesheet,
 }
 
 // ==========================================================================
@@ -232,7 +249,7 @@ pub(crate) enum Content {
     Element,
     /// A word (or pre-formatted line) inside a line container: bytes
     /// `start..end` of the text of box `src`.
-    Word { src: u32, start: u32, end: u32 },
+    Word { src: u32, start: u32, end: u32, lang: u8 },
     /// A whole text run in a flex/grid container (wraps when measured).
     Text(SharedString),
     LineBreak,
@@ -241,6 +258,9 @@ pub(crate) enum Content {
     Replaced(Replaced),
     /// An anonymous line container (inline content between blocks).
     Anon,
+    /// The start (`true`) or end edge of its owner, an inline box with margin, border or padding
+    /// there: room in a line, where the box's fragment paints its side.
+    Edge(bool),
 }
 
 pub(crate) enum Replaced {
@@ -268,6 +288,8 @@ pub(crate) struct ElData {
     pub reactive: bool,
     /// `:empty`: no element or text children (rules match before the children are built).
     pub empty: bool,
+    /// `dir=auto` (or a `<bdi>` without `dir`): its text's direction, see [`auto_direction`].
+    pub auto_dir: Option<bool>,
     /// Answers to the author sheet's `Query::LaterMatches` queries: (query, following siblings
     /// that match its `S`).
     pub later: smallvec::SmallVec<[(u16, u32); 1]>,
@@ -340,6 +362,9 @@ pub(crate) enum Measure {
     /// A textarea with `field-sizing: content`: its height is asked of the kit at the width it gets;
     /// `hash` identifies the text.
     Area { key: Key, hash: u64 },
+    /// A replaced element (image, video, canvas) of this natural size: a size given in one axis
+    /// gives the other through its ratio.
+    Replaced { width: f32, height: f32 },
 }
 
 /// The computed style a taffy style was made from, and how: boxes with the same shape have the
@@ -414,8 +439,12 @@ pub(crate) struct LayoutCaches {
     tw: TwJit,
     /// `@container`: query containers' content sizes from the last layout.
     containers: Containers,
+    /// Anchor positioning: anchors and containing blocks from the last layout.
+    anchors: crate::anchor::Anchors,
     /// CSS animations and transitions by element key.
     pub(crate) anim: crate::anim::Animations,
+    /// The viewport of the last layout.
+    viewport: (f32, f32),
 }
 
 impl LayoutCaches {
@@ -424,6 +453,7 @@ impl LayoutCaches {
     pub(crate) fn after_layout(&mut self, frame: &Frame) -> bool {
         let queried = self.author.sheet.has_container_queries();
         let mut again = self.containers.update(frame, &self.styles, queried);
+        again |= self.anchors.update(frame, &self.styles, self.viewport);
         // overflow-wrap: blocks whose width changed lay out their words again
         for n in &frame.nodes {
             let c = &self.styles[n.style];
@@ -516,7 +546,9 @@ impl Default for LayoutCaches {
             wrap_widths: KeyMap::default(),
             tw: TwJit::default(),
             containers: Containers::default(),
+            anchors: Default::default(),
             anim: Default::default(),
+            viewport: (0.0, 0.0),
         }
     }
 }
@@ -542,6 +574,7 @@ struct Builder<'a> {
     ua_styled: &'a Stylesheet,
     author_hash: u64,
     containers: &'a Containers,
+    anchors: &'a crate::anchor::Anchors,
     /// Media query results of the UA and author sheets this frame.
     ua_media: Vec<bool>,
     ua_styled_media: Vec<bool>,
@@ -557,6 +590,10 @@ struct Builder<'a> {
     table_cols: KeyMap<usize, TableCols>,
     wrap_widths: &'a KeyMap<Key, f32>,
     anim: &'a mut crate::anim::Animations,
+    /// The box being built made a container of inline content (its node lays out in lines).
+    inlined: bool,
+    /// Run-in boxes taken in by the block after them (block -> run-in, `adopt_run_ins`).
+    run_ins: KeyMap<usize, usize>,
 }
 
 /// A table's columns: widths in px, and whether the table sizes to them.
@@ -579,6 +616,46 @@ type NodeList = smallvec::SmallVec<[NodeId; 8]>;
 fn cascade_order<'d>(ua: &[&'d Rule], au: &[&'d Rule], own: &[&'d Decl]) -> smallvec::SmallVec<[&'d Decl; 24]> {
     let rules = || ua.iter().chain(au).flat_map(|r| r.decls.iter());
     let mut out: smallvec::SmallVec<[&'d Decl; 24]> = rules().chain(own.iter().copied()).filter(|d| !d.important).collect();
+    // `revert-layer` and `revert` roll a property back to what the layers below (the user agent
+    // origin) give it (CSS Cascade 5 7.3): to the latest such declaration in cascade order; with
+    // none, the keyword stays (it acts as `unset`)
+    let keyword = |d: &Decl| match &*d.value {
+        [crate::css::Tok::Ident(k)] if k.as_ref() == "revert-layer" => Some(true),
+        [crate::css::Tok::Ident(k)] if k.as_ref() == "revert" => Some(false),
+        _ => None,
+    };
+    if out.iter().any(|d| keyword(d).is_some()) {
+        // each normal declaration's rank: the user agent's lowest, then the author's by layer
+        // (unlayered and inline last)
+        let rank: smallvec::SmallVec<[u32; 24]> = ua.iter().flat_map(|r| r.decls.iter().filter(|d| !d.important).map(|_| 0))
+            .chain(au.iter().flat_map(|r| r.decls.iter().filter(|d| !d.important).map(move |_| 1 + u32::from(r.layer))))
+            .chain(own.iter().filter(|d| !d.important).map(|_| 2 + u32::from(u16::MAX)))
+            .collect();
+        const ALL: Prop = Prop::named("all");
+        let mut rolled: smallvec::SmallVec<[&'d Decl; 24]> = smallvec::SmallVec::with_capacity(out.len());
+        // each declaration as it resolved (a rolled-back one: what it rolled back to)
+        let mut resolved: smallvec::SmallVec<[&'d Decl; 24]> = smallvec::SmallVec::with_capacity(out.len());
+        for k in 0..out.len() {
+            let Some(layer) = keyword(out[k]) else {
+                rolled.push(out[k]);
+                resolved.push(out[k]);
+                continue;
+            };
+            let below = |j: usize| if layer { rank[j] < rank[k] } else { rank[j] == 0 };
+            if out[k].prop == ALL {
+                // every property: reset (as `unset`), then what the layers below say again
+                rolled.push(out[k]);
+                rolled.extend((0..k).filter(|&j| below(j) && keyword(resolved[j]).is_none()).map(|j| resolved[j]));
+                resolved.push(out[k]);
+            } else {
+                let j = (0..k).rev().find(|&j| out[j].prop == out[k].prop && below(j));
+                let to = j.map_or(out[k], |j| resolved[j]);
+                rolled.push(to);
+                resolved.push(to);
+            }
+        }
+        out = rolled;
+    }
     let important = |d: &&Decl| d.important;
     if !rules().chain(own.iter().copied()).any(|d| d.important) {
         return out;
@@ -634,6 +711,29 @@ struct NodeRef<'b> {
 }
 
 impl NodeRef<'_> {
+    /// A `<textarea>` or an `<input>` of a type one types text into (where `readonly` and
+    /// `placeholder` apply).
+    fn text_field(&self) -> bool {
+        match self.tag() {
+            "textarea" => true,
+            "input" => matches!(self.own_attr("type").map(str::to_ascii_lowercase).as_deref(),
+                None | Some("" | "text" | "search" | "url" | "tel" | "email" | "password" | "number"
+                    | "date" | "month" | "week" | "time" | "datetime-local")),
+            _ => false,
+        }
+    }
+
+    /// A control `required` applies to: `<select>`, `<textarea>`, an `<input>` other than a button,
+    /// a hidden one, a range or a colour.
+    fn requirable(&self) -> bool {
+        match self.tag() {
+            "select" | "textarea" => true,
+            "input" => !matches!(self.own_attr("type").map(str::to_ascii_lowercase).as_deref(),
+                Some("hidden" | "range" | "color" | "submit" | "image" | "reset" | "button")),
+            _ => false,
+        }
+    }
+
     fn el(&self) -> Option<&ElData> {
         let e = self.nodes[self.i].el;
         (e != NONE).then(|| &self.els[e as usize])
@@ -691,13 +791,17 @@ impl Subject for NodeRef<'_> {
             "disabled" => self.own_attr("disabled").is_some(),
             "enabled" => self.own_attr("disabled").is_none(),
             "link" | "any-link" => self.tag() == "a" && self.own_attr("href").is_some(),
-            "required" => self.own_attr("required").is_some(),
-            "optional" => self.own_attr("required").is_none(),
-            "read-only" => self.own_attr("readonly").is_some(),
-            "read-write" => self.own_attr("readonly").is_none(),
+            // the form pseudo-classes are of the controls they apply to (HTML 4.16.3)
+            "required" => self.requirable() && self.own_attr("required").is_some(),
+            "optional" => self.requirable() && self.own_attr("required").is_none(),
+            "read-write" => self.text_field() && self.own_attr("readonly").is_none() && self.own_attr("disabled").is_none(),
+            "read-only" => !(self.text_field() && self.own_attr("readonly").is_none() && self.own_attr("disabled").is_none()),
             "open" => self.attr("open").is_some(),
+            "popover-open" => self.own_attr("popover").is_some() && self.state.popover_open.contains(&key),
+            // an open dialog shown modally: in the top layer as popovers are
+            "modal" => self.tag() == "dialog" && self.own_attr("open").is_some() && self.state.popover_open.contains(&key),
             "placeholder-shown" => {
-                self.own_attr("placeholder").is_some() && self.own_attr("value").is_none_or(str::is_empty)
+                self.text_field() && self.own_attr("placeholder").is_some() && self.own_attr("value").is_none_or(str::is_empty)
             }
             _ => false,
         }
@@ -724,6 +828,9 @@ impl Subject for NodeRef<'_> {
     }
     fn is_empty(&self) -> bool {
         self.el().is_none_or(|e| e.empty)
+    }
+    fn auto_dir(&self) -> Option<bool> {
+        self.el()?.auto_dir
     }
     fn has(&self, id: u16) -> bool {
         id < 64 && self.el().is_some_and(|e| e.has & (1 << id) != 0)
@@ -831,6 +938,63 @@ fn flatten_later<'d>(later: &'d [AnyElement], take: usize, me: u32, pos: (usize,
         flatten_kids(d, idx, ck, out);
     }
     if out.len() as u32 == first { NONE } else { first }
+}
+
+/// An inline `<svg>` as SVG markup (its elements, attributes and text) for the kit's SVG reader.
+fn svg_markup(div: &Div) -> String {
+    fn put(d: &Div, out: &mut String) {
+        let esc = |s: &str| s.replace('&', "&amp;").replace('<', "&lt;").replace('"', "&quot;");
+        out.push('<');
+        out.push_str(d.tag);
+        if d.tag == "svg" {
+            out.push_str(" xmlns=\"http://www.w3.org/2000/svg\"");
+        }
+        if let Some(id) = &d.id {
+            out.push_str(&format!(" id=\"{}\"", esc(id)));
+        }
+        for (k, v) in &d.attrs {
+            out.push_str(&format!(" {}=\"{}\"", k, esc(v)));
+        }
+        out.push('>');
+        for c in &d.children {
+            match c {
+                AnyElement::Element(e) => put(e, out),
+                AnyElement::Text(t) => out.push_str(&esc(t)),
+            }
+        }
+        out.push_str("</");
+        out.push_str(d.tag);
+        out.push('>');
+    }
+    let mut out = String::new();
+    put(div, &mut out);
+    out
+}
+
+/// HTML's auto directionality of `div` when it has `dir=auto` (or is a `<bdi>` without `dir`):
+/// the direction of the first strong character of its text (an `<input>`'s value), skipping
+/// elements with their own `dir` and `bdi`, `script`, `style` and `textarea` subtrees.
+fn auto_direction(div: &Div) -> Option<bool> {
+    fn walk(kids: &[AnyElement]) -> Option<bool> {
+        kids.iter().find_map(|c| match c {
+            AnyElement::Text(t) => text::first_strong(t),
+            AnyElement::Element(d) if matches!(d.tag, "bdi" | "script" | "style" | "textarea")
+                || d.attrs.iter().any(|a| a.0.as_ref() == "dir") => None,
+            AnyElement::Element(d) => walk(&d.children),
+        })
+    }
+    let attr = |name: &str| div.attrs.iter().find(|a| a.0.as_ref() == name).map(|a| a.1.as_ref());
+    let auto = match attr("dir") {
+        Some(d) => d.eq_ignore_ascii_case("auto"),
+        None => div.tag == "bdi",
+    };
+    if !auto {
+        return None;
+    }
+    if div.tag == "input" {
+        return attr("value").and_then(text::first_strong);
+    }
+    walk(&div.children)
 }
 
 #[derive(Clone)]
@@ -1024,6 +1188,11 @@ impl<'a> Builder<'a> {
     /// items before the result is shared.
     fn cascade(&mut self, i: usize, div: &Div, parent: StyleId, fixup: u8) -> StyleId {
         let _s = span(Phase::Cascade);
+        // the root's <body>: its `overflow` is the viewport's while the root's is visible (CSS
+        // Overflow 3 3.3), so it neither clips nor starts a formatting context itself. Only a
+        // clipping one: the window doesn't scroll as a viewport does, so a scrolling body (an
+        // app's) keeps scrolling
+        let fixup = if div.tag == "body" && self.nodes[i].parent == Some(0) { fixup | 4 } else { fixup };
         let (ua, au) = self.matched_rules(i);
         let decls = self.declared(i, div, &ua, &au);
         let viewport = (self.viewport.0.to_bits(), self.viewport.1.to_bits());
@@ -1065,10 +1234,27 @@ impl<'a> Builder<'a> {
             fixup,
         };
         let mut c = self.compute(parent, &decls);
-        match fixup {
+        match fixup & 3 {
             1 if c.display == DisplayKind::Inline => c.display = DisplayKind::InlineBlock,
             2 if c.display == DisplayKind::Inline => c.display = DisplayKind::Block,
             _ => {}
+        }
+        let visible = taffy::Point { x: Overflow::Visible, y: Overflow::Visible };
+        let clips = |o: Overflow| matches!(o, Overflow::Hidden | Overflow::Clip);
+        if fixup & 4 != 0 && self.styles[parent].layout.overflow == visible
+            && clips(c.layout.overflow.x) && clips(c.layout.overflow.y) {
+            c.layout.overflow = visible;
+        }
+        // a float, or an absolutely positioned box, is blockified (CSS 2 §9.7)
+        if c.layout.float != taffy::style::Float::None || c.layout.position == Position::Absolute {
+            c.inline_static = c.layout.float == taffy::style::Float::None
+                && matches!(c.display, DisplayKind::Inline | DisplayKind::InlineBlock | DisplayKind::InlineFlex | DisplayKind::InlineGrid);
+            c.display = match c.display {
+                DisplayKind::Inline | DisplayKind::InlineBlock => DisplayKind::Block,
+                DisplayKind::InlineFlex => DisplayKind::Flex,
+                DisplayKind::InlineGrid => DisplayKind::Grid,
+                d => d,
+            };
         }
         let id = self.styles.add(c);
         self.styles.cache.entry(hash).or_default().push((key, id));
@@ -1178,7 +1364,8 @@ impl<'a> Builder<'a> {
         let st = self.state;
         let key = n.key;
         (st.hovered.contains(&key), st.active.contains(&key), st.focused == Some(key),
-         st.focus_path.contains(&key), st.checked.get(&key).copied(), st.details_open.get(&key).copied())
+         st.focus_path.contains(&key), st.checked.get(&key).copied(), st.details_open.get(&key).copied(),
+         st.popover_open.contains(&key))
             .hash(&mut h);
         h.finish()
     }
@@ -1241,7 +1428,9 @@ impl<'a> Builder<'a> {
         };
         const FONT_SIZE: Prop = Prop::named("font-size");
         const FONT: Prop = Prop::named("font");
-        let font_first = |d: &&Decl| d.prop == FONT_SIZE || d.prop == FONT;
+        const FONT_FAMILY: Prop = Prop::named("font-family");
+        const DIRECTION: Prop = Prop::named("direction");
+        let font_first = |d: &&Decl| d.prop == FONT_SIZE || d.prop == FONT || d.prop == FONT_FAMILY || d.prop == DIRECTION;
         let run = |c: &mut Computed, u: Units, d: &Decl| {
             if crate::vars::uses_vars(&d.value) {
                 if let Some(d) = subst(d) {
@@ -1252,7 +1441,8 @@ impl<'a> Builder<'a> {
             }
         };
         for important in [false, true] {
-            // font-size first: em lengths in the other properties depend on it
+            // the font first: em and ch lengths in the other properties depend on it (and
+            // `direction`: the inline-start and -end properties are its sides)
             for d in decls.iter().filter(|d| d.important == important && font_first(d)) {
                 run(&mut c, parent.units(self.viewport), d);
             }
@@ -1260,11 +1450,25 @@ impl<'a> Builder<'a> {
         if root {
             c.root_font_size = c.font_size; // `rem` everywhere (the root's own font-size used the initial)
         }
+        // then the line height (`lh` lengths in the others), with the font's units
+        const LINE_HEIGHT: Prop = Prop::named("line-height");
+        for important in [false, true] {
+            for d in decls.iter().filter(|d| d.important == important && d.prop == LINE_HEIGHT) {
+                let fu = c.units(self.viewport);
+                run(&mut c, fu, d);
+            }
+        }
         let u = c.units(self.viewport);
         for important in [false, true] {
-            for d in decls.iter().filter(|d| d.important == important && !font_first(d)) {
+            for d in decls.iter().filter(|d| d.important == important && !font_first(d) && d.prop != LINE_HEIGHT) {
                 run(&mut c, u, d);
             }
+        }
+        if c.background_current.is_some() {
+            crate::style::resolve_current(&mut c);
+        }
+        if c.stretch_fn.iter().any(Option::is_some) {
+            crate::style::resolve_stretch(&mut c, &u);
         }
         c
     }
@@ -1346,6 +1550,7 @@ impl<'a> Builder<'a> {
         self.nodes[i].el = self.els.len() as u32;
         // (the user-agent sheet's own pointer rule is `a:hover`)
         let reactive = div.listeners.is_some() || div.states.is_some() || div.motion().is_some() || div.tag == "a";
+        let auto_dir = auto_direction(&div);
         self.els.push(ElData {
             tag: div.tag,
             id: div.id.take(),
@@ -1354,6 +1559,7 @@ impl<'a> Builder<'a> {
             has: 0,
             reactive,
             empty: div.children.iter().all(|c| matches!(c, AnyElement::Text(t) if t.is_empty())),
+            auto_dir,
             later: smallvec::SmallVec::new(),
         });
         if !self.author.has.is_empty() {
@@ -1415,6 +1621,10 @@ impl<'a> Builder<'a> {
             return None;
         }
         let style = self.animate(i, &div, parent_style, style);
+        let style = match self.anchors.apply(self.nodes[i].key, &self.styles[style]) {
+            Some(c) => self.styles.add(c),
+            None => style,
+        };
         self.nodes[i].style = style;
         self.counter_ops(style, parent.unwrap_or(usize::MAX));
         // attributes moved into ElData: widgets read them back through the arena
@@ -1475,12 +1685,18 @@ impl<'a> Builder<'a> {
                     }
                 } else if div.tag == "video" && let Some(v) = self.video_src(i) {
                     Replaced::Video(v)
+                } else if div.tag == "svg" && let Some(img) = self.images.svg(&svg_markup(&div)) {
+                    Replaced::Image(img)
                 } else if let Some(file) = self.attr(i, "src").map(str::to_owned).and_then(|s| self.images.load(&s)) {
                     Replaced::File(file, self.attr(i, "frame").and_then(|v| v.trim().parse().ok()))
                 } else {
                     Replaced::Placeholder(div.tag)
                 };
                 self.nodes[i].content = Content::Replaced(r);
+            }
+            // <wbr>: a word break opportunity, U+200B in the text
+            TagKind::Break if div.tag == "wbr" => {
+                self.nodes[i].content = Content::Text("\u{200b}".into());
             }
             TagKind::Break => {
                 self.nodes[i].content = Content::LineBreak;
@@ -1623,7 +1839,7 @@ impl<'a> Builder<'a> {
         let g = self.push(Some(i), Content::Element, None, sid, key, true);
         self.nodes[g].el = self.els.len() as u32;
         self.els.push(ElData { tag, id: None, attrs: Vec::new(), listeners: None, has: 0, reactive: false,
-                               empty: text.is_empty(), later: smallvec::SmallVec::new() });
+                               empty: text.is_empty(), auto_dir: None, later: smallvec::SmallVec::new() });
         if !text.is_empty() {
             self.push(Some(g), Content::Text(text.into()), Some(g), sid, child_key(key, "#text", 1), true);
         }
@@ -1698,7 +1914,11 @@ impl<'a> Builder<'a> {
 
     fn is_block_level(&self, i: usize) -> bool {
         match &self.nodes[i].content {
-            Content::Element => !self.st(i).display.is_inline_level(),
+            // an image or a control is inline unless its display says otherwise (`display: block`)
+            Content::Element | Content::Replaced(_) | Content::Widget(_) => {
+                let s = self.st(i);
+                !s.display.is_inline_level() && !s.inline_static
+            }
             _ => false,
         }
     }
@@ -1732,6 +1952,38 @@ impl<'a> Builder<'a> {
             _ if c.layout.display == Display::FlowRoot => Display::FlowRoot,
             _ => Display::Block,
         };
+        if c.phys_align != 0 {
+            self.physical_alignment(i, &mut s);
+        }
+        // a collapsed flex item (CSS Flexbox 4.4): no main size, margins or flexing; its cross size
+        // stays, a strut for its line
+        if c.collapsed && let Some(p) = self.nodes[i].parent {
+            let ps = self.st(p);
+            if matches!(ps.display, DisplayKind::Flex | DisplayKind::InlineFlex) {
+                let zero = LengthPercentageAuto::length(0.0);
+                let (size, min, max, m0, m1) = if matches!(ps.layout.flex_direction, FlexDirection::Row | FlexDirection::RowReverse) {
+                    (&mut s.size.width, &mut s.min_size.width, &mut s.max_size.width, &mut s.margin.left, &mut s.margin.right)
+                } else {
+                    (&mut s.size.height, &mut s.min_size.height, &mut s.max_size.height, &mut s.margin.top, &mut s.margin.bottom)
+                };
+                (*size, *min, *max, *m0, *m1) = (Dimension::length(0.0), zero, zero, zero, zero);
+                (s.flex_grow, s.flex_shrink, s.flex_basis) = (0.0, 0.0, Dimension::length(0.0));
+                s.overflow = taffy::Point { x: Overflow::Hidden, y: Overflow::Hidden };
+                let pad = LengthPercentage::length(0.0);
+                if matches!(ps.layout.flex_direction, FlexDirection::Row | FlexDirection::RowReverse) {
+                    (s.padding.left, s.padding.right, s.border.left, s.border.right) = (pad, pad, pad, pad);
+                } else {
+                    (s.padding.top, s.padding.bottom, s.border.top, s.border.bottom) = (pad, pad, pad, pad);
+                }
+            }
+        }
+        let [start, end] = self.trimmed(i);
+        if start {
+            s.margin.top = LengthPercentageAuto::length(0.0);
+        }
+        if end {
+            s.margin.bottom = LengthPercentageAuto::length(0.0);
+        }
         if c.display == DisplayKind::Table {
             if let Some(tc) = self.table_cols.get(&i).filter(|t| t.fit && !t.widths.is_empty()) {
                 // auto width: the table shrinks to its columns (up to its container)
@@ -1910,20 +2162,41 @@ impl<'a> Builder<'a> {
     }
 
     /// Make line-container style: a wrapping flex row aligned per text-align.
-    fn line_style(c: &Computed, mut s: Style) -> Style {
-        s.display = Display::Flex;
-        s.flex_direction = FlexDirection::Row;
-        // nowrap / pre text arrives as unbreakable pieces; wrapping only
-        // happens at forced breaks (<br>, newlines) and between inline boxes
-        s.flex_wrap = FlexWrap::Wrap;
-        s.align_items = AlignItems::FLEX_END;
-        s.align_content = AlignContent::FLEX_START;
-        s.justify_content = match c.text_align {
-            TextAlign::Center => JustifyContent::CENTER,
-            TextAlign::Right => JustifyContent::FLEX_END,
-            _ => JustifyContent::FLEX_START,
+    /// How container style `c`'s lines go, with `items` (`tree/inline.rs`); `first`: they begin the
+    /// block (`text-indent`).
+    fn inline_of(&self, c: &Computed, items: Vec<crate::tree::Item>, first: bool) -> crate::tree::Inline {
+        use crate::tree::{ALIGN_CENTER, ALIGN_JUSTIFY, ALIGN_LEFT, ALIGN_RIGHT};
+        let rtl = c.layout.direction == taffy::style::Direction::Rtl;
+        let code = |a: TextAlign| match a.physical(rtl) {
+            TextAlign::Right => ALIGN_RIGHT,
+            TextAlign::Center => ALIGN_CENTER,
+            TextAlign::Justify => ALIGN_JUSTIFY,
+            _ => ALIGN_LEFT,
         };
-        s
+        // `text-align-last: auto`: as `text-align`, but `justify` aligns the last line to the start
+        let last = match (c.text_align_last, c.text_align) {
+            (Some(a), _) => code(a),
+            (None, TextAlign::Justify) => code(TextAlign::Start),
+            (None, a) => code(a),
+        };
+        let line = c.line_px();
+        let above = text::baseline(0.0, line, c.font_size, c.font_id);
+        crate::tree::Inline {
+            items,
+            align: code(c.text_align),
+            last,
+            // a percentage is of the line's room, known when the lines are laid out
+            indent: if first {
+                let u = c.units(self.viewport);
+                let px = c.text_indent.resolve(&u, 0.0);
+                (px, (c.text_indent.resolve(&u, 100.0) - px) / 100.0)
+            } else {
+                (0.0, 0.0)
+            },
+            strut: [above, line - above],
+            middle: c.font_size * 0.25,
+            balance: c.text_wrap & crate::linebreak::WRAP_BALANCE != 0,
+        }
     }
 
     /// The taffy node for `key` with this style, measure context and
@@ -2015,6 +2288,104 @@ impl<'a> Builder<'a> {
     }
 
     /// The taffy style of box `i`: its computed layout, and the root filling the viewport.
+    /// `left` / `right` in `justify-*` (`Computed::phys_align`): parsed as start / end, which swap
+    /// when the direction they are relative to (the container's) is right to left. In a flex
+    /// column's vertical main axis, `justify-content` takes them as start.
+    fn physical_alignment(&self, i: usize, s: &mut Style) {
+        use crate::style::{PHYS_JUSTIFY_CONTENT, PHYS_JUSTIFY_ITEMS, PHYS_JUSTIFY_SELF};
+        use taffy::style::{AlignContentKeyword as Ac, AlignItemsKeyword as Ai};
+        let bits = self.st(i).phys_align;
+        let rtl = s.direction == taffy::style::Direction::Rtl;
+        let items = |a: AlignItems| AlignItems { keyword: match a.keyword { Ai::Start => Ai::End, Ai::End => Ai::Start, k => k }, ..a };
+        if bits & PHYS_JUSTIFY_ITEMS != 0 && rtl {
+            s.justify_items = items(s.justify_items);
+        }
+        let parent_rtl = self.nodes[i].parent.is_some_and(|p| self.st(p).layout.direction == taffy::style::Direction::Rtl);
+        if bits & PHYS_JUSTIFY_SELF != 0 && parent_rtl {
+            s.justify_self = s.justify_self.map(items);
+        }
+        if bits & PHYS_JUSTIFY_CONTENT != 0 {
+            let column = s.display == Display::Flex && matches!(s.flex_direction, FlexDirection::Column | FlexDirection::ColumnReverse);
+            let a = s.justify_content;
+            s.justify_content = AlignContent { keyword: match a.keyword {
+                _ if column => Ac::Start,
+                Ac::Start if rtl => Ac::End,
+                Ac::End if rtl => Ac::Start,
+                k => k,
+            }, ..a };
+        }
+    }
+
+    /// Which of box `i`'s block margins `margin-trim` drops (css-box-4 3): it is its block
+    /// container's first (last) in-flow child, or its margin collapses through ancestors that are
+    /// (block boxes with no border or padding on that side) up to one that trims that edge.
+    fn trimmed(&self, i: usize) -> [bool; 2] {
+        use crate::style::{TRIM_BLOCK_END, TRIM_BLOCK_START};
+        // only under a trimming container (a few ancestors up at most)
+        let mut up = self.nodes[i].parent;
+        let mut any = false;
+        for _ in 0..16 {
+            let Some(p) = up else { break };
+            if self.st(p).margin_trim & (TRIM_BLOCK_START | TRIM_BLOCK_END) != 0 {
+                any = true;
+                break;
+            }
+            up = self.nodes[p].parent;
+        }
+        if !any {
+            return [false; 2];
+        }
+        let in_flow = |k: usize| match &self.nodes[k].content {
+            Content::Text(t) => !t.trim().is_empty(),
+            Content::Element | Content::Replaced(_) | Content::Widget(_) => {
+                let s = self.st(k);
+                s.display != DisplayKind::None && !s.layout.position.is_out_of_flow() && s.layout.float == taffy::style::Float::None
+            }
+            _ => false,
+        };
+        let mut out = [false; 2];
+        for (side, bit) in [(0, TRIM_BLOCK_START), (1, TRIM_BLOCK_END)] {
+            let mut cur = i;
+            while let Some(p) = self.nodes[cur].parent {
+                // the edge child, or one with only self-collapsing boxes (margins collapse
+                // through them) between it and the edge
+                let list: Kids = kids(&self.nodes, p).filter(|&k| in_flow(k)).collect();
+                let Some(at) = list.iter().position(|&k| k == cur) else { break };
+                let between = if side == 0 { &list[..at] } else { &list[at + 1..] };
+                if !between.iter().all(|&k| self.self_collapsing(k)) {
+                    break;
+                }
+                let ps = self.st(p);
+                if ps.margin_trim & bit != 0 {
+                    out[side] = true;
+                    break;
+                }
+                // its margin adjoins the parent's only through a plain block edge
+                let (pad, border) = if side == 0 { (ps.layout.padding.top, ps.layout.border.top) } else { (ps.layout.padding.bottom, ps.layout.border.bottom) };
+                let zero = LengthPercentage::length(0.0);
+                let block = matches!(ps.display, DisplayKind::Block | DisplayKind::ListItem | DisplayKind::Inline)
+                    && ps.layout.display != Display::FlowRoot && !overflow_clips(ps);
+                if !block || pad != zero || border != zero {
+                    break;
+                }
+                cur = p;
+            }
+        }
+        out
+    }
+
+    /// Whether block box `k` collapses through (CSS 2 8.3.1): no height, border, padding or content.
+    fn self_collapsing(&self, k: usize) -> bool {
+        let s = self.st(k);
+        let zero = LengthPercentage::length(0.0);
+        let l = &s.layout;
+        matches!(self.nodes[k].content, Content::Element)
+            && matches!(s.display, DisplayKind::Block | DisplayKind::ListItem)
+            && (l.size.height == Dimension::length(0.0) || (l.size.height == Dimension::auto() && kids(&self.nodes, k).next().is_none()))
+            && matches!(l.min_size.height, m if m == LengthPercentageAuto::auto() || m == LengthPercentageAuto::length(0.0))
+            && [l.padding.top, l.padding.bottom, l.border.top, l.border.bottom].iter().all(|v| *v == zero)
+    }
+
     fn box_style(&self, i: usize) -> Style {
         let mut base = self.base_style(i);
         if i == 0 {
@@ -2030,13 +2401,21 @@ impl<'a> Builder<'a> {
         id
     }
 
+    /// Text leaf `id` in style `sid`: its baselines, where its font's sit in its line boxes.
+    fn text_baseline(&mut self, id: NodeId, sid: StyleId) {
+        let c = &self.styles[sid];
+        let line = c.line_px();
+        let above = text::baseline(0.0, line, c.font_size, c.font_id);
+        self.changed |= self.taffy.set_baseline(id, Some(crate::tree::Baseline::Text([above, line - above])));
+    }
+
     /// Replace the text of box `k` by its whitespace-processed, transformed form.
     fn transform_text(&mut self, k: usize, c: StyleId) {
-        let (tt, ws, tab) = (self.styles[c].text_transform, self.styles[c].white_space, self.styles[c].tab_size);
+        let (tt, ws, tab) = ((self.styles[c].text_transform, self.styles[c].text_transform_extra), self.styles[c].white_space, self.styles[c].tab_size);
         let (rtl, ovr) = (self.styles[c].layout.direction == taffy::style::Direction::Rtl, self.styles[c].bidi_override);
         if let Content::Text(t) = &self.nodes[k].content {
             // the stored text stays as it is unless a transform or the bidi order changes it
-            let changed = match transform(t, tt, ws, tab) {
+            let changed = match crate::linebreak::transform(t, tt, ws, Some(tab)) {
                 std::borrow::Cow::Owned(s) => Some(s),
                 std::borrow::Cow::Borrowed(_) => None,
             };
@@ -2068,7 +2447,16 @@ impl<'a> Builder<'a> {
     /// which reconciling can leave stale).
     fn layout_node(&mut self, i: usize) -> NodeId {
         let outer = std::mem::replace(&mut self.changed, false);
+        let made = std::mem::replace(&mut self.inlined, false);
         let id = self.layout_node_inner(i);
+        // a box that no longer holds lines lays out as its display says
+        if !std::mem::replace(&mut self.inlined, made) {
+            self.changed |= self.taffy.set_inline(id, None);
+        }
+        let c = &self.styles[self.nodes[i].style];
+        let (kw, contain) = (c.size_kw, c.contain);
+        self.changed |= self.taffy.set_sizing(id, kw);
+        self.changed |= self.taffy.set_contain(id, contain);
         if self.changed {
             self.taffy.mark_dirty(id);
         }
@@ -2085,6 +2473,7 @@ impl<'a> Builder<'a> {
             Content::Widget(spec) => {
                 let (w, h) = (self.widgets)(self.nodes[i].key, WidgetAsk::Ensure(spec));
                 let mut s = self.box_style(i);
+                s.item_is_compressible_replaced = s.size.width == Dimension::auto();
                 if s.size.width == Dimension::auto() {
                     s.size.width = Dimension::length(w);
                 }
@@ -2122,26 +2511,53 @@ impl<'a> Builder<'a> {
                 };
                 let attr = |n: &str| self.attr(i, n).and_then(|v| v.trim_end_matches("px").parse::<f32>().ok());
                 let mut s = self.box_style(i);
+                // (an auto width only: taffy resolves the others, sizing keywords too, as for any box)
+                s.item_is_replaced = s.size.width == Dimension::auto();
                 let (aw, ah) = (attr("width"), attr("height"));
-                // the `width` / `height` attributes are sizes under any CSS one
-                if s.size.width == Dimension::auto() && let Some(w) = aw {
+                // a canvas's `width` / `height` are its bitmap's: its natural size
+                let svg = self.els.get(self.nodes[i].el as usize).is_some_and(|e| e.tag == "svg");
+                let canvas = svg || matches!(r, Replaced::Painted(_) | Replaced::Placeholder("canvas"));
+                let (iw, ih) = if canvas { (aw.unwrap_or(300.0), ah.unwrap_or(150.0)) } else { (iw, ih) };
+                // an inline <svg> without sizes takes its `viewBox`'s ratio (its picture scales)
+                let view_box = self.attr(i, "viewBox").and_then(|v| {
+                    let n: Vec<f32> = v.split([' ', ',']).filter(|s| !s.is_empty()).filter_map(|s| s.parse().ok()).collect();
+                    (n.len() == 4 && n[2] > 0.0 && n[3] > 0.0).then(|| (n[2], n[3]))
+                });
+                let (iw, ih) = match view_box {
+                    Some(vb) if aw.is_none() && ah.is_none() => vb,
+                    _ => (iw, ih),
+                };
+                // an image's are sizes under any CSS one
+                if !canvas && s.size.width == Dimension::auto() && let Some(w) = aw {
                     s.size.width = Dimension::length(w);
                 }
-                if s.size.height == Dimension::auto() && let Some(h) = ah {
+                if !canvas && s.size.height == Dimension::auto() && let Some(h) = ah {
                     s.size.height = Dimension::length(h);
                 }
                 // an auto size follows the other through a ratio, as in CSS: the
-                // `aspect-ratio`, else the attributes', else the picture's own (a
-                // `width: 70%` image is as tall as 70% of the width makes it)
+                // `aspect-ratio`, unless `auto` comes with it; the picture's own; the
+                // attributes' (`aspect-ratio: auto w / h` in the UA sheet). A `width: 70%`
+                // image is as tall as 70% of the width makes it
                 let attrs = aw.zip(ah).filter(|&(_, h)| h > 0.0).map(|(w, h)| w / h);
-                s.aspect_ratio = s.aspect_ratio.or(attrs).or((ih > 0.0).then(|| iw / ih));
-                if s.size.width == Dimension::auto() && s.size.height == Dimension::auto() {
-                    // neither given: the natural width (the ratio gives the height)
-                    s.size.width = Dimension::length(iw);
-                }
-                return self.leaf(i, s);
+                let natural = (ih > 0.0).then(|| iw / ih);
+                // a natural ratio is the content box's, which the measure keeps; taffy would make it
+                // the border box's, so it gives it only when they are the same box
+                let zero = |l: LengthPercentage| l == LengthPercentage::length(0.0);
+                let bare = [s.padding, s.border].iter().all(|r| zero(r.left) && zero(r.right) && zero(r.top) && zero(r.bottom));
+                s.aspect_ratio = if self.styles[sid].aspect_auto || s.aspect_ratio.is_none() {
+                    natural.or(s.aspect_ratio).or(attrs).filter(|_| bare)
+                } else {
+                    s.aspect_ratio
+                };
+                // measured: its natural size, or through its ratio (CSS 2 §10.3.2, §10.6.2), which
+                // is also its automatic minimum size as a flex or grid item
+                let key = self.nodes[i].key;
+                let id = self.node(key, s, Some(Measure::Replaced { width: iw, height: ih }), &[]);
+                self.nodes[i].taffy = Some(id);
+                return id;
             }
             Content::LineBreak => {
+                // in lines, a forced break (their layout makes the empty line two of them leave)
                 let s = Style { size: Size { width: Dimension::percent(1.0), height: Dimension::length(0.0) },
                                 flex_shrink: 0.0, ..Default::default() };
                 return self.leaf(i, s);
@@ -2154,12 +2570,13 @@ impl<'a> Builder<'a> {
                 let key = self.nodes[i].key;
                 let m = self.text_measure(key, i, sid, nowrap);
                 let id = self.node(key, Style::default(), Some(m), &[]);
+                self.text_baseline(id, sid);
                 self.nodes[i].taffy = Some(id);
                 return id;
             }
             _ => {}
         }
-        if let Some(k) = self.foldable_text(i) {
+        if let Some(k) = self.foldable_text(i).filter(|_| !self.run_ins.contains_key(&i)) {
             // one leaf for the box and its text: the text is measured as the
             // box's content and placed inside it after layout
             self.transform_text(k, sid);
@@ -2168,6 +2585,19 @@ impl<'a> Builder<'a> {
             let m = self.text_measure(key, k, sid, nowrap);
             let shape = self.shape(i, Form::Folded);
             let id = self.node_from(key, shape, |b| Style { display: Display::Block, ..b.box_style(i) }, Some(m), &[]);
+            // its text is at the top of the box unless the box aligns it lower as a flex item
+            let c = &self.styles[sid];
+            let top = |a: AlignItems| matches!(a, AlignItems::NORMAL | AlignItems::STRETCH | AlignItems::START
+                                                  | AlignItems::FLEX_START | AlignItems::BASELINE);
+            let lower = matches!(c.display, DisplayKind::Flex | DisplayKind::InlineFlex) && match c.layout.flex_direction {
+                FlexDirection::Row | FlexDirection::RowReverse => !top(c.layout.align_items),
+                _ => !matches!(c.layout.justify_content, JustifyContent::NORMAL | JustifyContent::START | JustifyContent::FLEX_START),
+            };
+            if lower {
+                self.changed |= self.taffy.set_baseline(id, None);
+            } else {
+                self.text_baseline(id, sid);
+            }
             self.nodes[i].taffy = Some(id);
             self.nodes[i].fold = Some(k);
             self.nodes[k].folded = true;
@@ -2179,6 +2609,18 @@ impl<'a> Builder<'a> {
                                  | DisplayKind::Table | DisplayKind::TableRowGroup
                                  | DisplayKind::TableRow);
         let mut list: Kids = kids(&self.nodes, i).collect();
+        if let Some(&r) = self.run_ins.get(&i) {
+            list.insert(0, r);
+        }
+        if list.iter().any(|&k| self.styles[self.nodes[k].style].run_in) {
+            self.adopt_run_ins(&mut list);
+        }
+        // a `display: contents` element has no box: its children are this box's (CSS Display 2.5)
+        if list.iter().any(|&k| self.contents(k)) {
+            let mut flat = Kids::new();
+            self.flatten_contents(&list, &mut flat);
+            list = flat;
+        }
         let ordered = |b: &Builder, k: usize| {
             let st = b.st(k);
             if st.display == DisplayKind::TableCaption && st.caption_bottom { i32::MAX } else { st.order }
@@ -2189,8 +2631,15 @@ impl<'a> Builder<'a> {
         let mut out: NodeList = NodeList::new();
         if flex_like {
             for k in list {
+                // white space alone isn't an item, whatever `white-space` says (Flexbox §4, Grid §6)
                 if let Content::Text(t) = &self.nodes[k].content {
-                    if t.trim().is_empty() && self.st(k).white_space == WhiteSpace::Normal {
+                    if t.trim().is_empty() {
+                        continue;
+                    }
+                    // text that needs inline layout (break opportunities, spacing ...) is an
+                    // anonymous block of lines, as browsers make it
+                    if !simple_text(t, self.st(k)) {
+                        self.flush_run(i, &mut smallvec::smallvec![k], &mut out);
                         continue;
                     }
                 }
@@ -2198,14 +2647,19 @@ impl<'a> Builder<'a> {
             }
             let shape = self.shape(i, Form::Plain);
             let id = self.node_from(self.nodes[i].key, shape, |b| b.box_style(i), None, &out);
+            self.changed |= self.taffy.set_subgrid(id, self.styles[sid].subgrid);
+            self.changed |= self.taffy.set_lanes(id, self.styles[sid].lanes());
             self.nodes[i].taffy = Some(id);
             return id;
         }
         // block container: runs of inline content become line boxes
         if list.iter().all(|&k| !self.is_block_level(k)) {
-            self.inline_items(&list, i, &mut out, true);
+            let items = self.inline_items(&list, i, &mut out);
             let shape = self.shape(i, Form::Lines);
-            let id = self.node_from(self.nodes[i].key, shape, |b| Self::line_style(&b.styles[sid], b.box_style(i)), None, &out);
+            let id = self.node_from(self.nodes[i].key, shape, |b| b.box_style(i), None, &out);
+            let inline = self.inline_of(&self.styles[sid], items, true);
+            self.changed |= self.taffy.set_inline(id, Some(inline));
+            self.inlined = true;
             self.nodes[i].taffy = Some(id);
             return id;
         }
@@ -2233,11 +2687,11 @@ impl<'a> Builder<'a> {
             return None;
         }
         let k = n.first as usize;
+        let c = self.st(i);
         match &self.nodes[k].content {
-            Content::Text(t) if !t.trim().is_empty() => {}
+            Content::Text(t) if !t.trim().is_empty() && (simple_text(t, c) || ellipsized_line(t, c)) => {}
             _ => return None,
         }
-        let c = self.st(i);
         let s = &c.layout;
         let display_ok = match c.display {
             DisplayKind::Block | DisplayKind::InlineBlock | DisplayKind::ListItem
@@ -2259,6 +2713,63 @@ impl<'a> Builder<'a> {
             && s.overflow.x != Overflow::Scroll
             && s.overflow.y != Overflow::Scroll)
             .then_some(k)
+    }
+
+    /// `display: run-in` (CSS Display 2.4): a run-in followed by a block box (white space between
+    /// aside) becomes an inline box at the start of that block, taken out of `list`; any other stays
+    /// a block box.
+    fn adopt_run_ins(&mut self, list: &mut Kids) {
+        let mut k = 0;
+        while k < list.len() {
+            let r = list[k];
+            let next = list[k + 1..].iter().copied()
+                .find(|&n| !matches!(&self.nodes[n].content, Content::Text(t) if t.trim().is_empty()
+                    && matches!(self.st(n).white_space, WhiteSpace::Normal | WhiteSpace::NoWrap)));
+            let st = &self.styles[self.nodes[r].style];
+            let target = next.filter(|&n| {
+                let s = self.st(n);
+                st.run_in && matches!(self.nodes[n].content, Content::Element) && !s.run_in
+                    && matches!(s.display, DisplayKind::Block | DisplayKind::ListItem)
+                    && s.layout.display != Display::FlowRoot && !s.layout.position.is_out_of_flow()
+                    && s.layout.float == taffy::style::Float::None
+            });
+            // (one holding a block-level box, a run-in's too, stays a block)
+            match target {
+                Some(n) if matches!(self.nodes[r].content, Content::Element) && !self.holds_block(r) => {
+                    let inline = Computed { display: DisplayKind::Inline, run_in: false, ..st.clone() };
+                    self.nodes[r].style = self.styles.add(inline);
+                    self.run_ins.insert(n, r);
+                    list.remove(k);
+                }
+                _ => k += 1,
+            }
+        }
+    }
+
+    /// Whether box `k` holds a block-level box (through its inline ones).
+    fn holds_block(&self, k: usize) -> bool {
+        // (a table cell, row or caption among inline content is wrapped in an inline table)
+        let table_part = |c: usize| matches!(self.st(c).display, DisplayKind::TableCell | DisplayKind::TableRow
+            | DisplayKind::TableRowGroup | DisplayKind::TableCaption);
+        kids(&self.nodes, k).any(|c| (self.is_block_level(c) && !table_part(c))
+            || (matches!(self.nodes[c].content, Content::Element) && (self.st(c).run_in || self.holds_block(c))))
+    }
+
+    /// Whether box `k` is an element with `display: contents`.
+    fn contents(&self, k: usize) -> bool {
+        matches!(self.nodes[k].content, Content::Element) && self.st(k).display == DisplayKind::Contents
+    }
+
+    /// `list` with its `display: contents` elements replaced by their children, in `out`.
+    fn flatten_contents(&self, list: &[usize], out: &mut Kids) {
+        for &k in list {
+            if self.contents(k) {
+                let inner: Kids = kids(&self.nodes, k).collect();
+                self.flatten_contents(&inner, out);
+            } else {
+                out.push(k);
+            }
+        }
     }
 
     fn child_nodes(&mut self, k: usize, out: &mut NodeList) {
@@ -2284,10 +2795,12 @@ impl<'a> Builder<'a> {
         let key = child_key(self.nodes[parent].key, "#anon", out.len());
         let anon = self.push(Some(parent), Content::Anon, Some(parent), style, key, false);
         let mut line = NodeList::new();
-        let items: Kids = std::mem::take(run);
-        self.inline_items(&items, parent, &mut line, true);
-        let ls = Self::line_style(&self.styles[style], Style::default());
-        let id = self.node(key, ls, None, &line);
+        let run: Kids = std::mem::take(run);
+        let items = self.inline_items(&run, parent, &mut line);
+        let id = self.node(key, Style { display: Display::Block, ..Default::default() }, None, &line);
+        // `text-indent` is the block's first line's: here when nothing block-level came before
+        let inline = self.inline_of(&self.styles[style], items, out.is_empty());
+        self.changed |= self.taffy.set_inline(id, Some(inline));
         if self.changed {
             self.taffy.mark_dirty(id);
         }
@@ -2295,174 +2808,6 @@ impl<'a> Builder<'a> {
         out.push(id);
     }
 
-    /// Flatten inline content into line items: words, atomic inline boxes, breaks.
-    fn inline_items(&mut self, list: &[usize], owner: usize, line: &mut NodeList, first: bool) {
-        let mut first_word = first;
-        for &k in list {
-            match &self.nodes[k].content {
-                Content::Text(_) => {
-                    let n = line.len();
-                    self.words(k, owner, first_word, line);
-                    if line.len() > n {
-                        first_word = false;
-                    }
-                }
-                Content::Element if matches!(self.st(k).display, DisplayKind::Inline | DisplayKind::Contents) => {
-                    let inner: Kids = kids(&self.nodes, k).collect();
-                    self.inline_items(&inner, k, line, first_word);
-                    first_word = false;
-                }
-                _ => {
-                    self.child_nodes(k, line);
-                    first_word = false;
-                }
-            }
-        }
-    }
-
-    /// Word boxes for text box `src`, with the style of its inline owner. The
-    /// box keeps the processed text; words are byte ranges into it.
-    fn words(&mut self, src: usize, owner: usize, first: bool, line: &mut NodeList) {
-        let sid = self.nodes[owner].style;
-        let c = &self.styles[sid];
-        let (ws, tt, size, letter, word_sp) = (c.white_space, c.text_transform, c.font_size, c.letter_spacing, c.word_spacing);
-        let (tab, break_all) = (c.tab_size, c.break_all);
-        let flags = text::flags(c);
-        let line_h = c.line_px();
-        let indent = if first { c.text_indent.resolve(&c.units(self.viewport), 0.0) } else { 0.0 };
-        // the processed text, kept in the box
-        let Content::Text(raw) = std::mem::replace(&mut self.nodes[src].content, Content::Anon) else { return };
-        let mut text = match transform(&raw, tt, ws, tab) {
-            std::borrow::Cow::Borrowed(_) => raw,
-            std::borrow::Cow::Owned(s) => s.into(),
-        };
-        // bidirectional text: laid out in visual order
-        let (rtl, ovr) = (c.layout.direction == taffy::style::Direction::Rtl, c.bidi_override);
-        if let Some(v) = text::bidi_visual(&text, rtl, ovr) {
-            text = v.into();
-        }
-        if ws == WhiteSpace::NoWrap {
-            text = collapse(&text).into();
-        }
-        // pieces: byte range, trailing space, forced break after
-        let mut pieces: smallvec::SmallVec<[(usize, usize, bool, bool); 16]> = smallvec::SmallVec::new();
-        let base = text.as_ptr() as usize;
-        let range = |w: &str| (w.as_ptr() as usize - base, w.as_ptr() as usize - base + w.len());
-        match ws {
-            WhiteSpace::Pre | WhiteSpace::PreWrap | WhiteSpace::PreLine => {
-                let lines: Vec<&str> = text.split('\n').collect();
-                for (n, l) in lines.iter().enumerate() {
-                    let brk = n + 1 < lines.len();
-                    if ws == WhiteSpace::Pre {
-                        let (a, b) = range(l);
-                        pieces.push((a, b, false, brk));
-                    } else {
-                        let words: Vec<&str> = l.split_whitespace().collect();
-                        if words.is_empty() {
-                            let (a, _) = range(l);
-                            pieces.push((a, a, false, brk));
-                        }
-                        for (j, w) in words.iter().enumerate() {
-                            let (a, b) = range(w);
-                            pieces.push((a, b, j + 1 < words.len(), brk && j + 1 == words.len()));
-                        }
-                    }
-                }
-            }
-            WhiteSpace::NoWrap => pieces.push((0, text.len(), false, false)),
-            WhiteSpace::Normal => {
-                let lead = text.starts_with(char::is_whitespace) && !first;
-                let words: Vec<&str> = text.split_whitespace().collect();
-                let trail = text.ends_with(char::is_whitespace);
-                for (j, w) in words.iter().enumerate() {
-                    let (mut a, b) = range(w);
-                    if j == 0 && lead {
-                        a -= 1; // one leading space, drawn with the word
-                    }
-                    pieces.push((a, b, j + 1 < words.len() || trail, false));
-                }
-            }
-        }
-        // overflow-wrap: a word wider than its block (as laid out last
-        // frame) is cut where it has to be
-        let anywhere = self.styles[sid].wrap_anywhere && !break_all
-            && ws != WhiteSpace::NoWrap && ws != WhiteSpace::Pre;
-        if anywhere {
-            let mut blk = owner;
-            while self.st(blk).display.is_inline_level() || self.st(blk).display == DisplayKind::Inline {
-                match self.nodes[blk].parent {
-                    Some(p) => blk = p,
-                    None => break,
-                }
-            }
-            let max = self.wrap_widths.get(&self.nodes[blk].key).copied().unwrap_or(self.viewport.0).max(1.0);
-            let mut out: smallvec::SmallVec<[(usize, usize, bool, bool); 16]> = smallvec::SmallVec::new();
-            for &(a, b, trailing, brk) in &pieces {
-                let piece = &text[a..b];
-                if self.text.width(piece, size, flags) <= max {
-                    out.push((a, b, trailing, brk));
-                    continue;
-                }
-                let mut start = a;
-                let mut acc = String::new();
-                for (o, ch) in piece.char_indices() {
-                    acc.push(ch);
-                    if self.text.width(&acc, size, flags) > max && acc.chars().count() > 1 {
-                        out.push((start, a + o, false, false));
-                        start = a + o;
-                        acc.clear();
-                        acc.push(ch);
-                    }
-                }
-                out.push((start, b, trailing, brk));
-            }
-            pieces = out;
-        }
-        if break_all && ws != WhiteSpace::NoWrap && ws != WhiteSpace::Pre {
-            let mut chars: smallvec::SmallVec<[(usize, usize, bool, bool); 16]> = smallvec::SmallVec::new();
-            for &(a, b, trailing, brk) in &pieces {
-                let piece = &text[a..b];
-                let n = piece.char_indices().count();
-                for (j, (o, ch)) in piece.char_indices().enumerate() {
-                    let last = j + 1 == n;
-                    chars.push((a + o, a + o + ch.len_utf8(), trailing && last, brk && last));
-                }
-                if n == 0 {
-                    chars.push((a, b, trailing, brk));
-                }
-            }
-            pieces = chars;
-        }
-        let space = self.text.width(" ", size, flags) + word_sp;
-        let src_key = self.nodes[src].key;
-        for (n, &(a, b, trailing, brk)) in pieces.iter().enumerate() {
-            let piece = &text[a..b];
-            // a leading space becomes a plain space for measuring and drawing
-            let w = self.text.width(piece, size, flags)
-                + letter * piece.chars().count() as f32
-                + if trailing { space } else { 0.0 };
-            let content = Content::Word { src: src as u32, start: a as u32, end: b as u32 };
-            let node = self.push(Some(owner), content, Some(owner), sid, child_key(src_key, "#w", n), false);
-            let s = Style {
-                size: Size { width: Dimension::length(w.ceil()), height: Dimension::length(line_h) },
-                flex_shrink: 0.0,
-                margin: Rect { left: LengthPercentageAuto::length(if n == 0 { indent } else { 0.0 }),
-                               ..Rect::zero() },
-                ..Default::default()
-            };
-            line.push(self.leaf(node, s));
-            if brk {
-                let br = self.push(Some(owner), Content::LineBreak, Some(owner), sid,
-                                   child_key(src_key, "#br", n), false);
-                line.push(self.leaf(br, Style {
-                    size: Size { width: Dimension::percent(1.0), height: Dimension::length(0.0) },
-                    flex_shrink: 0.0,
-                    ..Default::default()
-                }));
-            }
-        }
-        self.nodes[src].content = Content::Text(text);
-    }
 }
 
 impl Computed {
@@ -2477,68 +2822,6 @@ struct DisplayOnly {
     display: DisplayKind,
 }
 
-fn collapse(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for w in s.split_whitespace() {
-        if !out.is_empty() {
-            out.push(' ');
-        }
-        out.push_str(w);
-    }
-    out
-}
-
-/// Whitespace processing and `text-transform`; borrows when nothing changes.
-fn transform(s: &str, t: TextTransform, ws: WhiteSpace, tab: u8) -> std::borrow::Cow<'_, str> {
-    use std::borrow::Cow;
-    let collapse_ws = (ws == WhiteSpace::Normal || ws == WhiteSpace::NoWrap) && s.contains(['\n', '\t', '\r']);
-    // preserved tabs advance to the next multiple of `tab-size` spaces
-    let expand_tabs = matches!(ws, WhiteSpace::Pre | WhiteSpace::PreWrap) && s.contains('\t');
-    if !collapse_ws && !expand_tabs && t == TextTransform::None {
-        return Cow::Borrowed(s);
-    }
-    let s = if collapse_ws {
-        s.replace(['\n', '\t', '\r'], " ")
-    } else if expand_tabs {
-        let mut out = String::with_capacity(s.len() + 16);
-        let mut col = 0usize;
-        for ch in s.chars() {
-            match ch {
-                '\t' if tab > 0 => {
-                    let n = tab as usize - col % tab as usize;
-                    out.extend(std::iter::repeat_n(' ', n));
-                    col += n;
-                }
-                '\t' => {}
-                '\n' => {
-                    out.push('\n');
-                    col = 0;
-                }
-                c => {
-                    out.push(c);
-                    col += 1;
-                }
-            }
-        }
-        out
-    } else {
-        s.to_string()
-    };
-    Cow::Owned(match t {
-        TextTransform::None => s,
-        TextTransform::Upper => s.to_uppercase(),
-        TextTransform::Lower => s.to_lowercase(),
-        TextTransform::Capitalize => s
-            .split(' ')
-            .map(|w| {
-                let mut c = w.chars();
-                c.next().map(|f| f.to_uppercase().chain(c).collect()).unwrap_or_default()
-            })
-            .collect::<Vec<String>>()
-            .join(" "),
-    })
-}
-
 /// Build, cascade and lay out `root` in a `viewport` (logical pixels),
 /// reusing the arenas of `recycle` (the previous frame) and `caches`.
 pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, caches: &mut LayoutCaches,
@@ -2548,8 +2831,14 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     caches.tw.on = TAILWIND.load(std::sync::atomic::Ordering::Relaxed);
     collect_styles(&root, &mut css, &mut title, &mut caches.tw);
     if caches.tw.on && !caches.tw.rules.is_empty() {
-        css.push('\n');
-        css.push_str(caches.tw.css());
+        let utilities = caches.tw.css(&css);
+        if !utilities.is_empty() {
+            let mut all = String::with_capacity(css.len() + utilities.len() + 1);
+            all.push_str(&css);
+            all.push('\n');
+            all.push_str(utilities);
+            css = all;
+        }
     }
     // the pointer and the focus restyle only where the sheet says so
     caches.state_rules = [":hover", ":active", ":focus"].iter().any(|p| css.contains(p));
@@ -2581,8 +2870,9 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     }
     caches.images.videos.begin_pass();
     let ua_styled = ua_styled_stylesheet();
+    caches.viewport = viewport;
     let LayoutCaches { styles, text, images, author, taffy, box_of, acc, matched, recon, text_box, shapes, containers,
-                       wrap_widths, anim, .. } = caches;
+                       anchors, wrap_widths, anim, .. } = caches;
     let mut b = Builder {
         nodes,
         els,
@@ -2595,6 +2885,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         text_box,
         shapes,
         containers,
+        anchors,
         wrap_widths,
         changed: false,
         next_tpos: (1, 1),
@@ -2613,6 +2904,8 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
         counters: Vec::new(),
         table_cols: KeyMap::default(),
         anim,
+        inlined: false,
+        run_ins: KeyMap::default(),
     };
     // the document: <html><body> unless the app built them itself
     let root_div = match root {
@@ -2661,6 +2954,19 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
                     }
                     Measure::Word { width, line } => Size { width: known.width.unwrap_or(*width),
                                                             height: known.height.unwrap_or(*line) },
+                    // `known` is the border box; the content box, when known, is the definite space
+                    Measure::Replaced { width, height } => {
+                        let content = |k: Option<f32>, a: AvailableSpace| k.and(match a {
+                            AvailableSpace::Definite(v) => Some(v),
+                            _ => None,
+                        });
+                        match (content(known.width, available.width), content(known.height, available.height)) {
+                            (Some(w), Some(h)) => Size { width: w, height: h },
+                            (Some(w), None) => Size { width: w, height: if *width > 0.0 { w * height / width } else { *height } },
+                            (None, Some(h)) => Size { width: if *height > 0.0 { h * width / height } else { *width }, height: h },
+                            (None, None) => Size { width: *width, height: *height },
+                        }
+                    }
                     Measure::Text { key, size, flags, line, nowrap, brk, .. } => {
                         let text = match text_box.get(key).map(|&k| &nodes[k].content) {
                             Some(Content::Text(t)) => t.as_ref(),
@@ -2691,13 +2997,38 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
             box_of[s] = i as u32;
         }
     }
-    let mut walk = Walk { t: taffy, box_of, state, vp: viewport, styles, text: tc, seq: 0 };
+    let mut walk = Walk { t: taffy, box_of, state, vp: viewport, styles, text: tc, seq: 0,
+                          port: rect(0.0, 0.0, viewport.0, viewport.1), within: rect(0.0, 0.0, viewport.0, viewport.1) };
     walk.place(&mut frame.nodes, root_id, 0.0, 0.0, None, (0.0, 0.0));
     finish(&mut frame.nodes, styles, acc);
     frame
 }
 
 /// The edges of a box's `clip` (css2 11.1.2): only an absolutely positioned box has one.
+/// Text the one-leaf text paths (a box with its lone text, a text run as a flex or grid item) lay
+/// out as inline layout would: printable ASCII words between spaces (no hyphens, slashes, tabs or
+/// other break opportunities), in white space that collapses, aligned but not justified, with no
+/// line-breaking or spacing options.
+fn simple_text(t: &str, c: &Computed) -> bool {
+    t.bytes().all(|b| b == b' ' || (b.is_ascii_graphic() && !matches!(b, b'-' | b'/' | b'?' | b'!' | b'%' | b'$' | b'}' | b')' | b']')))
+        && c.text_align != TextAlign::Justify
+        && c.text_wrap == 0
+        && !c.break_all
+        && !c.wrap_anywhere
+}
+
+/// A line cut with an ellipsis (`white-space: nowrap`, `text-overflow: ellipsis`) of any left-to-right
+/// text: it never breaks, so its break opportunities and characters (hyphens, brackets, quotes,
+/// Indic scripts ...) lay out alike either way, and only the one-leaf path ellipsizes (inline
+/// layout clips it mid-glyph). Right-to-left text stays inline, where it is reordered.
+fn ellipsized_line(t: &str, c: &Computed) -> bool {
+    c.white_space == WhiteSpace::NoWrap
+        && c.ellipsizes()
+        && c.text_align != TextAlign::Justify
+        && c.layout.direction != Direction::Rtl
+        && text::bidi_visual(t, false, false).is_none()
+}
+
 fn clip_edges(st: &Computed) -> Option<[Option<crate::geometry::Length>; 4]> {
     st.clip_rect.filter(|_| matches!(st.layout.position, Position::Absolute | Position::Fixed))
 }
@@ -2725,7 +3056,8 @@ pub(crate) fn move_reclips(nodes: &[BoxNode], styles: &StyleStore, j: usize) -> 
 pub(crate) fn replace(frame: &mut Frame, viewport: (f32, f32), state: &UiState, caches: &mut LayoutCaches) -> bool {
     let Some(root) = frame.nodes.first().and_then(|n| n.taffy) else { return false };
     let LayoutCaches { styles, text, taffy, box_of, acc, .. } = caches;
-    let mut walk = Walk { t: taffy, box_of, state, vp: viewport, styles, text, seq: 0 };
+    let mut walk = Walk { t: taffy, box_of, state, vp: viewport, styles, text, seq: 0,
+                          port: rect(0.0, 0.0, viewport.0, viewport.1), within: rect(0.0, 0.0, viewport.0, viewport.1) };
     walk.place(&mut frame.nodes, root, 0.0, 0.0, None, (0.0, 0.0));
     finish(&mut frame.nodes, styles, acc);
     true
@@ -2742,6 +3074,10 @@ struct Walk<'a> {
     text: &'a mut TextCache,
     /// Boxes placed so far (`BoxNode::seq`).
     seq: u32,
+    /// The nearest scrollport (the viewport, or a scroll container's padding box) and the content
+    /// box of the box being placed into: what a sticky box sticks to and stays within.
+    port: Bounds<f32>,
+    within: Bounds<f32>,
 }
 
 impl Walk<'_> {
@@ -2752,8 +3088,14 @@ impl Walk<'_> {
         let l = *self.t.layout(id);
         let (mut x, mut y) = (ox + l.location.x, oy + l.location.y);
         let (w, h) = (l.size.width, l.size.height);
+        if self.t.style(id).position == Position::Sticky {
+            let (dx, dy) = self.sticky(id, rect(x, y, w, h), &l);
+            x += dx;
+            y += dy;
+        }
         let mut child_clip = clip;
         let (mut sx, mut sy) = (0.0, 0.0);
+        let mut port = None;
         if let Some(i) = self.box_of.get(slot(id)).filter(|&&b| b != NONE).map(|&b| b as usize) {
             let st = &self.styles[nodes[i].style];
             let u = st.units(self.vp);
@@ -2768,7 +3110,7 @@ impl Walk<'_> {
                 y += match st.vertical_align {
                     VAlign::Sub => st.font_size * 0.25,
                     VAlign::Super => -st.font_size * 0.35,
-                    VAlign::Baseline => 0.0,
+                    VAlign::Baseline | VAlign::Top | VAlign::Middle | VAlign::Bottom => 0.0,
                 };
             }
             nodes[i].bounds = rect(x, y, w, h);
@@ -2796,16 +3138,30 @@ impl Walk<'_> {
                     Some(c) => c.intersect(&pad),
                     None => pad,
                 });
-                if ov.x == Overflow::Scroll || ov.y == Overflow::Scroll {
-                    let axis = |o: Overflow, content: f32, view: f32| {
-                        if o == Overflow::Scroll { (content - view).max(0.0) } else { 0.0 }
+                // `hidden` is a scroll container too, scrolled by programs only: its range moves it,
+                // the user's scrolling (scrollbars, wheel: `scroll_range`) is `scroll`'s
+                let scrolls = |o: Overflow| matches!(o, Overflow::Scroll | Overflow::Hidden);
+                if scrolls(ov.x) || scrolls(ov.y) {
+                    port = Some(pad);
+                    let axis = |o: Overflow, content: f32, view: f32, user: bool| {
+                        if o == Overflow::Scroll || (!user && o == Overflow::Hidden) { (content - view).max(0.0) } else { 0.0 }
                     };
-                    let range = (axis(ov.x, l.scrollable_overflow_rect.right, pad.size.width),
-                                 axis(ov.y, l.scrollable_overflow_rect.bottom, pad.size.height));
-                    nodes[i].scroll_range = range;
+                    let range = |user| (axis(ov.x, l.scrollable_overflow_rect.right, pad.size.width, user),
+                                        axis(ov.y, l.scrollable_overflow_rect.bottom, pad.size.height, user));
+                    nodes[i].scroll_range = range(true);
                     let (ax, ay) = self.state.scroll.get(&nodes[i].key).copied().unwrap_or((0.0, 0.0));
-                    sx = ax.clamp(0.0, range.0);
-                    sy = ay.clamp(0.0, range.1);
+                    let all = range(false);
+                    sx = ax.clamp(0.0, all.0);
+                    sy = ay.clamp(0.0, all.1);
+                    nodes[i].scroll_pos = (sx, sy);
+                }
+            }
+            // the root scrolls as the viewport does, by programs (`window.scrollTo`) only
+            if i == 0 && !overflow_clips(st) {
+                if let Some(&(ax, ay)) = self.state.scroll.get(&nodes[i].key) {
+                    let o = l.scrollable_overflow_rect;
+                    sx = ax.clamp(0.0, (o.right.max(w) - self.vp.0).max(0.0));
+                    sy = ay.clamp(0.0, (o.bottom.max(h) - self.vp.1).max(0.0));
                     nodes[i].scroll_pos = (sx, sy);
                 }
             }
@@ -2819,6 +3175,13 @@ impl Walk<'_> {
         }
         let inner = (x - sx, y - sy);
         let cb = if self.t.style(id).position == Position::Static { cb } else { inner };
+        let (b, p) = (l.border, l.padding);
+        let content = rect(inner.0 + b.left + p.left, inner.1 + b.top + p.top,
+                           (w - b.left - b.right - p.left - p.right).max(0.0), (h - b.top - b.bottom - p.top - p.bottom).max(0.0));
+        let saved = (self.port, std::mem::replace(&mut self.within, content));
+        if let Some(port) = port {
+            self.port = port;
+        }
         for &k in self.t.children(id) {
             let (kx, ky) = match self.t.style(k).position {
                 Position::Absolute => cb,
@@ -2827,6 +3190,36 @@ impl Walk<'_> {
             };
             self.place(nodes, k, kx, ky, child_clip, cb);
         }
+        (self.port, self.within) = saved;
+    }
+
+    /// How far sticky box `id` (at `at`, laid out as `l`) moves (css-position-3 3.4): into the
+    /// scrollport inset by its `top` / `right` / `bottom` / `left`, but its margin box no further
+    /// than its containing block's content box; `top` and `left` win when both sides can't hold.
+    fn sticky(&self, id: NodeId, at: Bounds<f32>, l: &taffy::Layout) -> (f32, f32) {
+        let s = self.t.style(id);
+        let (port, cb, m) = (self.port, self.within, l.margin);
+        let inset = |v: LengthPercentageAuto, basis: f32| taffy::MaybeResolve::maybe_resolve(v, Some(basis), crate::tree::resolve_calc);
+        let axis = |start: Option<f32>, end: Option<f32>, (pos, size): (f32, f32), (lo, hi): (f32, f32), (clo, chi): (f32, f32), (ms, me): (f32, f32)| {
+            let mut d = 0.0f32;
+            if let Some(e) = end {
+                d = d.min(hi - e - (pos + size));
+            }
+            if let Some(s) = start {
+                d = d.max(lo + s - pos);
+            }
+            if d > 0.0 {
+                d.min((chi - me - size - pos).max(0.0))
+            } else {
+                d.max((clo + ms - pos).min(0.0))
+            }
+        };
+        let (pw, ph) = (port.size.width, port.size.height);
+        let dx = axis(inset(s.inset.left, pw), inset(s.inset.right, pw), (at.origin.x, at.size.width),
+                      (port.origin.x, port.origin.x + pw), (cb.origin.x, cb.origin.x + cb.size.width), (m.left, m.right));
+        let dy = axis(inset(s.inset.top, ph), inset(s.inset.bottom, ph), (at.origin.y, at.size.height),
+                      (port.origin.y, port.origin.y + ph), (cb.origin.y, cb.origin.y + cb.size.height), (m.top, m.bottom));
+        (dx, dy)
     }
 }
 
@@ -2985,7 +3378,7 @@ impl Frame {
     pub(crate) fn text(&self, i: usize) -> &str {
         match &self.nodes[i].content {
             Content::Text(t) => t,
-            Content::Word { src, start, end } => match &self.nodes[*src as usize].content {
+            Content::Word { src, start, end, .. } => match &self.nodes[*src as usize].content {
                 Content::Text(t) => &t[*start as usize..*end as usize],
                 _ => "",
             },
@@ -3032,7 +3425,43 @@ impl Frame {
     }
 
     /// The effective stacking level of a box (its nearest z-index).
+    /// Its boxes in order-modified document order (CSS Flexbox 5.4.1, Grid 4.2: flex and grid
+    /// items paint in `order`), `None` when no item has an `order` (it is tree order then).
+    pub(crate) fn order_modified(&self, styles: &StyleStore) -> Option<Vec<usize>> {
+        let ordered = |i: usize| {
+            let c = &styles[self.nodes[i].style];
+            // (an absolutely positioned child isn't an item)
+            let o = if c.layout.position == taffy::style::Position::Absolute { 0 } else { c.order };
+            (o != 0 && self.nodes[i].parent.is_some_and(|p| matches!(styles[self.nodes[p].style].display,
+                DisplayKind::Flex | DisplayKind::InlineFlex | DisplayKind::Grid | DisplayKind::InlineGrid))).then_some(o)
+        };
+        if !(0..self.nodes.len()).any(|i| ordered(i).is_some()) {
+            return None;
+        }
+        // each box's path from the root, a step being (its `order`, its tree position)
+        let path = |mut i: usize| {
+            let mut k = Vec::new();
+            loop {
+                k.push((ordered(i).unwrap_or(0), i));
+                match self.nodes[i].parent {
+                    Some(p) => i = p,
+                    None => break,
+                }
+            }
+            k.reverse();
+            k
+        };
+        let mut v: Vec<usize> = (0..self.nodes.len()).collect();
+        v.sort_by_cached_key(|&i| path(i));
+        Some(v)
+    }
+
     pub(crate) fn z_of(&self, mut i: usize, styles: &StyleStore) -> i32 {
+        // the root's box is the canvas's background: under every stacking layer, negative ones too
+        // (CSS 2 Appendix E)
+        if i == 0 {
+            return i32::MIN;
+        }
         loop {
             if let Some(z) = styles[self.nodes[i].style].z_index {
                 return z;

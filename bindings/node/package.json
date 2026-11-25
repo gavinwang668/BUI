@@ -40,6 +40,7 @@
     "dom.js",
     "host.js",
     "screen.js",
+    "shell.js",
     "screen.d.ts",
     "globals.js",
     "bundle.js",

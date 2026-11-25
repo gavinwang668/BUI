@@ -57,7 +57,7 @@ pub(crate) fn measure(s: &str, size: f32, scale: f32) -> f32 {
 
 /// Top of a text item of `size` px whose line box is centered on `cy`.
 fn text_top(cy: f32, size: f32) -> f32 {
-    let base = crate::text::baseline(cy - size * 0.5, size, size);
+    let base = crate::text::baseline(cy - size * 0.5, size, size, 0);
     crate::text::item_top(base, size)
 }
 

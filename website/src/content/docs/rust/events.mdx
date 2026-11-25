@@ -48,7 +48,7 @@ If you use [hooks](../hooks/) instead, you don't need either: writing a signal r
 | `on_mouse_up(button, f)` | `MouseUpEvent { button, position, modifiers }` | Yes |
 | `on_mouse_move` | `MouseMoveEvent { position, pressed_button, modifiers }` | Yes |
 | `on_hover` | `bool`: `true` when the pointer enters, `false` when it leaves | No |
-| `on_scroll_wheel` | `ScrollWheelEvent { position, delta, modifiers }` | Yes |
+| `on_scroll_wheel` | `ScrollWheelEvent { position, delta, pixels, phase, modifiers }` | Yes |
 | `on_key_down`, `on_key_up` | `KeyDownEvent` / `KeyUpEvent { keystroke }` | Yes, from the focused element |
 | `on_change`, `on_input` | `ChangeEvent { value, checked, number }` | Yes |
 
@@ -58,6 +58,7 @@ The details:
 - **`MouseButton`** is `Left`, `Right` or `Middle`.
 - **`Modifiers`** has `shift`, `control` and `alt`.
 - **`ClickEvent::click_count()`** tells a double-click from a single one.
+- **`ScrollWheelEvent::phase`** is how the scroll came: `Wheel` (a notch or touchpad), `Drag` (a finger moves the content), `Fling` (it coasts on) or `End` (the finger lifted, `delta` 0). A list uses it to stretch past an end while the finger is down and spring back when it lifts.
 - **`ScrollWheelEvent::delta`** is in lines; positive scrolls the content up (the wheel turned away from you).
 - **`Keystroke`** has `key` (the key's name: `"a"`, `"Return"`, `"Left"` …), `key_char` (the typed text, if any) and `modifiers`.
 - **`ChangeEvent`** carries `value` (the text), `checked` (checkboxes and radios) and `number` (numbers, ranges, and a select's index). `on_input` and `on_change` both fire when the value changes. [The three looks](../styled-and-blender-components/#form-controls) lists what each control sends.

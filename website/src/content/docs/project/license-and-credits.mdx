@@ -47,6 +47,13 @@ Some parts of BUI come from other projects and keep their own licenses:
 | [Wuffs](https://github.com/google/wuffs) (Google) | Decoding PNG, GIF, BMP, TGA and QOI (`kit/extern/wuffs`) | MIT or Apache-2.0; BUI uses it under MIT |
 | [libjpeg-turbo](https://libjpeg-turbo.org) 3.1.2, decoder only | Decoding JPEG (`kit/extern/libjpeg-turbo`) | IJG License, BSD-3-Clause and zlib (see its `LICENSE.md`) |
 | [libwebp](https://chromium.googlesource.com/webm/libwebp) 1.6.0, decoder and demux | Decoding WebP (`kit/extern/libwebp`) | BSD-3-Clause, with Google's patent grant (`PATENTS`) |
+| [libtiff](https://libtiff.gitlab.io/libtiff/) 4.7.2, decoders | Decoding TIFF (`kit/extern/libtiff`) | libtiff License (BSD-like) |
+| [zlib](https://zlib.net) 1.4, inflate | Deflate in TIFF (`kit/extern/zlib`) | zlib |
+| [OpenEXR](https://openexr.com) 3.5.5, OpenEXRCore, with libdeflate 1.26 | Decoding OpenEXR, the `exr` feature (`kit/extern/openexr`) | BSD-3-Clause (libdeflate: MIT), with DreamWorks' patent grant (`PATENTS`) |
+| [libavif](https://github.com/AOMediaCodec/libavif) 1.4.2, decoder, with its libyuv copy | Decoding AVIF, the `avif` feature (`kit/extern/libavif`) | BSD-2-Clause (libyuv: BSD-3-Clause) |
+| [dav1d](https://code.videolan.org/videolan/dav1d) 1.5.5, C only | AV1 for AVIF (`kit/extern/dav1d`) | BSD-2-Clause |
+| [libjxl](https://github.com/libjxl/libjxl) 0.13.0, decoder | Decoding JPEG XL, the `jxl` feature (`kit/extern/libjxl`) | BSD-3-Clause, with Google's patent grant (`PATENTS`) |
+| [Highway](https://github.com/google/highway) 1.4.0 | SIMD for libjxl (`kit/extern/highway`) | Apache-2.0 or BSD-3-Clause; BUI uses it under BSD-3-Clause |
 | [Slug](https://github.com/EricLengyel/Slug) by Eric Lengyel | The GPU glyph coverage algorithm (shader code "Copyright 2017 by Eric Lengyel") | MIT |
 | [Tailwind CSS](https://tailwindcss.com) | The v4 default theme values behind the Tailwind support | MIT |
 

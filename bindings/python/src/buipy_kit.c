@@ -653,12 +653,11 @@ static PyObject *kitnode_set_grid_colors(KitNodeObject *self, PyObject *colors)
 
 /* -- menus: convert MenuItem-like Python objects to BKMenuSpec ---------------- */
 
-static int build_specs(PyObject *items, BKMenuSpec **r_specs, int *r_n);
 
-static void free_specs(BKMenuSpec *specs, int n)
+void buipy_menu_specs_free(BKMenuSpec *specs, int n)
 {
   for (int i = 0; i < n; i++) {
-    free_specs((BKMenuSpec *)specs[i].sub, specs[i].nsub);
+    buipy_menu_specs_free((BKMenuSpec *)specs[i].sub, specs[i].nsub);
   }
   free(specs);
 }
@@ -699,7 +698,7 @@ static int build_spec(PyObject *it, BKMenuSpec *s)
   OPT_ATTR("submenu", {
     BKMenuSpec *sub;
     int nsub;
-    if (!build_specs(v, &sub, &nsub)) {
+    if (!buipy_menu_specs(v, &sub, &nsub)) {
       Py_DECREF(v);
       return 0;
     }
@@ -710,7 +709,7 @@ static int build_spec(PyObject *it, BKMenuSpec *s)
   return !PyErr_Occurred();
 }
 
-static int build_specs(PyObject *items, BKMenuSpec **r_specs, int *r_n)
+int buipy_menu_specs(PyObject *items, BKMenuSpec **r_specs, int *r_n)
 {
   PyObject *seq = PySequence_Fast(items, "menu items must be a sequence");
   if (!seq) {
@@ -720,7 +719,7 @@ static int build_specs(PyObject *items, BKMenuSpec **r_specs, int *r_n)
   BKMenuSpec *specs = (BKMenuSpec *)calloc((size_t)(n + 1), sizeof(BKMenuSpec));
   for (Py_ssize_t i = 0; i < n; i++) {
     if (!build_spec(PySequence_Fast_GET_ITEM(seq, i), &specs[i])) {
-      free_specs(specs, (int)i);
+      buipy_menu_specs_free(specs, (int)i);
       Py_DECREF(seq);
       return 0;
     }
@@ -735,11 +734,11 @@ static PyObject *kitnode_set_menu(KitNodeObject *self, PyObject *items)
 {
   BKMenuSpec *specs;
   int n;
-  if (!build_specs(items, &specs, &n)) {
+  if (!buipy_menu_specs(items, &specs, &n)) {
     return NULL;
   }
   BK_menubutton_set_items(self->node, specs, n);
-  free_specs(specs, n);
+  buipy_menu_specs_free(specs, n);
   Py_RETURN_NONE;
 }
 
@@ -1994,11 +1993,11 @@ static PyObject *kitctx_open_menu(KitContextObject *self, PyObject *args, PyObje
   }
   BKMenuSpec *specs;
   int n;
-  if (!build_specs(items, &specs, &n)) {
+  if (!buipy_menu_specs(items, &specs, &n)) {
     return NULL;
   }
   BK_open_menu(self->ctx, o, specs, n, title, ax, ay);
-  free_specs(specs, n);
+  buipy_menu_specs_free(specs, n);
   Py_RETURN_NONE;
 }
 
@@ -2017,11 +2016,11 @@ static PyObject *kitctx_open_pie(KitContextObject *self, PyObject *args, PyObjec
   }
   BKMenuSpec *specs;
   int n;
-  if (!build_specs(items, &specs, &n)) {
+  if (!buipy_menu_specs(items, &specs, &n)) {
     return NULL;
   }
   BK_open_pie(self->ctx, specs, n, title, ax, ay);
-  free_specs(specs, n);
+  buipy_menu_specs_free(specs, n);
   Py_RETURN_NONE;
 }
 
@@ -2991,7 +2990,21 @@ static int kitwin_set_cb(KitWindowObject *self, PyObject *v, void *offset)
   return 0;
 }
 
+/* set_progress(state, value=0): the taskbar button's progress (BK_window_set_progress) */
+static PyObject *kitwin_set_progress(KitWindowObject *self, PyObject *args)
+{
+  int state;
+  float value = 0.0f;
+  if (!PyArg_ParseTuple(args, "i|f:set_progress", &state, &value)) {
+    return NULL;
+  }
+  return PyBool_FromLong(self->win && BK_window_set_progress(self->win, state, value));
+}
+
 static PyMethodDef kitwin_methods[] = {
+    {"set_progress", (PyCFunction)kitwin_set_progress, METH_VARARGS,
+     "set_progress(state, value=0) -> bool: the taskbar button's progress; state 0 none, "
+     "1 normal, 2 indeterminate, 3 paused, 4 error (buipy.PROGRESS_*), value 0..1."},
     {"show", (PyCFunction)kitwin_show, METH_NOARGS, ""},
     {"close", (PyCFunction)kitwin_close, METH_NOARGS, ""},
     {"is_open", (PyCFunction)kitwin_is_open, METH_NOARGS, ""},

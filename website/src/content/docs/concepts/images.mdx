@@ -1,9 +1,9 @@
 ---
 title: Images
-description: PNG, JPEG, WebP, GIF, BMP, TGA, QOI, Radiance HDR, PNM and SVG in every language, decoded once in C at the size they are drawn, off the UI thread, in a memory-budgeted cache. Formats, API, performance and limits.
+description: PNG, JPEG, WebP, GIF, BMP, TGA, QOI, Radiance HDR, PNM, SVG, TIFF, OpenEXR, AVIF, JPEG XL and HEIC in every language, decoded once in C at the size they are drawn, off the UI thread, in a memory-budgeted cache. Formats, API, performance and limits.
 section: Concepts
 order: 65
-sources: ["kit/intern/image/image.h", "kit/intern/image/imbuf.c", "kit/intern/image/filetype.c", "kit/intern/image/format_wuffs.c", "kit/intern/image/format_jpeg.c", "kit/intern/image/format_webp.c", "kit/intern/image/format_hdr.c", "kit/intern/image/format_pnm.c", "kit/intern/image/format_svg.c", "kit/intern/image/cache.c", "kit/intern/image/loader.c", "kit/intern/image/draw.c", "kit/include/BUI_kit.h", "gpu/include/GPU_raster.h", "gpu/intern/gpu_raster.c", "gpu/shaders/bui_ui.hlsl", "bindings/rust/blenderui/src/paint.rs", "bindings/python/bui/tksyntax/_images.py", "bindings/python/bui/components/widgets.py", "bench/images/image_grid.c", "bench/images/decoders.c", "tests/image_test.c"]
+sources: ["kit/intern/image/image.h", "kit/intern/image/imbuf.c", "kit/intern/image/filetype.c", "kit/intern/image/format_wuffs.c", "kit/intern/image/format_jpeg.c", "kit/intern/image/format_webp.c", "kit/intern/image/format_hdr.c", "kit/intern/image/format_pnm.c", "kit/intern/image/format_svg.c", "kit/intern/image/format_tiff.c", "kit/intern/image/format_exr.c", "kit/intern/image/format_avif.c", "kit/intern/image/format_jxl.c", "kit/intern/image/format_heic.c", "kit/intern/image/heic_wic.c", "kit/intern/image/heic_imageio.c", "kit/intern/image/heic_libheif.c", "kit/intern/image/cache.c", "kit/intern/image/loader.c", "kit/intern/image/draw.c", "kit/include/BUI_kit.h", "gpu/include/GPU_raster.h", "gpu/intern/gpu_raster.c", "gpu/shaders/bui_ui.hlsl", "bindings/rust/blenderui/src/paint.rs", "bindings/python/bui/tksyntax/_images.py", "bindings/python/bui/components/widgets.py", "bench/images/image_grid.c", "bench/images/decoders.c", "tests/image_test.c"]
 ---
 
 BUI reads images once, in C, for every language: the same decoders behind Rust's `<img>`, React's `<img>`, a tkinter `PhotoImage`, a Blender-style `Image` component, a canvas item or a Dear ImGui texture. The design is Blender's [imbuf](https://projects.blender.org/blender/blender/src/branch/main/source/blender/imbuf): one image type (`BKImBuf`, Blender's `ImBuf`) and one table of file types (`IMB_FILE_TYPES`), without imbuf's heavy dependencies.
@@ -26,13 +26,18 @@ Three things make it fast and light:
 | BMP, TGA, QOI | Wuffs | |
 | Radiance HDR | BUI, after Blender's `radiance_hdr` | shown like Blender's Standard view: clipped and sRGB-encoded |
 | PNM | BUI | PGM and PPM, ASCII and binary, 8 and 16 bit (what Tk reads) |
-| SVG | nanosvg (Blender's copy, already used for its icons) | rasterized at the drawn size; CMake `BUI_IMAGE_SVG` (on) |
+| SVG | nanosvg (Blender's copy, already used for its icons) | rasterized at the drawn size, also above its own (stretched or letterboxed as its `preserveAspectRatio` says); a width or height it doesn't give is in `BKImageInfo.flags` (`BK_IMAGE_INFO_NO_WIDTH` ...); CMake `BUI_IMAGE_SVG` (on) |
+| TIFF | [libtiff](https://libtiff.gitlab.io/libtiff/) 4.7.2, with zlib 1.4's inflate | the first page; RGB, palette, gray, CMYK, YCbCr, CIE L\*a\*b\*, LogLuv; 1 to 16 bits, strips or tiles; none, LZW, Deflate, PackBits, JPEG, CCITT fax; the Orientation tag; `tiff` (on) |
+| OpenEXR | [OpenEXRCore](https://openexr.com) 3.5.5, with libdeflate 1.26 | the first part's R, G, B, A (or Y), plain or the first named layer; scanlines or tiles; half, float, uint; every compression but zstd and HTJ2K; shown like Radiance HDR (Blender's Standard view); `exr` (off) |
+| AVIF | [libavif](https://github.com/AOMediaCodec/libavif) 1.4.2 and [dav1d](https://code.videolan.org/videolan/dav1d) 1.5.5 (C, no assembly) | 8 to 12 bits, any chroma subsampling, alpha, grids, `irot` / `imir`; image sequences play like animated WebP; `avif` (off) |
+| JPEG XL | [libjxl](https://github.com/libjxl/libjxl) 0.13.0 (the decoder; C++, on [Highway](https://github.com/google/highway) 1.4.0) | lossless and lossy (XYB shown in sRGB), alpha, orientation; animations; `jxl` (off) |
+| HEIC / HEIF | the system: WIC on Windows (with the HEIF Image and HEVC Video Extensions), ImageIO on macOS, libheif on Linux | loaded at run time, nothing vendored (HEVC is patent-encumbered; browsers leave it to the OS too). Where the system has no decoder, a HEIC file is not an image, as in a build without the format; on Windows, a HEIF extension without the HEVC one reads the size but fails to decode; `heic` (on) |
 
 Each format is a feature of the build (`features.json`): leave out what an app doesn't show, and it costs no binary size ([Binary size](/docs/reference/binary-size)). Videos play through [Video](/docs/concepts/video), with the same worker threads and clock.
 
-Not built in yet (planned as options, off by default): AVIF (dav1d + libavif), OpenEXR (tinyexr), TIFF, JPEG XL, and HEIC through the system (WIC on Windows, ImageIO on macOS).
+The large decoders are off by default and cost nothing until turned on (`exr`, `avif`, `jxl`: about 0.9, 0.9 and 1.3 MB each, GCC x64); TIFF (about 0.45 MB) and HEIC (a few KB: the OS decodes) are on. Every decoder checks sizes against the kit's limits (16384 pixels a side) before it allocates, and each decode runs single-threaded on one of the kit's workers, several at once.
 
-Licences: Wuffs (MIT, used as MIT), libjpeg-turbo (IJG, BSD-3-Clause, zlib), libwebp (BSD-3-Clause) and nanosvg (zlib) are all compatible with BUI's GPL-2.0-or-later. See [License and credits](/docs/project/license-and-credits).
+Licences: Wuffs (MIT, used as MIT), libjpeg-turbo (IJG, BSD-3-Clause, zlib), libwebp (BSD-3-Clause), nanosvg (zlib), libtiff (BSD-like), zlib (zlib), OpenEXR (BSD-3-Clause), libdeflate (MIT), libavif (BSD-2-Clause, with libyuv's BSD-3-Clause), dav1d (BSD-2-Clause), libjxl (BSD-3-Clause) and Highway (BSD-3-Clause or Apache-2.0) are all compatible with BUI's GPL-2.0-or-later. See [License and credits](/docs/project/license-and-credits).
 
 ## Showing an image file
 

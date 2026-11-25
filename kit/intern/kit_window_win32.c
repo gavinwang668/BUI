@@ -228,7 +228,7 @@ static float window_dpi_scale(HWND hwnd)
   return BK_MAX(1.0f, dpi / 96.0f);
 }
 
-static wchar_t *utf8_to_wide(const char *s)
+wchar_t *bk_utf8_to_wide(const char *s)
 {
   const int n = MultiByteToWideChar(CP_UTF8, 0, s ? s : "", -1, NULL, 0);
   wchar_t *w = (wchar_t *)malloc(sizeof(wchar_t) * (size_t)n);
@@ -343,7 +343,7 @@ static char *host_clipboard_get(void *data)
 static void host_clipboard_set(void *data, const char *text)
 {
   BKWindow *win = (BKWindow *)data;
-  wchar_t *w = utf8_to_wide(text);
+  wchar_t *w = bk_utf8_to_wide(text);
   const size_t bytes = (wcslen(w) + 1) * sizeof(wchar_t);
   if (OpenClipboard(win->hwnd)) {
     EmptyClipboard();
@@ -1261,7 +1261,7 @@ BKWindow *BK_window_new(BKContext *ctx, const char *title, int width, int height
   BK_set_scale(win->scale);
   RECT r = {0, 0, (LONG)(width * win->scale), (LONG)(height * win->scale)};
   AdjustWindowRect(&r, WS_OVERLAPPEDWINDOW, FALSE);
-  wchar_t *wt = utf8_to_wide(title);
+  wchar_t *wt = bk_utf8_to_wide(title);
   win->hwnd = CreateWindowExW(0, k_class, wt, WS_OVERLAPPEDWINDOW | WS_CLIPCHILDREN,
                               CW_USEDEFAULT, CW_USEDEFAULT, r.right - r.left, r.bottom - r.top,
                               NULL, NULL, inst, NULL);
@@ -1337,7 +1337,7 @@ int BK_window_is_open(BKWindow *win)
 void BK_window_set_title(BKWindow *win, const char *title)
 {
   if (win->hwnd) {
-    wchar_t *w = utf8_to_wide(title);
+    wchar_t *w = bk_utf8_to_wide(title);
     SetWindowTextW(win->hwnd, w);
     free(w);
   }

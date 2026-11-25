@@ -55,7 +55,8 @@ pub const HTML_ELEMENT_COUNT: usize = 113;
 
 /// How `tag` is realised (unknown / custom elements are boxes, as in browsers).
 pub fn tag_kind(tag: &str) -> TagKind {
-    if tag == "canvas" {
+    // an <svg> root is a replaced element (its picture isn't drawn: it is transparent)
+    if tag == "canvas" || tag == "svg" {
         return TagKind::Replaced;
     }
     TAGS.iter().find(|(t, _)| *t == tag).map(|(_, k)| *k).unwrap_or(TagKind::Box)
@@ -86,12 +87,12 @@ pub fn custom(tag: &'static str) -> Div {
 /// `styled`, form controls are drawn like a browser's; inside it they are
 /// Blender's widgets, and the Blender components always are.
 pub const UA_CSS: &str = r#"
-html { display: block; background-color: #ffffff; color: #000000; font-size: 16px; }
+html { display: block; color: #000000; font-size: 16px; }
 body { display: block; margin: 8px; }
 address, article, aside, blockquote, dd, details, dialog, div, dl, dt, fieldset, figcaption,
 figure, footer, form, h1, h2, h3, h4, h5, h6, header, hgroup, hr, legend, main, menu, nav, ol,
 p, pre, search, section, ul, noscript, optgroup, option { display: block; }
-head, title, base, link, meta, style, script, template, source, track, area, datalist, wbr,
+head, title, base, link, meta, style, script, template, source, track, area, datalist,
 map, [hidden], input[type=hidden], col, colgroup { display: none; }
 li, summary { display: list-item; }
 p, dl, pre { margin: 1em 0; }
@@ -141,6 +142,17 @@ audio:not([controls]) { display: none; }
 iframe { border: 2px inset #808080; }
 label { cursor: default; }
 output { display: inline; }
+[dir=rtl i] { direction: rtl; unicode-bidi: isolate; }
+[dir=ltr i] { direction: ltr; unicode-bidi: isolate; }
+[dir=auto i], bdi { unicode-bidi: isolate; }
+[dir=auto i]:dir(rtl), bdi:not([dir]):dir(rtl) { direction: rtl; }
+[dir=auto i]:dir(ltr), bdi:not([dir]):dir(ltr) { direction: ltr; }
+bdo[dir] { unicode-bidi: isolate-override; }
+[popover] { position: fixed; inset: 0; width: fit-content; height: fit-content; margin: auto; border: solid;
+            padding: 0.25em; overflow: auto; color: CanvasText; background-color: Canvas; z-index: 2147483647; }
+[popover]:not(:popover-open) { display: none; }
+dialog:modal { position: fixed; inset-block: 0; max-width: calc(100% - 6px - 2em); max-height: calc(100% - 6px - 2em);
+               overflow: auto; z-index: 2147483647; }
 
 "#;
 
@@ -154,7 +166,7 @@ body { display: block; margin: 8px; }
 address, article, aside, blockquote, dd, details, dialog, div, dl, dt, fieldset, figcaption,
 figure, footer, form, h1, h2, h3, h4, h5, h6, header, hgroup, hr, legend, main, menu, nav, ol,
 p, pre, search, section, ul, noscript, optgroup, option { display: block; }
-head, title, base, link, meta, style, script, template, source, track, area, datalist, wbr,
+head, title, base, link, meta, style, script, template, source, track, area, datalist,
 map, [hidden], input[type=hidden], col, colgroup { display: none; }
 li, summary { display: list-item; }
 p, dl, figure, pre { margin: 0.6em 0; }

@@ -1741,8 +1741,12 @@ static void turn(double block_ms)
     wl_display_dispatch_pending(d);
   }
   wl_display_flush(d);
-  struct pollfd fds[2] = {{wl_display_get_fd(d), POLLIN, 0}, {g_wake_pipe[0], POLLIN, 0}};
-  const int nfds = g_wake_pipe[0] >= 0 ? 2 : 1;
+  /* the display, the wake-up and the desktop shell's D-Bus (kit/intern/shell); poll skips a
+   * negative fd */
+  struct pollfd fds[3] = {{wl_display_get_fd(d), POLLIN, 0},
+                          {g_wake_pipe[0], POLLIN, 0},
+                          {bk_shell_fd(), POLLIN, 0}};
+  const int nfds = 3;
   int timeout = block_ms < 0 ? -1 : (int)ceil(block_ms);
   if (block_ms != 0.0) {
     const double rw = g.repeat_key ? BK_MAX(0.0, g.repeat_due - now_ms()) : -1.0;
@@ -1757,9 +1761,10 @@ static void turn(double block_ms)
   else {
     wl_display_cancel_read(d);
   }
-  if (ready > 0 && nfds == 2 && (fds[1].revents & POLLIN)) {
+  if (ready > 0 && (fds[1].revents & POLLIN)) {
     drain_wake();
   }
+  bk_shell_poll();
   wl_display_dispatch_pending(d);
   run_repeat();
   run_timers();

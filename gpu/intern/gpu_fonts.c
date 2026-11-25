@@ -773,12 +773,20 @@ static const char *g_files[GPU_FALLBACK_GROUPS] = {
     "NotoSansSC-Regular.otf|NotoSansCJKsc-Regular.otf",
     /* Thai */
     "LeelawUI.ttf|leelawui.ttf|Thonburi.ttc|NotoSansThai-Regular.ttf",
-    /* Indic */
-    "Nirmala.ttf|Kohinoor.ttc|NotoSansDevanagari-Regular.ttf",
-    /* symbols */
-    "seguisym.ttf|seguiemj.ttf|Apple Symbols.ttf|NotoSansSymbols2-Regular.ttf|DejaVuSans.ttf",
-    /* anything else (Arabic, Hebrew, Greek and Cyrillic beyond the UI font ...) */
-    "segoeui.ttf|arial.ttf|ArialHB.ttc|GeezaPro.ttc|NotoSans-Regular.ttf|DejaVuSans.ttf",
+    /* Indic: Nirmala has every script; Noto has a font per script, static on Linux
+     * (-Regular) and variable on Android (-VF), and the first that has the glyph draws */
+    "Nirmala.ttf|Kohinoor.ttc|NotoSansDevanagari-Regular.ttf|NotoSansDevanagari-VF.ttf|"
+    "NotoSansGurmukhi-Regular.ttf|NotoSansGurmukhi-VF.ttf|NotoSansBengali-Regular.ttf|"
+    "NotoSansBengali-VF.ttf|NotoSansTelugu-Regular.ttf|NotoSansTelugu-VF.ttf|"
+    "NotoSansTamil-Regular.ttf|NotoSansTamil-VF.ttf|NotoSansKannada-VF.ttf|"
+    "NotoSansMalayalam-VF.ttf|NotoSansGujarati-Regular.ttf|NotoSansOriya-Regular.ttf",
+    /* symbols (Android's Noto symbols are subset in two files) */
+    "seguisym.ttf|seguiemj.ttf|Apple Symbols.ttf|NotoSansSymbols2-Regular.ttf|"
+    "NotoSansSymbols-Regular-Subsetted.ttf|NotoSansSymbols-Regular-Subsetted2.ttf|DejaVuSans.ttf",
+    /* anything else (Arabic, Hebrew, Greek and Cyrillic beyond the UI font ...); Android's
+     * Roboto covers Greek and Cyrillic */
+    "segoeui.ttf|arial.ttf|ArialHB.ttc|GeezaPro.ttc|NotoSans-Regular.ttf|DejaVuSans.ttf|"
+    "Roboto-Regular.ttf",
 };
 
 int gpu_font_fallback_group(int cp)
