@@ -31,7 +31,7 @@ Where the version lives (one source of truth per registry, all moved together):
 * `CHANGELOG.md`: `[Unreleased]` becomes a dated section and a fresh `[Unreleased]` opens.
 * The `bui` command: `tools/bui/Cargo.toml` (it is released with every BUI release, as `bui-<target>`
   archives on the GitHub Release; `bui update` compares its own version with the release's).
-* The lock files (`Cargo.lock`, `tools/bui/Cargo.lock`, `bindings/package-lock.json`) are refreshed (best effort).
+* The lock files (every tracked `Cargo.lock`, and `bindings/package-lock.json`) are refreshed (best effort).
 
 `--dry-run` shows what would change and touches nothing.
 """
@@ -216,11 +216,14 @@ def cargo_lock(cwd: Path) -> bool:
 def refresh_locks(npm: bool) -> list[Path]:
     """Best effort: a lock file that can't be refreshed is reported, not fatal."""
     touched = []
-    for cwd, label in ((RUST, "bindings/rust"), (ROOT / "tools" / "bui", "tools/bui")):
+    # every Cargo.lock the repository tracks: the Rust workspace, `bui`, and the standalone workspaces (the
+    # addons, the bench, the examples, the Android apps, the demos) that pin the crates at their version too
+    for lock in run(["git", "ls-files", "*Cargo.lock"]).stdout.split():
+        cwd = ROOT / Path(lock).parent
         if cargo_lock(cwd):
-            touched.append(cwd / "Cargo.lock")
+            touched.append(ROOT / lock)
         else:
-            print(f"warning: {label}/Cargo.lock was not refreshed (run `cargo update --workspace` in {label}): CI builds with --locked and would reject it")
+            print(f"warning: {lock} was not refreshed (run `cargo update --workspace` in {cwd.relative_to(ROOT)}): CI builds with --locked and would reject it")
     if npm:
         r = run(["npm", "install", "--package-lock-only", "--ignore-scripts"], cwd=ROOT / "bindings", check=False)
         if r.returncode == 0:
