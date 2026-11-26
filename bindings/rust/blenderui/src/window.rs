@@ -848,6 +848,10 @@ impl App {
     /// Re-render dirty windows now (headless) or soon (native: next loop turn).
     fn flush(&mut self) {
         self.drain();
+        // a `shutdown` that waited for a callback or a kit call to return (`shutdown` asks again)
+        if self.shutdown_later {
+            self.shutdown();
+        }
         self.free_closed();
         let theme = crate::theme_generation();
         if theme != self.theme_seen {
@@ -896,8 +900,9 @@ impl App {
     /// that took the app from [`Application::start`] calls it when the page is done with it. Called from
     /// a window's callback (an event handler, a render), it runs once that callback has returned.
     pub fn shutdown(&mut self) {
-        // a window lent to a callback is out of its slot: free them all once it is back
-        self.shutdown_later = self.lent > 0;
+        // a window lent to a callback is out of its slot, and one a kit call is emitting into is still in
+        // use when the listener returns (the kit reads its context): free them all once they are back
+        self.shutdown_later = self.lent > 0 || kit_emitting();
         if self.shutdown_later {
             return;
         }
