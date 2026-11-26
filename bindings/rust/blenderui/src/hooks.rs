@@ -126,14 +126,7 @@ pub(crate) fn begin(window: usize) {
 pub(crate) fn end() {
     let jobs = with(|s| {
         let w = s.window.take();
-        let mut gone = Vec::new();
-        for (i, slot) in s.slots.iter_mut().enumerate() {
-            if slot.hook && Some(slot.window) == w && !slot.seen && slot.value.is_some() {
-                gone.push(slot.value.take());
-                s.free.push(i as u32);
-            }
-        }
-        s.keys.retain(|_, i| s.slots[*i as usize].value.is_some());
+        let gone = reap(s, |slot| Some(slot.window) == w && !slot.seen);
         s.ctx.clear();
         let jobs = std::mem::take(&mut s.jobs);
         (jobs, gone)
@@ -142,6 +135,26 @@ pub(crate) fn end() {
     for job in jobs.0 {
         job();
     }
+}
+
+/// Free the hook state of a window that has closed: it never renders again, so `end` would not.
+pub(crate) fn drop_window(window: usize) {
+    let gone = with(|s| reap(s, |slot| slot.window == window));
+    drop(gone); // user values dropped outside the store
+}
+
+/// Take the values of the hook slots `gone` says are unused, and their keys: the values are returned to
+/// be dropped outside the store (user code runs in a drop).
+fn reap(s: &mut Store, gone: impl Fn(&Slot) -> bool) -> Vec<Option<Box<dyn Any>>> {
+    let mut values = Vec::new();
+    for (i, slot) in s.slots.iter_mut().enumerate() {
+        if slot.hook && slot.value.is_some() && gone(slot) {
+            values.push(slot.value.take());
+            s.free.push(i as u32);
+        }
+    }
+    s.keys.retain(|_, i| s.slots[*i as usize].value.is_some());
+    values
 }
 
 /// Every window draws again (an animation started outside a render).

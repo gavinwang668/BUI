@@ -71,7 +71,12 @@ impl<T: 'static> Entity<T> {
             let mut ctx = Context { app: cx, entity: *self };
             f(v, &mut ctx)
         };
-        cx.entities[self.id as usize].value = Some(value);
+        // restore the value unless the callback released the entity (a window it closed and freed with
+        // `run_pending`): its handles are dead then, and the value goes with this scope
+        let slot = &mut cx.entities[self.id as usize];
+        if slot.generation == self.generation {
+            slot.value = Some(value);
+        }
         r
     }
 
@@ -782,7 +787,10 @@ impl App {
     /// still to come may look at it) and, a native one, until the system has destroyed it (its close
     /// is on the stack until then).
     fn free_closed(&mut self) {
-        if self.closed_later.is_some() {
+        // also not inside a kit call that emits into a window (its context is still in use after the
+        // listener returns: the cursor, the input entry's cleanup) and not while a window is lent to a
+        // callback (it may share this one's root view): the next flush frees them
+        if self.closed_later.is_some() || self.lent > 0 || kit_emitting() {
             return;
         }
         for id in 0..self.windows.len() {
@@ -791,8 +799,15 @@ impl App {
                 w.life == Life::Closed && w.native.is_none_or(|n| unsafe { sys::BK_window_is_open(n) } == 0)
             });
             if let Some(mut w) = self.windows[id].take_if(|_| done) {
+                // it never renders again: its hook state goes too
+                crate::hooks::drop_window(id);
                 w.destroy();
-                self.release_slot(w.view_entity.0, w.view_entity.1);
+                // a root view that other windows show (`open_window` may return an entity that exists)
+                // stays until the last of them is freed
+                let view = w.view_entity;
+                if !self.windows.iter().flatten().any(|other| other.view_entity == view) {
+                    self.release_slot(view.0, view.1);
+                }
             }
         }
     }
@@ -1206,8 +1221,36 @@ impl App {
 // ==========================================================================
 // Kit callbacks
 
+thread_local! {
+    /// How many kit calls are emitting into a listener right now (`on_emit` is on the stack).
+    static EMITTING: Cell<u32> = const { Cell::new(0) };
+}
+
+/// Whether a kit call is emitting into the app: the context of the window it is for must outlive it,
+/// so a window a listener closed is freed once the call has returned.
+fn kit_emitting() -> bool {
+    EMITTING.with(|e| e.get() > 0)
+}
+
+/// Marks `on_emit` as running for as long as it lives (also when a listener unwinds).
+struct Emitting;
+
+impl Emitting {
+    fn enter() -> Self {
+        EMITTING.with(|e| e.set(e.get() + 1));
+        Self
+    }
+}
+
+impl Drop for Emitting {
+    fn drop(&mut self) {
+        EMITTING.with(|e| e.set(e.get() - 1));
+    }
+}
+
 unsafe extern "C" fn on_emit(data: *mut c_void, node: *mut sys::BKNode, kind: c_int, ref_: *mut c_void,
                              a: c_double, b: c_double) {
+    let _emitting = Emitting::enter();
     crate::screen::kit_event(node, kind, a, b); // areas made and freed: known at once
     #[cfg(feature = "a11y")]
     if kind == sys::BK_EV_A11Y_ACTION {
