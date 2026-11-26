@@ -77,7 +77,23 @@ pub(crate) struct UiState {
     /// Popovers and modal dialogs shown (`:popover-open`, `:modal`), by `Window::show_popover`.
     pub popover_open: KeySet<Key>,
     pub scroll: KeyMap<Key, (f32, f32)>,
-    pub checked: KeyMap<Key, bool>,
+    /// A checkbox's or radio's state the user set, and its `checked` attribute when they did: theirs
+    /// holds until the app gives it another `checked` (see [`UiState::checked`]; the window drops
+    /// the record then, so the app's value holds from there on).
+    pub checked: KeyMap<Key, (bool, bool)>,
+}
+
+impl UiState {
+    /// Whether the control `key` with the `checked` attribute `attr` is checked: as the user left it,
+    /// while the app's `checked` is the one they changed it from; else as the app says. So a control
+    /// kept in the app's state follows it, and one it leaves alone keeps the user's choice (a
+    /// browser's checkedness, set again by a changed attribute as a framework sets it).
+    pub(crate) fn checked(&self, key: Key, attr: bool) -> bool {
+        match self.checked.get(&key) {
+            Some(&(user, at)) if at == attr => user,
+            _ => attr,
+        }
+    }
 }
 
 // ==========================================================================
@@ -313,7 +329,7 @@ pub(crate) struct ElData {
     pub later: smallvec::SmallVec<[(u16, u32); 1]>,
 }
 
-const NONE: u32 = u32::MAX;
+pub(crate) const NONE: u32 = u32::MAX;
 
 pub(crate) struct BoxNode {
     pub parent: Option<usize>,
@@ -344,6 +360,10 @@ pub(crate) struct BoxNode {
     // filled after layout
     pub bounds: Bounds<f32>,
     pub clip: Option<Bounds<f32>>,
+    /// The nearest box above this one whose `overflow` clips it to rounded corners (`NONE`: none):
+    /// `clip` is that box's padding box as a rectangle, paint cuts the corners (its bounds are read
+    /// when painting, so a box moved without a new layout keeps its clip).
+    pub round: u32,
     pub opacity: f32,
     pub visible: bool,
     pub scroll_range: (f32, f32),
@@ -844,7 +864,7 @@ impl Subject for NodeRef<'_> {
             "active" => self.state.active.contains(&key),
             "focus" | "focus-visible" => self.state.focused == Some(key),
             "focus-within" => self.state.focus_path.contains(&key),
-            "checked" => self.state.checked.get(&key).copied().unwrap_or(self.own_attr("checked").is_some()),
+            "checked" => self.state.checked(key, self.own_attr("checked").is_some()),
             "disabled" => self.own_attr("disabled").is_some(),
             "enabled" => self.own_attr("disabled").is_none(),
             "link" | "any-link" => self.tag() == "a" && self.own_attr("href").is_some(),
@@ -1087,7 +1107,7 @@ impl Subject for DivSubject<'_, '_> {
             "active" => self.state.active.contains(&key),
             "focus" | "focus-visible" => self.state.focused == Some(key),
             "focus-within" => self.state.focus_path.contains(&key),
-            "checked" => self.state.checked.get(&key).copied().unwrap_or(self.attr("checked").is_some()),
+            "checked" => self.state.checked(key, self.attr("checked").is_some()),
             "disabled" => self.attr("disabled").is_some(),
             "enabled" => self.attr("disabled").is_none(),
             "required" => self.attr("required").is_some(),
@@ -1558,6 +1578,7 @@ impl<'a> Builder<'a> {
             styled: false,
             bounds: rect(0.0, 0.0, 0.0, 0.0),
             clip: None,
+            round: NONE,
             opacity: 1.0,
             visible: true,
             scroll_range: (0.0, 0.0),
@@ -3061,7 +3082,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     }
     let mut walk = Walk { t: taffy, box_of, state, vp: viewport, styles, text: tc, seq: 0,
                           port: rect(0.0, 0.0, viewport.0, viewport.1), within: rect(0.0, 0.0, viewport.0, viewport.1) };
-    walk.place(&mut frame.nodes, root_id, 0.0, 0.0, None, (0.0, 0.0));
+    walk.place(&mut frame.nodes, root_id, 0.0, 0.0, (None, NONE), (0.0, 0.0));
     finish(&mut frame.nodes, styles, acc);
     styles.end_frame();
     frame
@@ -3121,7 +3142,7 @@ pub(crate) fn replace(frame: &mut Frame, viewport: (f32, f32), state: &UiState, 
     let LayoutCaches { styles, text, taffy, box_of, acc, .. } = caches;
     let mut walk = Walk { t: taffy, box_of, state, vp: viewport, styles, text, seq: 0,
                           port: rect(0.0, 0.0, viewport.0, viewport.1), within: rect(0.0, 0.0, viewport.0, viewport.1) };
-    walk.place(&mut frame.nodes, root, 0.0, 0.0, None, (0.0, 0.0));
+    walk.place(&mut frame.nodes, root, 0.0, 0.0, (None, NONE), (0.0, 0.0));
     finish(&mut frame.nodes, styles, acc);
     frame.moved();
     true
@@ -3147,7 +3168,8 @@ struct Walk<'a> {
 impl Walk<'_> {
     /// `cb`: the origin of the containing block of absolutely positioned
     /// descendants (taffy places those relative to it, not to their parent).
-    fn place(&mut self, nodes: &mut [BoxNode], id: NodeId, ox: f32, oy: f32, clip: Option<Bounds<f32>>,
+    #[allow(clippy::too_many_arguments)]
+    fn place(&mut self, nodes: &mut [BoxNode], id: NodeId, ox: f32, oy: f32, (clip, round): (Option<Bounds<f32>>, u32),
              cb: (f32, f32)) {
         let l = *self.t.layout(id);
         let (mut x, mut y) = (ox + l.location.x, oy + l.location.y);
@@ -3158,14 +3180,16 @@ impl Walk<'_> {
             y += dy;
         }
         let mut child_clip = clip;
+        let mut child_round = round;
         let (mut sx, mut sy) = (0.0, 0.0);
         let mut port = None;
         if let Some(i) = self.box_of.get(slot(id)).filter(|&&b| b != NONE).map(|&b| b as usize) {
             let st = &self.styles[nodes[i].style];
             let u = st.units(self.vp);
-            // a word carries its owner's style: the owner's translate already moved the line it is in,
-            // unless the owner is an inline element (no box of its own to carry it)
-            let own_translate = !matches!(nodes[i].content, Content::Word { .. }) || nodes[nodes[i].owner].taffy.is_none();
+            // a box without a style of its own (a word, a text run, an anonymous line box) carries its
+            // owner's: the owner's translate already moved it, unless the owner is an inline element
+            // (no box of its own to carry it)
+            let own_translate = owns_style(&nodes[i].content) || nodes[nodes[i].owner].taffy.is_none();
             if own_translate {
                 x += st.translate.0.resolve(&u, w);
                 y += st.translate.1.resolve(&u, h);
@@ -3179,9 +3203,13 @@ impl Walk<'_> {
             }
             nodes[i].bounds = rect(x, y, w, h);
             nodes[i].clip = clip;
+            nodes[i].round = round;
             nodes[i].seq = self.seq;
             self.seq += 1;
-            if let Some(cr) = clip_edges(st) {
+            // an anonymous box carries its owner's style: the owner's `clip` and `overflow` are its own,
+            // not cut again at the anonymous box
+            let own = owns_style(&nodes[i].content);
+            if let Some(cr) = clip_edges(st).filter(|_| own) {
                 // edges from the border box's top-left corner; auto = that edge
                 let e = |k: usize, auto: f32, basis: f32| cr[k].map_or(auto, |l| l.resolve(&u, basis));
                 let (top, right, bottom, left) = (e(0, 0.0, h), e(1, w, w), e(2, h, h), e(3, 0.0, w));
@@ -3193,7 +3221,7 @@ impl Walk<'_> {
                 nodes[i].clip = Some(r);
                 child_clip = Some(r);
             }
-            if overflow_clips(st) {
+            if own && overflow_clips(st) {
                 let ov = st.layout.overflow;
                 let b = l.border;
                 let pad = rect(x + b.left, y + b.top, (w - b.left - b.right).max(0.0),
@@ -3202,6 +3230,10 @@ impl Walk<'_> {
                     Some(c) => c.intersect(&pad),
                     None => pad,
                 });
+                // rounded corners clip too (CSS Backgrounds 3 §5.3): paint cuts them
+                if st.radius.iter().any(|r| *r != crate::geometry::Length::Px(0.0)) {
+                    child_round = i as u32;
+                }
                 // `hidden` is a scroll container too, scrolled by programs only: its range moves it,
                 // the user's scrolling (scrollbars, wheel: `scroll_range`) is `scroll`'s
                 let scrolls = |o: Overflow| matches!(o, Overflow::Scroll | Overflow::Hidden);
@@ -3233,6 +3265,7 @@ impl Walk<'_> {
                 place_folded_text(nodes, i, k, rect(x, y, w, h), &l, self.styles, self.text);
                 // the text is clipped by its container's `overflow`
                 nodes[k].clip = child_clip;
+                nodes[k].round = child_round;
                 nodes[k].seq = self.seq;
                 self.seq += 1;
             }
@@ -3252,7 +3285,7 @@ impl Walk<'_> {
                 Position::Fixed => (0.0, 0.0),
                 _ => inner,
             };
-            self.place(nodes, k, kx, ky, child_clip, cb);
+            self.place(nodes, k, kx, ky, (child_clip, child_round), cb);
         }
         (self.port, self.within) = saved;
     }
@@ -3373,6 +3406,7 @@ fn finish(nodes: &mut [BoxNode], styles: &StyleStore, acc: &mut Vec<Option<Bound
     for i in 0..nodes.len() {
         if nodes[i].taffy.is_none() && !nodes[i].folded {
             nodes[i].clip = nodes[i].parent.and_then(|p| nodes[p].clip);
+            nodes[i].round = nodes[i].parent.map_or(NONE, |p| nodes[p].round);
         }
     }
     acc.clear();

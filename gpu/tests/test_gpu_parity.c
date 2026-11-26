@@ -143,6 +143,14 @@ static void scene(BuiRaster *r, int pass)
   BUI_raster_hsv_circle(r, 320, 210, 30, 0.9f);
   const float light[3] = {-0.5f, 0.6f, 0.8f}, sph[4] = {0.6f, 0.4f, 0.2f, 1};
   BUI_raster_sphere(r, 400, 210, 30, light, sph);
+  /* CSS box shadows: blurred and moved, a hard ring round an empty box, a blur wider than its box */
+  const float sh_c[4] = {0.1f, 0.1f, 0.4f, 0.6f}, ring_c[4] = {0.9f, 0.2f, 0.2f, 1};
+  const float sh_box[4] = {40, 380, 70, 40}, sh_shape[4] = {44, 390, 70, 40};
+  BUI_raster_box_shadow(r, sh_shape, 10, 8, sh_c, sh_box, 10);
+  const float ring_box[4] = {150, 380, 40, 40}, ring_shape[4] = {146, 376, 48, 48};
+  BUI_raster_box_shadow(r, ring_shape, 24, 0, ring_c, ring_box, 20);
+  const float dot_box[4] = {240, 395, 6, 6}, dot_shape[4] = {240, 399, 6, 6};
+  BUI_raster_box_shadow(r, dot_shape, 3, 12, sh_c, dot_box, 3);
   uint32_t img[16 * 12];
   for (int i = 0; i < 16 * 12; i++) {
     img[i] = ((i % 16 + i / 16) & 1) ? 0xFFFF8000u : 0x80202080u;

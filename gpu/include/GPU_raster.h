@@ -190,6 +190,11 @@ void BUI_raster_end_frame_region(BuiRaster *r, int x, int y, int w, int h);
  * `size` pixels from `alpha`. */
 void BUI_raster_shadow(
     BuiRaster *r, float x, float y, float w, float h, float radius, float size, float alpha);
+/* CSS `box-shadow` (an outer one): the rounded box `shape` (x, y, w, h; corner `radius`) blurred by a
+ * Gaussian of `sigma` (0: a hard edge), in straight `rgba`, drawn only outside the rounded box `box`
+ * (corner `box_radius`), the element's border box, which covers it. */
+void BUI_raster_box_shadow(BuiRaster *r, const float shape[4], float radius, float sigma, const float rgba[4],
+                           const float box[4], float box_radius);
 void BUI_raster_triangles(BuiRaster *r,
                           const float (*coords)[2],
                           const float (*colors)[4],

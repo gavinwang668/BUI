@@ -125,6 +125,9 @@ pub const BK_ITEM_ROUNDRECT: c_int = 7;
 pub const BK_ITEM_EFFECT: c_int = 8;
 /// A GPU pass into a render target (`BUI_target_create`): see `effect_target`.
 pub const BK_ITEM_PASS: c_int = 9;
+/// CSS `box-shadow`: 8 coords (the shadow's box, then the box casting it), `radius` the shadow's corner,
+/// `size` the caster's, `width` the blur's sigma (see `BUI_kit.h`).
+pub const BK_ITEM_SHADOW: c_int = 10;
 
 /// The most textures an effect samples, the most floats it reads, the longest source (bytes).
 pub const BK_EFFECT_MAX_INPUTS: usize = 8;

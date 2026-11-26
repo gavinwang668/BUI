@@ -92,6 +92,34 @@ float sd_box(float2 s, float2 c, float2 hb, float rad, uint corners)
   return length(q) - r;
 }
 
+// erf, to 5e-4 (Abramowitz & Stegun 7.1.27).
+float2 erf2(float2 x)
+{
+  const float2 sg = sign(x), a = abs(x);
+  float2 t = 1.0 + (0.278393 + (0.230389 + 0.078108 * (a * a)) * a) * a;
+  t *= t;
+  return sg - sg / (t * t);
+}
+
+// A rounded box (half size hb, corner `corner`) blurred by a Gaussian of `sigma`, at p from its
+// centre: exact along x, four samples along y (Evan Wallace). gpu_raster.c shadow_gauss.
+float shadow_gauss(float2 p, float2 hb, float corner, float sigma)
+{
+  const float lo = p.y - hb.y, hi = p.y + hb.y;
+  const float start = clamp(-3.0 * sigma, lo, hi), end = clamp(3.0 * sigma, lo, hi);
+  const float dy = (end - start) * 0.25, k = 0.70710678 / sigma;
+  const float norm = dy / (2.50662827 * sigma);
+  float y = start + dy * 0.5, v = 0.0;
+  [unroll] for (int i = 0; i < 4; i++) {
+    const float delta = min(hb.y - corner - abs(p.y - y), 0.0);
+    const float curved = hb.x - corner + sqrt(max(0.0, corner * corner - delta * delta));
+    const float2 e = erf2((p.x + float2(curved, -curved)) * k);
+    v += 0.5 * (e.x - e.y) * exp(-(y * y) / (2.0 * sigma * sigma)) * norm;
+    y += dy;
+  }
+  return v;
+}
+
 // Source-over of a straight color into a premultiplied accumulator.
 void over(inout float4 acc, float4 c, float cov)
 {
@@ -356,17 +384,32 @@ float4 ps_quad(VOut v) : SV_Target
     return lerp(top, bot, f.y) * v.p.y;
   }
   if (kind == K_SHADOW) {
-    const float rad = v.p.y, size = v.p.z, alpha = v.p.w;
+    // gpu_raster.c shadow_keep: the shape R (corner p.y) faded out (uv.y 0: a menu's smoothstep over
+    // p.z; 1: a Gaussian of sigma p.z), in c0 times p.w, only outside the box c1 (corner uv.x)
+    const float rad = v.p.y, size = v.p.z, gain = v.p.w;
     const float2 hb = R.zw * 0.5;
     const float2 c = R.xy + hb;
-    const float d = sd_box(s, c + float2(0.0, size * 0.25), hb, rad, 15u);
-    const float dbox = sd_box(s, c, hb, rad, 15u);
-    if (dbox <= -0.5 || d >= size) {
+    const float2 bhb = v.c1.zw * 0.5;
+    const float dbox = sd_box(s, v.c1.xy + bhb, bhb, v.uv.x, 15u);
+    if (dbox <= -0.5) {
       return 0.0;
     }
-    float t = 1.0 - saturate(d / size);
-    t = t * t * (3.0 - 2.0 * t);
-    return float4(0.0, 0.0, 0.0, saturate(t * alpha * saturate(0.5 + dbox)));
+    float t;
+    if (v.uv.y < 0.5) {
+      const float d = sd_box(s, c, hb, rad, 15u);
+      if (d >= size) {
+        return 0.0;
+      }
+      t = 1.0 - saturate(d / size);
+      t = t * t * (3.0 - 2.0 * t);
+    }
+    else if (size < 0.25) {
+      t = saturate(0.5 - sd_box(s, c, hb, rad, 15u));
+    }
+    else {
+      t = shadow_gauss(s - c, hb, rad, size);
+    }
+    return premul(v.c0, t * gain * saturate(0.5 + dbox));
   }
   if (kind == K_GRADIENT) {
     const float2 uv = saturate((s - R.xy) / R.zw);

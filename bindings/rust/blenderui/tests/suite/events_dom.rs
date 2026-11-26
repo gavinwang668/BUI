@@ -490,3 +490,246 @@ fn removed_elements_let_go_and_other_scrolls_and_keypress() {
         assert_eq!(take(), ["keydown"], "ctrl+a isn't typing");
     });
 }
+
+static OVER: Mutex<Vec<(i32, i32)>> = Mutex::new(Vec::new());
+
+/// A drag that crosses one of Blender's widgets.
+struct DragOverWidget;
+
+impl Render for DragOverWidget {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().id("page").size_full()
+            .child(
+                div().id("grip").absolute().left(px(10.0)).top(px(10.0)).w(px(50.0)).h(px(50.0))
+                    .on_pointer_down(|_, window, app| window.set_pointer_capture(app))
+                    .on_pointer_move(|e, _, _| OVER.lock().unwrap().push((e.position.x.0 as i32, e.position.y.0 as i32))),
+            )
+            .child(div().absolute().left(px(200.0)).top(px(100.0)).child(Checkbox().id("cb")))
+    }
+}
+
+/// The pointer coming back onto the page from a widget is an enter with no position: it moves
+/// nothing (it used to be a move to (0, 0) mid-drag).
+#[test]
+fn a_drag_across_a_widget_never_jumps_to_the_corner() {
+    Application::headless().run(|cx| {
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(500.0), px(300.0)),
+            })),
+            ..Default::default()
+        };
+        let w = cx.open_window(opts, |_, cx| cx.new(|_| DragOverWidget)).unwrap().id;
+        cx.draw(w);
+        let cb = cx.element_bounds(w, "cb").expect("the checkbox");
+        let (cx_, cy_) = (cb.origin.x + cb.size.width / 2.0, cb.origin.y + cb.size.height / 2.0);
+        OVER.lock().unwrap().clear();
+        cx.simulate_press(w, 30.0, 30.0);
+        for (x, y) in [(100.0, 60.0), (cx_, cy_), (cx_ + 2.0, cy_), (300.0, 200.0), (320.0, 210.0)] {
+            cx.simulate_mouse_move(w, x, y);
+        }
+        cx.simulate_release(w, 320.0, 210.0);
+        let moves = OVER.lock().unwrap().clone();
+        assert!(!moves.is_empty(), "the drag is heard");
+        assert!(!moves.contains(&(0, 0)), "no move to the corner: {moves:?}");
+    });
+}
+
+static RESETS: Mutex<Vec<f64>> = Mutex::new(Vec::new());
+
+/// A page that acts on Backspace itself, over one of Blender's sliders.
+struct TakesKeys {
+    take: bool,
+}
+
+impl Render for TakesKeys {
+    fn render(&mut self, w: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        // keys go to the focused element: the page's, as an app focuses its root
+        if w.focused_id().is_none() {
+            w.focus_id("root");
+        }
+        let take = self.take;
+        div().id("root").size_full().attr("tabindex", "0")
+            .on_key_down(move |e: &KeyDownEvent, _, cx| {
+                if take && e.keystroke.key == "BackSpace" {
+                    cx.prevent_default();
+                }
+            })
+            .child(NumberSlider().id("s").min(0.0).max(10.0).value("7").w(px(200.0))
+                .on_change(|e: &ChangeEvent, _, _| RESETS.lock().unwrap().push(e.number)))
+    }
+}
+
+/// A key a page listener takes (`prevent_default`) is not Blender's too (Backspace over a slider
+/// resets it): in a headless run as in a window, the listener hears the key while the kit delivers it.
+#[test]
+fn a_key_the_page_takes_is_not_the_widgets() {
+    for take in [false, true] {
+        Application::headless().run(move |cx| {
+            let opts = WindowOptions {
+                window_bounds: Some(WindowBounds::Windowed(Bounds {
+                    origin: point(px(0.0), px(0.0)),
+                    size: size(px(400.0), px(200.0)),
+                })),
+                ..Default::default()
+            };
+            let w = cx.open_window(opts, |_, cx| cx.new(|_| TakesKeys { take })).unwrap().id;
+            cx.draw(w);
+            let b = cx.element_bounds(w, "s").expect("the slider");
+            let y = b.origin.y + b.size.height / 2.0;
+            // away from its default first (Backspace resets to it)
+            cx.simulate_drag(w, (b.origin.x + 150.0, y), (b.origin.x + 30.0, y));
+            cx.draw(w);
+            RESETS.lock().unwrap().clear();
+            cx.simulate_mouse_move(w, b.origin.x + 30.0, y);
+            cx.simulate_key(w, "", "BackSpace");
+            cx.draw(w);
+            let changed = !RESETS.lock().unwrap().is_empty();
+            assert_eq!(changed, !take, "take {take}: the slider reset {changed}");
+        });
+    }
+}
+
+/// Two radios kept in the app's state (`view`), and a box `:checked` styles after the first.
+struct Views {
+    grid: bool,
+}
+
+impl Render for Views {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        div().size_full()
+            .child(style().child("#mark { width: 10px; height: 10px } #list:checked ~ #mark { width: 50px }"))
+            .child(Radio().id("list").attr("name", "view").checked(!self.grid)
+                .on_change(cx.listener(|this, e: &ChangeEvent, _, cx| if e.checked { this.grid = false; cx.notify(); })))
+            .child(Radio().id("grid").attr("name", "view").checked(self.grid)
+                .on_change(cx.listener(|this, e: &ChangeEvent, _, cx| if e.checked { this.grid = true; cx.notify(); })))
+            .child(div().id("mark"))
+            .child(div().id("code").w(px(40.0)).h(px(40.0))
+                .on_click(cx.listener(|this, _, _, cx| { this.grid = false; cx.notify(); })))
+    }
+}
+
+/// A control kept in the app's state follows it after the user clicked it: the app's next
+/// `checked` wins over the click (it used to keep the user's state for good).
+#[test]
+fn a_controlled_radio_follows_the_app_after_a_click() {
+    Application::headless().run(|cx| {
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(400.0), px(200.0)),
+            })),
+            ..Default::default()
+        };
+        let w = cx.open_window(opts, |_, cx| cx.new(|_| Views { grid: false })).unwrap().id;
+        cx.draw(w);
+        let mark = |cx: &mut App| cx.element_bounds(w, "mark").expect("mark").size.width;
+        assert_eq!(mark(cx), 50.0, "List starts checked");
+        let g = cx.element_bounds(w, "grid").expect("grid");
+        cx.simulate_click(w, g.origin.x + g.size.width / 2.0, g.origin.y + g.size.height / 2.0);
+        cx.draw(w);
+        assert_eq!(mark(cx), 10.0, "the user picked Grid");
+        let c = cx.element_bounds(w, "code").expect("code");
+        cx.simulate_click(w, c.origin.x + 5.0, c.origin.y + 5.0);
+        cx.draw(w);
+        assert_eq!(mark(cx), 50.0, "the app set List again: it shows");
+    });
+}
+
+/// A composer whose field is a new one after each send (a new id: the value is cleared).
+struct Composer {
+    sent: Vec<String>,
+}
+
+impl Render for Composer {
+    fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if w.focused_id().is_none() {
+            w.focus_id("root");
+        }
+        div().id("root").size_full().attr("tabindex", "0")
+            .child(TextField().id(format!("field{}", self.sent.len())).w(px(200.0))
+                .on_change(cx.listener(|this, e: &ChangeEvent, _, cx| {
+                    if !e.value.is_empty() {
+                        this.sent.push(e.value.clone());
+                        cx.notify();
+                    }
+                })))
+    }
+}
+
+/// The Enter that sends takes the field away (a render replaces it) while the kit is still handling
+/// that key: the render waits until the kit is done, as a window's next frame does.
+#[test]
+fn a_field_its_own_enter_replaces_survives() {
+    Application::headless().run(|cx| {
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(400.0), px(200.0)),
+            })),
+            ..Default::default()
+        };
+        let h = cx.open_window(opts, |_, cx| cx.new(|_| Composer { sent: Vec::new() })).unwrap();
+        let w = h.id;
+        for (k, msg) in ["hi", "again"].into_iter().enumerate() {
+            cx.draw(w);
+            let b = cx.element_bounds(w, &format!("field{k}")).expect("the field");
+            cx.simulate_click(w, b.origin.x + 20.0, b.origin.y + b.size.height / 2.0);
+            for c in msg.chars() {
+                let s = c.to_string();
+                cx.simulate_key(w, &s, &s);
+            }
+            cx.simulate_key(w, "", "Return");
+        }
+        cx.draw(w);
+        let sent = h.update(cx, |v, _, _| v.sent.clone()).unwrap_or_default();
+        assert_eq!(sent, ["hi", "again"]);
+    });
+}
+
+struct Adder {
+    added: usize,
+    keys: String,
+}
+
+impl Render for Adder {
+    fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        if w.focused_id().is_none() {
+            w.focus_id("root");
+        }
+        div().id("root").size_full().attr("tabindex", "0")
+            .on_key_down(cx.listener(|this, e: &KeyDownEvent, _, _| this.keys.push_str(&e.keystroke.key)))
+            .child(Button().id(format!("add{}", self.added)).child("Add").w(px(120.0))
+                .on_click(cx.listener(|this, _: &ClickEvent, _, cx| {
+                    this.added += 1;
+                    cx.notify();
+                })))
+    }
+}
+
+/// The button clicked is rebuilt away (a new id): the keys typed next, before the pointer moves,
+/// still reach the page under the pointer, as Blender sends a key to the region under the cursor.
+#[test]
+fn keys_after_a_click_that_rebuilds_the_button_reach_the_page() {
+    Application::headless().run(|cx| {
+        let opts = WindowOptions {
+            window_bounds: Some(WindowBounds::Windowed(Bounds {
+                origin: point(px(0.0), px(0.0)),
+                size: size(px(400.0), px(200.0)),
+            })),
+            ..Default::default()
+        };
+        let h = cx.open_window(opts, |_, cx| cx.new(|_| Adder { added: 0, keys: String::new() })).unwrap();
+        let w = h.id;
+        cx.draw(w);
+        let b = cx.element_bounds(w, "add0").expect("the button");
+        cx.simulate_click(w, b.origin.x + b.size.width / 2.0, b.origin.y + b.size.height / 2.0);
+        for c in ["o", "k"] {
+            cx.simulate_key(w, c, c);
+        }
+        cx.draw(w);
+        let (added, keys) = h.update(cx, |v, _, _| (v.added, v.keys.clone())).unwrap_or_default();
+        assert_eq!((added, keys.as_str()), (1, "ok"));
+    });
+}

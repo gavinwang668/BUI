@@ -113,6 +113,17 @@ impl<T: 'static> WeakEntity<T> {
     pub fn update<R>(&self, cx: &mut App, f: impl FnOnce(&mut T, &mut Context<T>) -> R) -> Option<R> {
         self.upgrade_in(cx).map(|e| e.update(cx, f))
     }
+
+    /// An element listener that updates this entity (what [`Context::listener`] makes), for code
+    /// that builds elements away from `render`'s context: a screen's editor factories, say.
+    pub fn listener<E: ?Sized>(
+        self,
+        f: impl Fn(&mut T, &E, &mut Window, &mut Context<T>) + 'static,
+    ) -> impl Fn(&E, &mut Window, &mut App) + 'static {
+        move |e: &E, window: &mut Window, cx: &mut App| {
+            self.update(cx, |this, cx| f(this, e, window, cx));
+        }
+    }
 }
 
 /// The app, seen from inside an entity (gpui's `Context<T>`); derefs to [`App`].
@@ -153,10 +164,7 @@ impl<T: 'static> Context<'_, T> {
         &self,
         f: impl Fn(&mut T, &E, &mut Window, &mut Context<T>) + 'static,
     ) -> impl Fn(&E, &mut Window, &mut App) + 'static {
-        let weak = self.entity.downgrade();
-        move |e: &E, window: &mut Window, cx: &mut App| {
-            weak.update(cx, |this, cx| f(this, e, window, cx));
-        }
+        self.entity.downgrade().listener(f)
     }
 }
 
@@ -463,6 +471,9 @@ pub struct App {
     windows: Vec<Option<Box<Window>>>,
     /// How many windows are lent to callbacks right now.
     lent: usize,
+    /// A simulated input is inside the kit (`input`): its events reach the listeners as they come, the
+    /// windows render once the kit returns (as a native window's frame comes after its events).
+    in_kit: bool,
     entities: Vec<Slot>,
     headless: bool,
     real_clock: bool,
@@ -531,7 +542,7 @@ impl App {
     /// follow the virtual one tests step with [`App::advance_clock`].
     fn create(headless: bool, real_clock: bool) -> App {
         crate::motion::start_clock(real_clock);
-        App { windows: Vec::new(), lent: 0, entities: Vec::new(), headless, real_clock, globals: HashMap::new(), propagate: true,
+        App { windows: Vec::new(), lent: 0, in_kit: false, entities: Vec::new(), headless, real_clock, globals: HashMap::new(), propagate: true,
               default_prevented: false, remote: None, close_hooks: Vec::new(), closed_later: None,
               activation_hooks: Vec::new(), shell_hooks: Vec::new(), notified: 0, shutdown_later: false,
               theme_seen: crate::theme_generation() }
@@ -872,6 +883,8 @@ impl App {
                     unsafe { sys::BK_window_timer(n, 0) };
                 }
                 Some(_) => {}
+                // inside the kit: not under its feet (a render can free the widget it is handling)
+                None if self.in_kit => {}
                 None => {
                     self.with_window(id, |w, app| w.update(app));
                 }
@@ -1025,12 +1038,17 @@ impl App {
 
     fn input(&mut self, window: WindowId, f: impl FnOnce(*mut sys::BKContext, f32)) {
         self.flush();
-        if let Some(w) = self.window(window) {
-            if w.frame.is_none() {
-                return;
-            }
-            f(w.ctx, w.scale);
-        }
+        let Some((ctx, scale)) = self.window(window).filter(|w| w.frame.is_some()).map(|w| (w.ctx, w.scale)) else {
+            return;
+        };
+        // as the native loop delivers them (`Application::run`): the kit's events reach the listeners
+        // during the call, so a key listener's `prevent_default` takes the key from Blender's own
+        // handling, as it does in a window. `self` isn't touched until the call returns.
+        let outer = APP.with(|a| a.replace(std::ptr::from_mut(self)));
+        let was = std::mem::replace(&mut self.in_kit, true);
+        f(ctx, scale);
+        self.in_kit = was;
+        APP.with(|a| a.set(outer));
         self.flush();
     }
 
@@ -2035,8 +2053,10 @@ impl Window {
         self.cursor
     }
 
-    /// A text field (the kit's editor) has the keyboard.
-    fn text_field_focused(&self) -> bool {
+    /// A text field (one of Blender's text widgets) is being typed in. Keys typed there still reach
+    /// the page's key listeners, as a browser's do: check this to keep single-key shortcuts from
+    /// firing while the user types.
+    pub fn text_field_focused(&self) -> bool {
         // SAFETY: a live context.
         unsafe { !sys::BK_focus(self.ctx).is_null() }
     }
@@ -2145,6 +2165,10 @@ impl Window {
                                crate::widgets::WidgetAsk::Ensure(spec) => widgets.ensure(canvas, key, spec, scale),
                                crate::widgets::WidgetAsk::Height(w) => (0.0, widgets.height_for(key, w, scale)),
                            });
+        // a checkbox / radio the app gave another `checked` since the user changed it is the app's
+        // again, for good (see `UiState::checked`)
+        let widgets = &self.widgets;
+        self.state.checked.retain(|k, &mut (_, at)| widgets.nodes.get(k).is_none_or(|w| w.spec.attr_checked == at));
         crate::vlist::run_after_layout(&frame, self, app);
         // `data-stick="bottom"`: a scroll container that grew goes to its end
         // (`"bottom"`: only if it was at the end; `"always"`: whatever it showed)
@@ -2806,7 +2830,9 @@ impl Window {
                     self.dirty = true;
                 }
             }
-            sys::BK_EV_MOTION | sys::BK_EV_ENTER => {
+            // an enter carries no position (the kit's `set_hover`): the motion after it does
+            sys::BK_EV_ENTER => {}
+            sys::BK_EV_MOTION => {
                 self.pointer = (x, y);
                 if self.sb_drag.is_some() {
                     self.drag_scrollbar(y);
@@ -3241,14 +3267,16 @@ impl Window {
             sys::BK_EV_CHANGE => {
                 let e = self.widgets.read(key);
                 let kind = self.widgets.nodes.get(&key).map(|w| w.spec.kind);
+                // the user's state, kept against the app's `checked` they changed it from
+                let app_checked = |w: &crate::widgets::Widgets, k: Key| w.nodes.get(&k).is_some_and(|n| n.spec.attr_checked);
                 match kind {
                     Some(WKind::Checkbox) => {
-                        self.state.checked.insert(key, e.checked);
+                        self.state.checked.insert(key, (e.checked, app_checked(&self.widgets, key)));
                     }
                     Some(WKind::Radio) if e.checked => {
-                        self.state.checked.insert(key, true);
+                        self.state.checked.insert(key, (true, app_checked(&self.widgets, key)));
                         for other in self.widgets.radio_group(key) {
-                            self.state.checked.insert(other, false);
+                            self.state.checked.insert(other, (false, app_checked(&self.widgets, other)));
                             self.widgets.set_value(other, 0.0);
                         }
                     }

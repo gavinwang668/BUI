@@ -217,11 +217,38 @@ pub struct CounterOps {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct Gradient {
-    pub radial: bool,
-    pub angle_deg: f32,
+    pub shape: GradientShape,
     /// Colour stops, with their positions on the gradient line when given (`50%`, `75px`,
     /// `calc(100% - 10px)`).
     pub stops: Vec<(Rgba, Option<LengthPercentage>)>,
+}
+
+/// Which way a gradient runs (CSS Images 3 §3.1, §3.2).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum GradientShape {
+    /// Along a line at `angle_deg` (0 = to top, 90 = to right).
+    Linear { angle_deg: f32 },
+    /// Out from a centre: a circle or an ellipse.
+    Radial(Radial),
+}
+
+/// A `radial-gradient()`'s ending shape: a circle (one radius) or an ellipse, its size and its
+/// centre (`at <position>`, against the box).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Radial {
+    pub circle: bool,
+    pub size: RadialSize,
+    pub at: [Pos; 2],
+}
+
+/// How big a radial gradient's ending shape is.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum RadialSize {
+    /// `closest-side`, `farthest-side`, `closest-corner`, `farthest-corner` (the default).
+    Extent { corner: bool, farthest: bool },
+    /// The radii, x and y (a circle's are the same length); a percentage is of the box's
+    /// width / height.
+    Radii(Pos, Pos),
 }
 
 impl Gradient {
@@ -567,7 +594,8 @@ pub struct Computed {
     pub marker_inside: bool,
     /// `quotes`: None = the default curly quotes.
     pub quotes: Option<(String, String)>,
-    pub text_shadow: Option<Shadow>,
+    /// `text-shadow`: the first on top.
+    pub text_shadow: Vec<Shadow>,
     pub decoration_color: Option<Rgba>,
     pub decoration_style: DecoStyle,
     /// `text-decoration-thickness` in px (None: auto / from-font).
@@ -696,7 +724,7 @@ impl Default for Computed {
             snap_align: (0, 0),
             marker_inside: false,
             quotes: None,
-            text_shadow: None,
+            text_shadow: Vec::new(),
             decoration_color: None,
             decoration_style: DecoStyle::Solid,
             decoration_thickness: None,
@@ -774,7 +802,7 @@ impl Computed {
             caption_bottom: parent.caption_bottom,
             marker_inside: parent.marker_inside,
             quotes: parent.quotes.clone(),
-            text_shadow: parent.text_shadow,
+            text_shadow: parent.text_shadow.clone(),
             vars: parent.vars,
             layout: Style { display: Display::Block, direction: parent.layout.direction, ..Default::default() },
             ..Computed::default()
@@ -1777,25 +1805,26 @@ fn grid_line(v: &[Tok]) -> Option<Line<GridPlacement<Ident>>> {
 pub(crate) fn gradient(ctx: &Ctx, t: &Tok) -> Option<Gradient> {
     let Tok::Func(fx) = t else { return None };
     let (f, args) = (&fx.name, &fx.args);
-    let radial = f.contains("radial");
     if !f.contains("gradient") {
         return None;
     }
-    let mut angle = 180.0;
+    let radial = f.contains("radial");
+    let mut shape = if radial { GradientShape::Radial(radial_shape(ctx, &[])?) } else { GradientShape::Linear { angle_deg: 180.0 } };
     let mut first = 0;
     if let Some(a) = args.first() {
         match a.first() {
-            Some(Tok::Dim(v, u)) if u == "deg" || u == "turn" || u == "rad" => {
-                angle = match u.as_ref() {
+            Some(Tok::Dim(v, u)) if !radial && (u == "deg" || u == "turn" || u == "rad") => {
+                let angle_deg = match u.as_ref() {
                     "turn" => v * 360.0,
                     "rad" => v.to_degrees(),
                     _ => *v,
                 };
+                shape = GradientShape::Linear { angle_deg };
                 first = 1;
             }
-            Some(Tok::Ident(s)) if s == "to" => {
+            Some(Tok::Ident(s)) if !radial && s == "to" => {
                 let dirs: Vec<&str> = a[1..].iter().filter_map(Tok::ident).collect();
-                angle = match dirs.as_slice() {
+                let angle_deg = match dirs.as_slice() {
                     ["top"] => 0.0,
                     ["right"] => 90.0,
                     ["left"] => 270.0,
@@ -1805,9 +1834,14 @@ pub(crate) fn gradient(ctx: &Ctx, t: &Tok) -> Option<Gradient> {
                     }
                     _ => if dirs.contains(&"right") { 135.0 } else { 225.0 },
                 };
+                shape = GradientShape::Linear { angle_deg };
                 first = 1;
             }
-            Some(Tok::Ident(s)) if radial && !parse_color(s).is_some() => first = 1,
+            // `circle`, `ellipse 40px 20px`, `farthest-side at 20% 30%`, `at center`: no colour in it
+            _ if radial && !a.iter().any(|t| color(t, ctx.c.color).is_some()) => {
+                shape = GradientShape::Radial(radial_shape(ctx, a)?);
+                first = 1;
+            }
             _ => {}
         }
     }
@@ -1821,7 +1855,46 @@ pub(crate) fn gradient(ctx: &Ctx, t: &Tok) -> Option<Gradient> {
         }
         stops.extend(at.into_iter().map(|a| (c, Some(a))));
     }
-    (!stops.is_empty()).then_some(Gradient { radial, angle_deg: angle, stops })
+    (!stops.is_empty()).then_some(Gradient { shape, stops })
+}
+
+/// A `radial-gradient()`'s first argument: `[circle | ellipse] [<extent> | <radii>] [at <position>]`
+/// in any order before `at` (CSS Images 3 §3.2.1). Empty: an ellipse to the farthest corner, centred.
+fn radial_shape(c: &Ctx, v: &[Tok]) -> Option<Radial> {
+    let (head, at) = match v.iter().position(|t| t.ident() == Some("at")) {
+        Some(k) => (&v[..k], position(c, &v[k + 1..])?),
+        None => (v, [Pos::CENTER; 2]),
+    };
+    let mut circle = None;
+    let mut extent = None;
+    let mut radii: Vec<Pos> = Vec::new();
+    for t in head {
+        match t.ident() {
+            Some("circle") => circle = Some(true),
+            Some("ellipse") => circle = Some(false),
+            Some("closest-side") => extent = Some((false, false)),
+            Some("farthest-side") => extent = Some((false, true)),
+            Some("closest-corner") => extent = Some((true, false)),
+            Some("farthest-corner") => extent = Some((true, true)),
+            Some(_) => return None,
+            None => radii.push(match length(t)? {
+                Length::Percent(p) => Pos { frac: p / 100.0, px: 0.0 },
+                l => Pos { frac: 0.0, px: l.to_px(&c.u)? },
+            }),
+        }
+    }
+    // one radius is a circle's (and a length, not a percentage); two, an ellipse's
+    let circle = circle.unwrap_or(radii.len() == 1);
+    let size = match radii.as_slice() {
+        [] => {
+            let (corner, farthest) = extent.unwrap_or((true, true));
+            RadialSize::Extent { corner, farthest }
+        }
+        [r] if circle && r.frac == 0.0 && extent.is_none() => RadialSize::Radii(*r, *r),
+        [rx, ry] if !circle && extent.is_none() => RadialSize::Radii(*rx, *ry),
+        _ => return None,
+    };
+    Some(Radial { circle, size, at })
 }
 
 fn shadows(ctx: &Ctx, v: &[Tok]) -> Option<Vec<Shadow>> {
@@ -3772,24 +3845,13 @@ pub(crate) const HANDLERS: &[(&str, Handler)] = &{
             }
             true
         }),
-        h("text-shadow", |c, v| {
-            if kw(v) == Some("none") {
-                c.c.text_shadow = None;
-                return true;
+        // `box-shadow`'s list, without `inset` or a spread (CSS Text Decoration 3 §4)
+        h("text-shadow", |c, v| match shadows(c, v) {
+            Some(l) if l.iter().all(|s| !s.inset && s.spread == 0.0) => {
+                c.c.text_shadow = l;
+                true
             }
-            let first: Vec<Tok> = v.split(|t| matches!(t, Tok::Comma)).next().unwrap_or(&[]).to_vec();
-            let lens: Vec<f32> = first.iter().filter_map(|t| length(t).and_then(|l| l.to_px(&c.u))).collect();
-            let col = first.iter()
-                .find_map(|t| color(t, c.c.color).filter(|_| !matches!(t, Tok::Dim(..) | Tok::Num(_))))
-                .unwrap_or(c.c.color);
-            match lens.as_slice() {
-                [x, y, rest @ ..] => {
-                    c.c.text_shadow = Some(Shadow { x: *x, y: *y, blur: rest.first().copied().unwrap_or(0.0),
-                                                    spread: 0.0, color: col, inset: false });
-                    true
-                }
-                _ => false,
-            }
+            _ => false,
         }),
         h("text-decoration-color", |c, v| v.first().and_then(|t| color(t, c.c.color))
             .map(|col| c.c.decoration_color = Some(col)).is_some()),

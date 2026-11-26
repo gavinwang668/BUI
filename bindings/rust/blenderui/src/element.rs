@@ -359,6 +359,10 @@ impl Div {
     pub fn step(self, v: f64) -> Self {
         self.attr("step", v.to_string())
     }
+    /// The decimals a number field or slider shows (Blender's property precision, 0 to 6).
+    pub fn precision(self, decimals: u8) -> Self {
+        self.attr("precision", decimals.to_string())
+    }
     pub fn src(self, path: impl Into<SharedString>) -> Self {
         self.attr("src", path)
     }
