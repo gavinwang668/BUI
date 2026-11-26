@@ -416,8 +416,9 @@ test('Vue: the example fills its window: no white below the content or in the ma
   }
   const corners = (s) => [[2, 2], [417, 2], [2, 297], [417, 297], [210, 280]].map(([x, y]) => at(s, x, y).join())
   assert.deepStrictEqual(new Set(corners(await shotOf(setup[1]))), new Set(['43,43,43']), 'the page color reaches every edge')
-  // what the class string without min-h-screen did: the color stopped at the content, white below
-  assert.strictEqual(at(await shotOf('m-0 bg-[#2b2b2b] text-[#e6e6e6]'), 210, 280).join(), '255,255,255', 'the cause: a body is only as tall as its content')
+  // Until 0.6.0 a class string without min-h-screen stopped the color at the content (white below it), and this
+  // test also asserted that. The page's color reaches the bottom without it now, so only the example's own page
+  // (above) is checked: it must reach every edge.
 })
 
 test('Vue: require() and import give the same package: BUI\'s render and createApp, Vue\'s everything else', () => {
