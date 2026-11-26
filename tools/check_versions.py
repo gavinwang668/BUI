@@ -77,6 +77,15 @@ def main() -> int:
     found["bindings/d/source/bui/kit.d (numbers)"] = ".".join(p.group(1) for p in dparts)
     found["bindings/d/source/bui/kit.d (string)"] = dstring.group(1)
 
+    # the kit's version as ClangSharp copied it into the C# interop
+    cs = read(ROOT / "bindings" / "csharp" / "src" / "Bui" / "Interop" / "Native.g.cs")
+    cparts = [re.search(rf"public const int BUI_KIT_VERSION_{p} = (\d+);", cs) for p in ("MAJOR", "MINOR", "PATCH")]
+    cstring = re.search(r'BUI_KIT_VERSION_STRING => "([^"]+)"u8;', cs)
+    if not all(cparts) or not cstring:
+        sys.exit("bindings/csharp/src/Bui/Interop/Native.g.cs: the BUI_KIT_VERSION_* constants are missing or malformed")
+    found["bindings/csharp/.../Native.g.cs (numbers)"] = ".".join(p.group(1) for p in cparts)
+    found["bindings/csharp/.../Native.g.cs (string)"] = cstring.group(1)
+
     # the NuGet packages (bindings/csharp/Directory.Build.props)
     found["bindings/csharp/Directory.Build.props"] = re.search(
         r"<Version>([^<]+)</Version>", read(ROOT / "bindings" / "csharp" / "Directory.Build.props")).group(1)

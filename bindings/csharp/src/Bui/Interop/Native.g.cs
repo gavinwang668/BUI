@@ -1669,17 +1669,17 @@ namespace Bui.Interop
         [NativeTypeName("#define BUI_KIT_VERSION_MAJOR 0")]
         public const int BUI_KIT_VERSION_MAJOR = 0;
 
-        [NativeTypeName("#define BUI_KIT_VERSION_MINOR 5")]
-        public const int BUI_KIT_VERSION_MINOR = 5;
+        [NativeTypeName("#define BUI_KIT_VERSION_MINOR 6")]
+        public const int BUI_KIT_VERSION_MINOR = 6;
 
-        [NativeTypeName("#define BUI_KIT_VERSION_PATCH 1")]
-        public const int BUI_KIT_VERSION_PATCH = 1;
+        [NativeTypeName("#define BUI_KIT_VERSION_PATCH 0")]
+        public const int BUI_KIT_VERSION_PATCH = 0;
 
-        [NativeTypeName("#define BUI_KIT_VERSION_STRING \"0.5.1\"")]
-        public static ReadOnlySpan<byte> BUI_KIT_VERSION_STRING => "0.5.1"u8;
+        [NativeTypeName("#define BUI_KIT_VERSION_STRING \"0.6.0\"")]
+        public static ReadOnlySpan<byte> BUI_KIT_VERSION_STRING => "0.6.0"u8;
 
         [NativeTypeName("#define BUI_KIT_VERSION (BUI_KIT_VERSION_MAJOR * 10000 + BUI_KIT_VERSION_MINOR * 100 + BUI_KIT_VERSION_PATCH)")]
-        public const int BUI_KIT_VERSION = (0 * 10000 + 5 * 100 + 1);
+        public const int BUI_KIT_VERSION = (0 * 10000 + 6 * 100 + 0);
 
         [NativeTypeName("#define BK_EFFECT_MAX_INPUTS BUI_EFFECT_MAX_INPUTS")]
         public const int BK_EFFECT_MAX_INPUTS = 8;

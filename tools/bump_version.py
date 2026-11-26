@@ -18,6 +18,7 @@ Where the version lives (one source of truth per registry, all moved together):
 * Python: `bindings/python/bui/_version.py` (the wheel reads it).
 * Rust: `[workspace.package]` in `bindings/rust/Cargo.toml`, and the `version = "..."` of every
   sibling path dependency (`blenderui-sys = { path = "...", version = "..." }`).
+* C#: the kit's version constants that ClangSharp copied into `bindings/csharp/src/Bui/Interop/Native.g.cs`.
 * D: `bindings/d/dub.json` and the hand-written `BUI_KIT_VERSION_*` constants in
   `bindings/d/source/bui/kit.d` (they mirror `kit/include/BUI_kit.h`).
 * npm (only with `--npm`): every already-published package in `bindings/package.json`'s workspaces
@@ -119,6 +120,19 @@ def plan_edits(new: str, npm: str | None) -> tuple[dict[Path, str], list[Path]]:
         htext = re.sub(rf"(#define BUI_KIT_VERSION_{part}\s+)\d+", rf"\g<1>{value}", htext)
     htext = re.sub(r'(#define BUI_KIT_VERSION_STRING\s+")[^"]+(")', rf"\g<1>{new}\g<2>", htext)
     put(header, htext)
+
+    # C#: ClangSharp copied the header's version constants into the generated interop
+    interop = ROOT / "bindings" / "csharp" / "src" / "Bui" / "Interop" / "Native.g.cs"
+    text = read(interop)
+    major, minor, patch = new.split(".")
+    for part, value in zip(("MAJOR", "MINOR", "PATCH"), (major, minor, patch)):
+        text = re.sub(rf"(#define BUI_KIT_VERSION_{part} )\d+", rf"\g<1>{value}", text)
+        text = re.sub(rf"(public const int BUI_KIT_VERSION_{part} = )\d+", rf"\g<1>{value}", text)
+    text = re.sub(r'(#define BUI_KIT_VERSION_STRING \\")[^\\"]+(\\")', rf"\g<1>{new}\g<2>", text)
+    text = re.sub(r'(BUI_KIT_VERSION_STRING => ")[^"]+("u8)', rf"\g<1>{new}\g<2>", text)
+    text = re.sub(r"(public const int BUI_KIT_VERSION = \()\d+ \* 10000 \+ \d+ \* 100 \+ \d+(\))",
+                  rf"\g<1>{major} * 10000 + {minor} * 100 + {patch}\g<2>", text)
+    put(interop, text)
 
     dub = ROOT / "bindings" / "d" / "dub.json"
     text = read(dub)

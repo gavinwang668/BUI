@@ -13,7 +13,7 @@ public static unsafe class Kit
     /// <summary>The version this binding was generated from (BUI_KIT_VERSION).</summary>
     public const int HeaderVersion = BUI_KIT_VERSION;
 
-    /// <summary>The loaded library's version as one number (0.5.1 is 501).</summary>
+    /// <summary>The loaded library's version as one number (0.6.0 is 600).</summary>
     public static int LibraryVersion => BK_version();
 
     /// <summary>Blender's resolution scale (1: 20 px widgets).</summary>

@@ -62,7 +62,8 @@ static void Click(Context ctx, Node n)
 Test("library and header versions match", () =>
 {
     Check(Kit.LibraryVersion == Kit.HeaderVersion, $"library {Kit.LibraryVersion}, header {Kit.HeaderVersion}");
-    Check(Kit.Version == "0.5.1", Kit.Version);
+    string header = $"{Bui.Interop.Native.BUI_KIT_VERSION_MAJOR}.{Bui.Interop.Native.BUI_KIT_VERSION_MINOR}.{Bui.Interop.Native.BUI_KIT_VERSION_PATCH}";
+    Check(Kit.Version == header, $"library {Kit.Version}, header {header}");
 });
 
 Test("unknown node type and property throw", () =>
