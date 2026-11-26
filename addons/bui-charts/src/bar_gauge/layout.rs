@@ -99,9 +99,9 @@ impl Region {
     pub(crate) fn origin(&self, offset: Point) -> Point {
         let bounds = self.bounds;
         let x = match self.align {
-            TextAlign::Left | TextAlign::Justify => bounds.left(),
+            TextAlign::Left | TextAlign::Start | TextAlign::Justify => bounds.left(),
             TextAlign::Center => bounds.center().x,
-            TextAlign::Right => bounds.right() - VALUE_PADDING,
+            TextAlign::Right | TextAlign::End => bounds.right() - VALUE_PADDING,
         };
         offset + point(x, bounds.top() + (bounds.size.height - self.font) / 2.)
     }
