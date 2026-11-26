@@ -2853,13 +2853,16 @@ fn crop(img: &Arc<Image>, x: u32, y: u32, w: u32, h: u32) -> Option<Arc<Image>> 
     if w == 0 || h == 0 || x + w > img.width || y + h > img.height {
         return None;
     }
+    // keyed by the source's address, with a weak reference to it: the address is not reused while
+    // the entry holds it, and a source that has gone (no strong reference) is a miss
+    type Crops = HashMap<(usize, [u32; 4]), (std::sync::Weak<Image>, Arc<Image>)>;
     thread_local! {
-        static CROPS: std::cell::RefCell<HashMap<(usize, [u32; 4]), Arc<Image>>> =
-            std::cell::RefCell::new(HashMap::new());
+        static CROPS: std::cell::RefCell<Crops> = std::cell::RefCell::new(HashMap::new());
     }
     let key = (Arc::as_ptr(img) as usize, [x, y, w, h]);
-    if let Some(c) = CROPS.with(|m| m.borrow().get(&key).cloned()) {
-        return Some(c);
+    let hit = CROPS.with(|m| m.borrow().get(&key).filter(|(src, _)| src.strong_count() > 0).map(|(_, c)| c.clone()));
+    if hit.is_some() {
+        return hit;
     }
     let all = img.to_rgba();
     let mut rgba = Vec::with_capacity((w * h * 4) as usize);
@@ -2873,7 +2876,7 @@ fn crop(img: &Arc<Image>, x: u32, y: u32, w: u32, h: u32) -> Option<Arc<Image>> 
         if m.len() > 512 {
             m.clear();
         }
-        m.insert(key, c.clone());
+        m.insert(key, (Arc::downgrade(img), c.clone()));
     });
     Some(c)
 }

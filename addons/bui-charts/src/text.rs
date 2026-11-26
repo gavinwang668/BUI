@@ -37,8 +37,8 @@ pub(crate) fn draw(
         return;
     }
     let shift = match align {
-        TextAlign::Left | TextAlign::Justify => 0.,
-        TextAlign::Right => measure(text, size),
+        TextAlign::Left | TextAlign::Start | TextAlign::Justify => 0., // chart text runs left to right
+        TextAlign::Right | TextAlign::End => measure(text, size),
         TextAlign::Center => measure(text, size) / 2.,
     };
     let baseline = (ASCENT - DESCENT).mul_add(0.5, 0.5) * size;

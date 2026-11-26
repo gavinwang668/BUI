@@ -13,6 +13,7 @@ Here's the story of BUI so far, in plain words: what each release gave you, and 
 
 These are on `main` and will ship in the next release; the details are under **Unreleased** in the changelog. Nothing here is on PyPI, crates.io or npm yet.
 
+- **Closing a window frees it.** A closed window gives back everything it held, so apps that open and close dialogs no longer grow.
 - **Your own title bar.** `WindowDecorations::Client` and `window_control_area` (or CSS `app-region`) let you draw the bar, and on Windows the window keeps its resize edges, snap and shadow. See [Your own title bar](../../rust/gpui-syntax/#your-own-title-bar).
 - **Blender's screen layout.** Areas you resize by dragging the edges between them, split, join and dock by dragging a corner, swap, maximize and drag out of the window; headers, toolbars and sidebars that resize, hide and flip; panels that pin and reorder; the layout saved as JSON. `QSplitter` and tkinter's `PanedWindow` drag Blender's area edges too. See [Screens, areas and regions](../../concepts/screens/).
 - **Animation.** One animation engine in the C kit runs GSAP-style timelines (position strings such as `"<"` and `"+=1"`, stagger, repeat, yoyo) and Motion-style springs, for Rust, JavaScript, React, Python, Lua and C. Rust gets `<motion.div>` in `rsx!`; see [Motion](../../rust/motion/) and [Effects and animations](../../rust/effects-and-animations/).

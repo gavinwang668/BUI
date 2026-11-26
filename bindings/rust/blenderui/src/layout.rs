@@ -113,11 +113,18 @@ pub(crate) struct StyleStore {
     seeded: u64,
     /// Counts the times the store was emptied: a [`StyleId`] means the same style within one epoch.
     epoch: u32,
+    /// The size past which the next frame starts from empty: a few times what a frame built from
+    /// empty needed (at least `STYLES_MAX`), as the layout tree's `styles_limit`. A style's key has
+    /// the viewport in it, so every size a window is resized through adds a set.
+    limit: usize,
+    /// This frame started from empty (its size sets `limit`).
+    fresh: bool,
 }
 
 impl Default for StyleStore {
     fn default() -> Self {
-        StyleStore { styles: vec![Computed::default()], cache: Default::default(), vars: Default::default(), seeded: 0, epoch: 0 }
+        StyleStore { styles: vec![Computed::default()], cache: Default::default(), vars: Default::default(), seeded: 0, epoch: 0,
+                     limit: STYLES_MAX, fresh: false }
     }
 }
 
@@ -136,14 +143,22 @@ impl StyleStore {
     }
 
     /// Before building a frame: drop everything when the store has grown
-    /// large (ids from the previous frame are not used after this).
+    /// past `limit` (ids from the previous frame are not used after this).
     fn begin_frame(&mut self) {
-        if self.styles.len() > 20_000 {
+        if self.styles.len() > self.limit {
             self.styles.truncate(1);
             self.cache.clear();
             self.vars.clear();
             self.seeded = 0;
             self.epoch += 1;
+            self.fresh = true;
+        }
+    }
+
+    /// After building a frame: one that started from empty sets the next `limit`.
+    fn end_frame(&mut self) {
+        if std::mem::take(&mut self.fresh) {
+            self.limit = (self.styles.len() * 4).max(STYLES_MAX);
         }
     }
 
@@ -2954,11 +2969,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
     let root_div = match root {
         AnyElement::Element(d) if d.tag == "html" => d,
         AnyElement::Element(d) if d.tag == "body" => crate::html::html().child(d),
-        other => {
-            let mut body = crate::html::body();
-            body.children.push(other);
-            crate::html::html().child(body)
-        }
+        other => crate::html::html().child(crate::html::body().child(other)),
     };
     let s = span(Phase::Build);
     let root = match b.element(root_div, None, ROOT_KEY, (1, 1), &[]) {
@@ -3052,6 +3063,7 @@ pub(crate) fn layout(root: AnyElement, viewport: (f32, f32), state: &UiState, ca
                           port: rect(0.0, 0.0, viewport.0, viewport.1), within: rect(0.0, 0.0, viewport.0, viewport.1) };
     walk.place(&mut frame.nodes, root_id, 0.0, 0.0, None, (0.0, 0.0));
     finish(&mut frame.nodes, styles, acc);
+    styles.end_frame();
     frame
 }
 

@@ -673,7 +673,19 @@ pub trait ParentElement: Sized {
     }
 
     fn children(mut self, children: impl IntoIterator<Item = impl IntoElement>) -> Self {
-        self.children_mut().extend(children.into_iter().map(IntoElement::into_any_element));
+        let mut children = children.into_iter();
+        // no children, no buffer: a leaf given an empty iterator needs none (and 10,000 of them would
+        // empty the pool of spare lists every frame)
+        let Some(first) = children.next() else {
+            return self;
+        };
+        let list = self.children_mut();
+        // a spare list, as `child` takes: a fresh one here would be one more kept each frame
+        if list.capacity() == 0 {
+            *list = SPARE_CHILDREN.with(|s| s.take(children.size_hint().0.saturating_add(1)));
+        }
+        list.push(first.into_any_element());
+        list.extend(children.map(IntoElement::into_any_element));
         self
     }
 }
