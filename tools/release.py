@@ -176,6 +176,19 @@ def verify(version: str) -> bool:
     return all(v is not False for v in status.values())
 
 
+def release_checks(version: str) -> bool:
+    """The checks release.yml's first job makes (versions match the tag, the third-party notices are up to
+    date), run now: a failure there costs seconds here and a whole CI round after the push."""
+    ok = True
+    for cmd in ([sys.executable, str(ROOT / "tools" / "check_versions.py"), f"v{version}"],
+                [sys.executable, str(ROOT / "tools" / "gen_notices.py"), "--check"]):
+        r = subprocess.run(cmd, cwd=ROOT, text=True, capture_output=True, encoding="utf-8", check=False)
+        if r.returncode != 0:
+            ok = False
+            print(f"{Path(cmd[1]).name} failed:\n{(r.stdout + r.stderr).strip()[-1500:]}")
+    return ok
+
+
 def preflight(allow_dirty: bool) -> None:
     if sh("git", "rev-parse", "--abbrev-ref", "HEAD") != "main":
         sys.exit("release from the main branch")
@@ -216,9 +229,13 @@ def main() -> int:
         if not a.yes and input("release this? [y/N] ").strip().lower() != "y":
             print("cancelled; nothing changed")
             return 1
-        if bump(a.version, *extra, "--commit", "--push") != 0:
+        # committed, not pushed yet: what release.yml checks first runs here, before CI and the wheels are waited for
+        if bump(a.version, *extra, "--commit") != 0:
             return 1
         version = current_version()
+        if not release_checks(version):
+            print("\nThe bump commit is local only (nothing was pushed). Fix it, amend the commit, then: python tools/release.py --resume")
+            return 1
 
     sha = sh("git", "rev-parse", "HEAD")
     if sh("git", "rev-list", "--count", "@{u}..HEAD") != "0":
