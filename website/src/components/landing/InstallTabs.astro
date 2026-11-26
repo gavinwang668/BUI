@@ -7,7 +7,7 @@ import type { LangIconName } from "../../lib/lang-icons";
 const clone = "git clone --depth 1 https://github.com/ppmpreetham/BUI";
 
 const commands: { id: string; label: string; icon?: LangIconName; cmd: string; note: string }[] = [
-  { id: "bui", label: "bui", cmd: "curl -LsSf https://bui.preetham.top/install.sh | sh", note: "Linux and macOS · then bui new my-app (Rust, JavaScript, Python, Lua or C) or bui init in your own project" },
+  { id: "bui", label: "bui", cmd: "curl -LsSf https://bui.preetham.top/install.sh | sh", note: "Linux and macOS · then bui new my-app (Rust, JavaScript, Python, Lua, C, D, C#, Go or Ruby) or bui init in your own project" },
   { id: "bui-win", label: "bui (Windows)", icon: "powershell", cmd: "irm https://bui.preetham.top/install.ps1 | iex", note: "PowerShell · then bui new my-app, or bui init in your own project to add BUI to it" },
   { id: "pip", label: "pip", icon: "python", cmd: "pip install blenderui", note: "Python 3.11+: tkinter, Qt syntax, components, Dear ImGui" },
   { id: "npm", label: "npm", icon: "npm", cmd: "npm install @blender-ui/react react", note: "Node.js 18+ or Bun · prebuilt for Windows x64" },
