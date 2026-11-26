@@ -45,9 +45,13 @@ function runtimeFile (name = 'full') {
 }
 
 // bui-runtime (BUI + QuickJS, its image decoders included) measured 7,097,856
-// bytes on Windows x64 (`npm run build`: the dist profile, fat LTO). The budget is
-// that plus 5 %: growth past it should be a decision, not an accident.
-const RUNTIME_BUDGET = { 'win32-x64': Math.round(7097856 * 1.05) }
+// bytes on Windows x64 (`npm run build`: the dist profile, fat LTO), before the
+// runtimes had variants. The base runtime, which an app without media gets,
+// measured 7,961,088 bytes for 0.6.0 (the CI build): the release added screen
+// readers (AccessKit), the desktop shell, a larger animation engine and more CSS.
+// That growth was decided (0.6.0); the budget is the measurement plus 5 %: further
+// growth past it should be a decision, not an accident.
+const RUNTIME_BUDGET = { 'win32-x64': Math.round(7961088 * 1.05) }
 
 function exec (file, args = []) {
   const r = spawnSync(file, args, { encoding: 'utf8', env: { ...process.env, BUI_HEADLESS: '1' }, timeout: 60000 })
