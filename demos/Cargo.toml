@@ -3,7 +3,7 @@ name = "bui-demos"
 version = "0.0.0"
 edition = "2024"
 publish = false
-description = "Small demos built on BUI: shader components, glass UI, a Blender-style CI pipeline and a motion editor."
+description = "Demos built on BUI: shader components, glass and skeuomorphic apps, menus, players and portfolio motion."
 
 # Standalone: not a member of bindings/rust's workspace, so the main tree is untouched.
 [workspace]

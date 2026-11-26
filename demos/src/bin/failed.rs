@@ -14,10 +14,9 @@
 //! `-- --storyboard DIR` clicks through it headlessly and saves frames along BUI's virtual clock;
 //! `-- --frames DIR` renders the background shader off-screen on the GPU.
 
-use std::time::Duration;
 
 use blenderui::prelude::*;
-use bui_demos::{arg, gpu_stills, now, run_with, save_png, Fx, Script};
+use bui_demos::{arg, gpu_stills, now, run_with, story::{story, Story}, Fx, Script};
 
 /// U[0] = time, U[1] = seconds since the last click (< 0: none).
 const WALL: &str = r"
@@ -375,43 +374,27 @@ impl Render for Failed {
 /// cascade (and the first panic), closing warnings with ✕ and OK (each opens another), then
 /// more clicks on the wall (one warning each).
 fn storyboard(dir: String) -> Script {
-    Box::new(move |cx, win| {
-        let shot = |cx: &mut App, name: &str| {
-            let (w, h, px) = cx.draw(win);
-            save_png(&format!("{dir}/{name}.png"), w, h, &px);
-        };
-        let click = |cx: &mut App, id: &str| {
-            let b = cx.element_bounds(win, id).unwrap_or_else(|| panic!("no #{id}"));
-            cx.simulate_click(win, b.origin.x + b.size.width / 2.0, b.origin.y + b.size.height / 2.0);
-        };
-        let play = |cx: &mut App, name: &str, steps: &[u64]| {
-            let mut at = 0;
-            for &ms in steps {
-                cx.advance_clock(Duration::from_millis(ms - at));
-                at = ms;
-                shot(cx, &format!("{name}-{ms:04}ms"));
-            }
-        };
-        let wall = |cx: &mut App| cx.simulate_click(win, 1060.0, 790.0);
-        shot(cx, "00-idle");
-        wall(cx);
-        play(cx, "01-cascade", &[0, 40, 90, 150, 220, 300, 380, 460, 600, 1000]);
+    story(dir, move |s| {
+        let wall = |s: &mut Story| s.cx.simulate_click(s.win, 1060.0, 790.0);
+        s.shot("00-idle");
+        wall(s);
+        s.play("01-cascade", &[0, 40, 90, 150, 220, 300, 380, 460, 600, 1000]);
         // close the front warning (id 4) with ✕: it goes, warning 5 pops up elsewhere
-        click(cx, "x4");
-        play(cx, "02-close", &[0, 60, 120, 200, 400]);
+        s.click("x4");
+        s.play("02-close", &[0, 60, 120, 200, 400]);
         // OK works the same, and neither starts a cascade
         for id in 5..=8 {
-            click(cx, &format!("{}{id}", if id % 2 == 1 { "ok" } else { "x" }));
-            cx.advance_clock(Duration::from_millis(500));
+            s.click(&format!("{}{id}", if id % 2 == 1 { "ok" } else { "x" }));
+            s.tick(500);
         }
-        shot(cx, "03-after-closing-5");
+        s.shot("03-after-closing-5");
         // later clicks on the wall: one warning each, no cascade
-        wall(cx);
-        play(cx, "04-wall-again", &[0, 80, 400]);
-        wall(cx);
-        wall(cx);
-        cx.advance_clock(Duration::from_millis(500));
-        shot(cx, "05-wall-three-times");
+        wall(s);
+        s.play("04-wall-again", &[0, 80, 400]);
+        wall(s);
+        wall(s);
+        s.tick(500);
+        s.shot("05-wall-three-times");
     })
 }
 

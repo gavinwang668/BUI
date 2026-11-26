@@ -25,6 +25,12 @@ impl Fit {
         Self { scale, w, h, ox: (w - design.0) / 2.0, oy: (h - design.1) / 2.0 }
     }
 
+    /// A window point (logical px) in design pixels.
+    #[must_use]
+    pub fn design(&self, p: Point<Pixels>) -> (f32, f32) {
+        (p.x.0 / self.scale - self.ox, p.y.0 / self.scale - self.oy)
+    }
+
     /// The root font size that makes `1rem` one design pixel x 16 at this scale.
     #[must_use]
     pub fn root_font(&self) -> String {
@@ -36,6 +42,12 @@ impl Fit {
 #[must_use]
 pub fn rem(design_px: f32) -> String {
     format!("{}rem", design_px / 16.0)
+}
+
+/// Places `d` absolutely at (`x`, `y`) design pixels (its `.abs` class is `position: absolute`).
+#[must_use]
+pub fn at(d: Div, x: f32, y: f32) -> Div {
+    d.class("abs").css("left", rem(x)).css("top", rem(y))
 }
 
 /// `css` with every `<number>px` written as `rem` (16 design pixels each).
