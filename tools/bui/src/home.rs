@@ -12,8 +12,8 @@ const COMMANDS: &[Entry] = &[
         "bui new [NAME]",
         "Make an app in a new folder",
         &[
-            ("-l, --language <rust|js|python|lua|c>", "the language"),
-            ("--framework <react|svelte|vanilla>", "JavaScript"),
+            ("-l, --language <rust|js|python|lua|c|d|csharp|go|ruby>", "the language"),
+            ("--framework <react|svelte|vue|vanilla>", "JavaScript"),
             ("--typescript | --javascript", "JavaScript"),
             ("--pm <bun|npm|pnpm>", "JavaScript: runtime and package manager"),
             ("--api <components|qt|tk>", "Python: the style of UI code"),
@@ -47,7 +47,7 @@ fn render(entries: &[Entry]) -> String {
     for (usage, what, options) in entries {
         lines.push(format!("{}  {}", ui::code(&format!("{usage:<25}")), what));
         for (flag, meaning) in *options {
-            let text = if meaning.is_empty() { (*flag).to_owned() } else { format!("{flag:<40}{meaning}") };
+            let text = if meaning.is_empty() { (*flag).to_owned() } else { format!("{flag:<40} {meaning}") };
             lines.push(format!("    {}", ui::dim(&text)));
         }
     }

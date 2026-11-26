@@ -10,7 +10,7 @@ use anyhow::{Result, bail};
 
 use crate::cli::{Choices, Lang, NewArgs};
 use crate::flavours::{File, Step, Vars};
-use crate::flavours::{c::CApp, js::JsApp, lua::LuaApp, python::PythonApp, rust::RustApp};
+use crate::flavours::{c::CApp, csharp::CsharpApp, d::DApp, go::GoApp, js::JsApp, lua::LuaApp, python::PythonApp, ruby::RubyApp, rust::RustApp};
 use crate::project::{FILE, Framework, Language, Meta, PackageManager, PyApi, Stack};
 use crate::sys::{Cmd, which};
 use crate::ui::{self, choice};
@@ -83,7 +83,7 @@ fn make(name: &str, dir: &Path, choices: &Choices, new_folder: bool) -> Result<(
     };
 
     // the files that are there already, made to fit (a manifest that cannot be read stops here, with nothing written)
-    let adopted = app.adopt(dir)?;
+    let adopted = app.adopt(dir, name)?;
     let writing = ui::task("Writing your app");
     fs::create_dir_all(dir)?;
     let mut files = app.files(&Vars::new(name));
@@ -164,10 +164,14 @@ fn ask(c: &Choices) -> Result<Stack> {
         "Which language do you want to use?",
         &[
             choice(Lang::Rust, "Rust".into(), "Builders like GPUI, or HTML and Tailwind"),
-            choice(Lang::Js, "JavaScript or TypeScript".into(), "React, Svelte or plain DOM"),
+            choice(Lang::Js, "JavaScript or TypeScript".into(), "React, Svelte, Vue or plain DOM"),
             choice(Lang::Python, "Python".into(), "Blender's components, or Qt or tkinter style"),
             choice(Lang::Lua, "Lua".into(), "Small, quick to start"),
             choice(Lang::C, "C".into(), "BUI's own API, built with CMake"),
+            choice(Lang::D, "D".into(), "A DUB package, built with LDC"),
+            choice(Lang::Csharp, "C#".into(), "A NuGet package on .NET 8"),
+            choice(Lang::Go, "Go".into(), "A cgo module, MyGo-style views"),
+            choice(Lang::Ruby, "Ruby".into(), "A gem with a block builder"),
         ],
         c.language.as_ref(),
     )?;
@@ -175,6 +179,10 @@ fn ask(c: &Choices) -> Result<Stack> {
         Lang::Rust => Stack::Rust(RustApp {}),
         Lang::Lua => Stack::Lua(LuaApp {}),
         Lang::C => Stack::C(CApp {}),
+        Lang::D => Stack::D(DApp {}),
+        Lang::Csharp => Stack::Csharp(CsharpApp {}),
+        Lang::Go => Stack::Go(GoApp {}),
+        Lang::Ruby => Stack::Ruby(RubyApp {}),
         Lang::Python => Stack::Python(PythonApp {
             api: ui::select(
                 "How do you want to write the UI?",
@@ -196,12 +204,13 @@ fn ask_js(c: &Choices) -> Result<Stack> {
         &[
             choice(Framework::React, "React".into(), "React 19: components and hooks"),
             choice(Framework::Svelte, "Svelte".into(), "Svelte 5: runes (runs on Node.js)"),
+            choice(Framework::Vue, "Vue".into(), "Vue 3: refs and single-file components (Node.js 22.15+ or Bun)"),
             choice(Framework::Vanilla, "None".into(), "BUI's own DOM-like API"),
         ],
         c.framework.as_ref(),
     )?;
-    // Svelte files are compiled by BUI's loader and written in plain JavaScript
-    let language = if framework == Framework::Svelte {
+    // Svelte and Vue files are compiled by BUI's loader and written in plain JavaScript
+    let language = if framework.has_loader() {
         Language::JavaScript
     } else {
         ui::select(

@@ -8,7 +8,9 @@ use anyhow::{Context, Result};
 use clap::ValueEnum;
 use serde::{Deserialize, Serialize};
 
-use crate::flavours::{Flavour, c::CApp, js::JsApp, lua::LuaApp, python::PythonApp, rust::RustApp};
+use crate::flavours::{
+    Flavour, c::CApp, csharp, csharp::CsharpApp, d, d::DApp, go, go::GoApp, js::JsApp, lua::LuaApp, python::PythonApp, ruby, ruby::RubyApp, rust::RustApp,
+};
 
 pub const FILE: &str = "bui.toml";
 
@@ -17,8 +19,16 @@ pub const FILE: &str = "bui.toml";
 pub enum Framework {
     React,
     Svelte,
+    Vue,
     /// BUI's DOM-like API with no framework.
     Vanilla,
+}
+
+impl Framework {
+    /// Components in single files (`.svelte`, `.vue`) that BUI's loader compiles, written in plain JavaScript.
+    pub const fn has_loader(self) -> bool {
+        matches!(self, Self::Svelte | Self::Vue)
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Serialize, Deserialize, ValueEnum)]
@@ -56,6 +66,10 @@ pub enum Stack {
     Python(PythonApp),
     Lua(LuaApp),
     C(CApp),
+    D(DApp),
+    Csharp(CsharpApp),
+    Go(GoApp),
+    Ruby(RubyApp),
 }
 
 impl Stack {
@@ -66,6 +80,10 @@ impl Stack {
             Self::Python(a) => a,
             Self::Lua(a) => a,
             Self::C(a) => a,
+            Self::D(a) => a,
+            Self::Csharp(a) => a,
+            Self::Go(a) => a,
+            Self::Ruby(a) => a,
         }
     }
 }
@@ -130,6 +148,8 @@ fn guess(dir: &Path) -> Option<Meta> {
             Framework::React
         } else if pkg.contains("@blender-ui/svelte") {
             Framework::Svelte
+        } else if pkg.contains("@blender-ui/vue") {
+            Framework::Vue
         } else {
             Framework::Vanilla
         };
@@ -148,6 +168,14 @@ fn guess(dir: &Path) -> Option<Meta> {
         Stack::Lua(LuaApp {})
     } else if read(dir, "CMakeLists.txt").contains("BUI") && dir.join("src").is_dir() {
         Stack::C(CApp {})
+    } else if go::detect(dir) {
+        Stack::Go(GoApp {})
+    } else if ruby::detect(dir) {
+        Stack::Ruby(RubyApp {})
+    } else if csharp::detect(dir) {
+        Stack::Csharp(CsharpApp {})
+    } else if d::detect(dir) {
+        Stack::D(DApp {})
     } else {
         return None;
     };
@@ -184,7 +212,15 @@ mod tests {
     use crate::flavours::{Vars, c::CApp};
 
     pub fn every_stack() -> Vec<Stack> {
-        let mut stacks = vec![Stack::Rust(RustApp {}), Stack::Lua(LuaApp {}), Stack::C(CApp {})];
+        let mut stacks = vec![
+            Stack::Rust(RustApp {}),
+            Stack::Lua(LuaApp {}),
+            Stack::C(CApp {}),
+            Stack::D(DApp {}),
+            Stack::Csharp(CsharpApp {}),
+            Stack::Go(GoApp {}),
+            Stack::Ruby(RubyApp {}),
+        ];
         for api in [PyApi::Components, PyApi::Qt, PyApi::Tk] {
             stacks.push(Stack::Python(PythonApp { api }));
         }
@@ -193,6 +229,7 @@ mod tests {
                 (Framework::React, Language::TypeScript),
                 (Framework::React, Language::JavaScript),
                 (Framework::Svelte, Language::JavaScript),
+                (Framework::Vue, Language::JavaScript),
                 (Framework::Vanilla, Language::TypeScript),
                 (Framework::Vanilla, Language::JavaScript),
             ] {
@@ -220,10 +257,44 @@ mod tests {
             assert!(!files.is_empty(), "{}", stack.app().label());
             assert!(files.iter().any(|f| f.path == ".gitignore"), "{} has no .gitignore", stack.app().label());
             for f in &files {
-                assert!(!f.body.contains("{{"), "{}: {} has a placeholder left", stack.app().label(), f.path);
+                // (Vue's own `{{ count }}` has spaces: only the placeholders `bui` fills are looked for)
+                for placeholder in ["{{name}}", "{{ident}}", "{{title}}", "{{tag}}"] {
+                    assert!(!f.body.contains(placeholder), "{}: {} has {placeholder} left", stack.app().label(), f.path);
+                }
                 assert!(!f.path.contains("/_") && !f.path.starts_with('_'), "{}: {} keeps its underscore", stack.app().label(), f.path);
             }
         }
+    }
+
+    /// What `guess` makes of a folder holding `files`.
+    fn guessed(tag: &str, files: &[(&str, &str)]) -> Option<Stack> {
+        let dir = std::env::temp_dir().join(format!("bui-guess-{tag}-{}", std::process::id())).join("my-app");
+        fs::create_dir_all(&dir).unwrap();
+        for (name, body) in files {
+            fs::write(dir.join(name), body).unwrap();
+        }
+        let stack = guess(&dir).map(|m| m.stack);
+        fs::remove_dir_all(dir.parent().unwrap()).unwrap();
+        stack
+    }
+
+    #[test]
+    fn a_folder_without_bui_toml_is_recognized_by_its_files() {
+        assert!(matches!(
+            guessed("vue", &[("package.json", r#"{"dependencies":{"@blender-ui/native":"1","@blender-ui/vue":"1","vue":"3"}}"#)]),
+            Some(Stack::Js(JsApp { framework: Framework::Vue, .. }))
+        ));
+        assert!(matches!(guessed("go", &[("go.mod", "module x\nrequire github.com/ppmpreetham/BUI/bindings/go v0.0.0\n")]), Some(Stack::Go(_))));
+        assert!(guessed("go-other", &[("go.mod", "module x\n")]).is_none());
+        assert!(matches!(guessed("ruby", &[("Gemfile", "source \"https://rubygems.org\"\ngem \"blenderui\", \"~> 0.5\"\n")]), Some(Stack::Ruby(_))));
+        assert!(guessed("ruby-other", &[("Gemfile", "gem \"rake\"\n")]).is_none());
+        assert!(matches!(
+            guessed("cs", &[("my-app.csproj", r#"<Project><ItemGroup><PackageReference Include="BlenderUI" Version="0.5.1" /></ItemGroup></Project>"#)]),
+            Some(Stack::Csharp(_))
+        ));
+        assert!(guessed("cs-other", &[("my-app.csproj", "<Project />")]).is_none());
+        assert!(matches!(guessed("d", &[("dub.json", r#"{"dependencies":{"blenderui":"~>0.5.1"}}"#)]), Some(Stack::D(_))));
+        assert!(guessed("d-other", &[("dub.json", r#"{"dependencies":{"vibe-d":"*"}}"#)]).is_none());
     }
 
     #[test]

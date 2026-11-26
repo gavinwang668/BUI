@@ -29,18 +29,24 @@ pub fn home() -> Option<PathBuf> {
     std::env::home_dir()
 }
 
+/// `bui`'s own folder in the user's home (`~/.bui`): what it keeps between projects (the BUI checkout Go builds
+/// from), and, by convention, `bin/` for tools. `BUI_HOME` replaces it (tests, CI).
+pub fn bui_home() -> Option<PathBuf> {
+    std::env::var_os("BUI_HOME").map(PathBuf::from).or_else(|| home().map(|h| h.join(".bui")))
+}
+
 /// Where tools put themselves that a terminal started before the install does not search yet.
 fn extra_dirs() -> Vec<PathBuf> {
     let mut dirs = Vec::new();
     if let Some(h) = home() {
-        for d in [".cargo/bin", ".bun/bin", ".local/bin", ".bui/bin", "scoop/shims", ".deno/bin", ".local/share/fnm/aliases/default/bin"] {
+        for d in [".cargo/bin", ".bun/bin", ".local/bin", ".bui/bin", "scoop/shims", ".deno/bin", ".local/share/fnm/aliases/default/bin", "go/bin", ".dotnet"] {
             dirs.push(h.join(d));
         }
     }
     if OS == Os::Windows {
         for var in ["ProgramFiles", "ProgramFiles(x86)"] {
             if let Some(p) = std::env::var_os(var).map(PathBuf::from) {
-                for d in ["nodejs", "Git/cmd", "CMake/bin", "LuaRocks"] {
+                for d in ["nodejs", "Git/cmd", "CMake/bin", "LuaRocks", "Go/bin", "dotnet"] {
                     dirs.push(p.join(d));
                 }
             }

@@ -3,9 +3,13 @@
 //! `bui doctor` checks it. Adding a language is a module here and a variant in `project::Stack`.
 
 pub mod c;
+pub mod csharp;
+pub mod d;
+pub mod go;
 pub mod js;
 pub mod lua;
 pub mod python;
+pub mod ruby;
 pub mod rust;
 
 use std::cell::OnceCell;
@@ -142,7 +146,8 @@ pub trait Flavour {
     fn files(&self, vars: &Vars) -> Vec<File>;
     /// Makes the project's existing files fit (`bui init` in a folder that has them), before anything is
     /// written: an error stops `init` with nothing changed. Everything else of theirs is left as it is.
-    fn adopt(&self, _dir: &Path) -> Result<Vec<Adopted>> {
+    /// `name` is what the app is called (its files are named after it).
+    fn adopt(&self, _dir: &Path, _name: &str) -> Result<Vec<Adopted>> {
         Ok(Vec::new())
     }
     /// Installs BUI and the language's tooling at their newest versions, in the new project.
@@ -156,6 +161,18 @@ pub trait Flavour {
     fn checks(&self, dir: &Path) -> Vec<Check>;
     /// Brings BUI and the tooling to their newest versions.
     fn update(&self, dir: &Path) -> Vec<Step>;
+}
+
+/// A file's text: absent is `None`; one that is there and cannot be read stops `init` (the caller's `?`), so
+/// nothing is written over it.
+pub fn read_manifest(dir: &Path, file: &str) -> Result<Option<String>> {
+    use anyhow::Context;
+    let path = dir.join(file);
+    match std::fs::read_to_string(&path) {
+        Ok(text) => Ok(Some(text)),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
+        Err(e) => Err(e).with_context(|| format!("reading {}: fix it first, then run `bui init` again", path.display())),
+    }
 }
 
 /// A file's text, if it can be read.

@@ -1,6 +1,6 @@
 [package]
 name = "bui-cli"
-description = "bui: create, run, check and update BUI apps (Rust, JavaScript, Python, Lua, C)"
+description = "bui: create, run, check and update BUI apps (Rust, JavaScript, Python, Lua, C, D, C#, Go, Ruby)"
 version = "0.5.1"
 edition = "2024"
 rust-version = "1.88"

@@ -16,8 +16,23 @@ use crate::tools::Tool;
 use crate::ui;
 
 /// Every toolchain bui knows, for `--all` and for a folder that is not a project.
-const ALL: [Tool; 9] =
-    [Tool::Rust, Tool::Cc, Tool::Cmake, Tool::Bun, Tool::Node, Tool::Uv, Tool::Lua, Tool::Luarocks, Tool::Git];
+const ALL: [Tool; 15] = [
+    Tool::Rust,
+    Tool::Cc,
+    Tool::Cmake,
+    Tool::Bun,
+    Tool::Node,
+    Tool::Uv,
+    Tool::Lua,
+    Tool::Luarocks,
+    Tool::Git,
+    Tool::Go,
+    Tool::Dotnet,
+    Tool::Dub,
+    Tool::Ldc,
+    Tool::Ruby,
+    Tool::Bundler,
+];
 
 struct Section {
     title: String,

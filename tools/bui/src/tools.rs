@@ -5,7 +5,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
 
-use crate::sys::{Cmd, OS, Os, version_of, which};
+use crate::sys::{Cmd, OS, Os, semver, version_of, which};
 use crate::ui;
 
 static INSTALL_WITHOUT_ASKING: AtomicBool = AtomicBool::new(false);
@@ -28,6 +28,20 @@ pub enum Tool {
     /// A C and a C++ compiler (on Windows, Visual Studio's C++ tools).
     Cc,
     Git,
+    /// Go 1.22 or newer.
+    Go,
+    /// gcc and g++ (on Windows MinGW-w64's: cgo cannot use Visual Studio's compiler).
+    Gcc,
+    /// The X11 development headers (Linux; there is nothing to check elsewhere).
+    X11,
+    /// The .NET SDK, 8 or newer.
+    Dotnet,
+    Dub,
+    /// LDC, the D compiler.
+    Ldc,
+    /// Ruby 3.1 or newer.
+    Ruby,
+    Bundler,
 }
 
 /// How to install a tool: commands, in order.
@@ -70,6 +84,14 @@ impl Tool {
             Self::Cmake => "CMake",
             Self::Cc => "a C and C++ compiler",
             Self::Git => "Git",
+            Self::Go => "Go 1.22+",
+            Self::Gcc => "gcc and g++",
+            Self::X11 => "X11 development headers",
+            Self::Dotnet => ".NET 8 SDK",
+            Self::Dub => "DUB",
+            Self::Ldc => "LDC (D compiler)",
+            Self::Ruby => "Ruby 3.1+",
+            Self::Bundler => "Bundler",
         }
     }
 
@@ -89,6 +111,14 @@ impl Tool {
             Self::Cmake => v("cmake", "--version"),
             Self::Git => v("git", "--version"),
             Self::Cc => cc_probe(),
+            Self::Go => v("go", "version").filter(|ver| at_least(ver, [1, 22])),
+            Self::Gcc => which("g++").and_then(|_| v("gcc", "--version")),
+            Self::X11 => x11_probe(),
+            Self::Dotnet => v("dotnet", "--version").filter(|ver| at_least(ver, [8, 0])),
+            Self::Dub => v("dub", "--version"),
+            Self::Ldc => v("ldc2", "--version"),
+            Self::Ruby => v("ruby", "--version").filter(|ver| at_least(ver, [3, 1])),
+            Self::Bundler => v("bundle", "--version"),
         }
     }
 
@@ -133,12 +163,56 @@ impl Tool {
                 )],
                 note: Some("A large download (a few GB); it only has to happen once."),
             },
-            (Self::Cc | Self::Git, Os::Mac) => none(vec![Cmd::script("xcode-select --install")]),
-            (Self::Cc, Os::Linux) => none(vec![pkg("build-essential", "gcc gcc-c++ make", "base-devel")]),
+            (Self::Cc | Self::Gcc | Self::Git, Os::Mac) => none(vec![Cmd::script("xcode-select --install")]),
+            (Self::Cc | Self::Gcc, Os::Linux) => none(vec![pkg("build-essential", "gcc gcc-c++ make", "base-devel")]),
+            (Self::Gcc, Os::Windows) => Install {
+                cmds: vec![winget("BrechtSanders.WinLibs.POSIX.UCRT")],
+                note: Some("MinGW-w64's gcc, for cgo (MSVC does not work with it). Open a new terminal afterwards so its folder is on PATH."),
+            },
             (Self::Git, Os::Windows) => none(vec![winget("Git.Git")]),
             (Self::Git, Os::Linux) => none(vec![pkg("git", "git", "git")]),
+            (Self::Go, Os::Windows) => none(vec![winget("GoLang.Go")]),
+            (Self::Go, Os::Mac) => none(vec![brew("go")]),
+            (Self::Go, Os::Linux) => none(vec![pkg("golang", "golang", "go")]),
+            (Self::X11, _) => none(vec![pkg("libx11-dev", "libX11-devel", "libx11")]),
+            (Self::Dotnet, Os::Windows) => none(vec![winget("Microsoft.DotNet.SDK.8")]),
+            (Self::Dotnet, Os::Mac) => none(vec![brew("--cask dotnet-sdk")]),
+            (Self::Dotnet, Os::Linux) => none(vec![pkg("dotnet-sdk-8.0", "dotnet-sdk-8.0", "dotnet-sdk-8.0")]),
+            (Self::Dub | Self::Ldc, Os::Windows) => Install {
+                cmds: vec![Cmd::script("scoop install ldc dub")],
+                note: Some("Needs Scoop (https://scoop.sh): `irm https://get.scoop.sh | iex`."),
+            },
+            (Self::Dub | Self::Ldc, Os::Mac) => none(vec![brew("ldc dub")]),
+            (Self::Dub | Self::Ldc, Os::Linux) => none(vec![pkg("ldc dub", "ldc dub", "ldc dub")]),
+            (Self::Ruby, Os::Windows) => Install {
+                cmds: vec![winget("RubyInstallerTeam.RubyWithDevKit.3.4")],
+                note: Some("RubyInstaller with its MSYS2 development kit, which has the compilers the gem needs."),
+            },
+            (Self::Ruby, Os::Mac) => none(vec![brew("ruby")]),
+            (Self::Ruby, Os::Linux) => none(vec![pkg("ruby-full", "ruby ruby-devel", "ruby")]),
+            (Self::Bundler, _) => none(vec![Cmd::new("gem", ["install", "bundler"])]),
         }
     }
+}
+
+/// Whether the dotted version `ver` (`1.22.1`) is `min` (major, minor) or newer.
+fn at_least(ver: &str, min: [u64; 2]) -> bool {
+    let [major, minor, _] = semver(ver);
+    [major, minor] >= min
+}
+
+/// The X11 headers on Linux (`Xlib.h` where the system or `pkg-config` keeps it); other systems have nothing to check.
+fn x11_probe() -> Option<String> {
+    if OS != Os::Linux {
+        return Some("not needed here".to_owned());
+    }
+    let header = std::path::Path::new("/usr/include/X11/Xlib.h").is_file();
+    (header || Cmd::new("pkg-config", ["--exists", "x11"]).capture().is_some()).then(|| "found".to_owned())
+}
+
+/// The X11 headers, for the languages that compile BUI's windows against them: on Linux only.
+pub const fn x11_headers() -> Option<Tool> {
+    if matches!(OS, Os::Linux) { Some(Tool::X11) } else { None }
 }
 
 fn cc_probe() -> Option<String> {
