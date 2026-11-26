@@ -446,7 +446,7 @@ test('Vue: compiled components are cached: a cached start does not load Vue\'s c
   const file = path.join(dir, 'Fresh.vue')
   fs.writeFileSync(file, `<template><div>${Date.now()}</div></template>`) // a component no run has compiled
   const script = fileURLToPath(new URL('./fixtures/compile-once.mjs', import.meta.url))
-  const run = () => spawnSync(process.execPath, [script, file], { encoding: 'utf8', cwd: path.dirname(script) }).stdout.trim()
+  const run = () => spawnSync(process.execPath, [script, file], { encoding: 'utf8', cwd: path.dirname(script), env: { ...process.env, NO_COLOR: '1', FORCE_COLOR: '0' } }).stdout.trim()
   assert.strictEqual(run(), 'true', 'the first start compiles it, with Vue\'s compiler')
   assert.strictEqual(run(), 'false', 'the next one reads the compiled file: no compiler loaded')
   fs.writeFileSync(file, `<template><div>${Date.now()}!</div></template>`)
