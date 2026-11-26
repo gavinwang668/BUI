@@ -13,13 +13,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "accesskit"
+version = "0.25.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4e883d1d28c5fd5568c79ed2d2bd48d9f2fd3945c8974ed0f53690ceddb051be"
+dependencies = [
+ "uuid",
+]
+
+[[package]]
 name = "accesskit_consumer"
 version = "0.38.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "5d10a236f96f87d70732e44520046785431ef01d5bcd6b041317bfadd2f88245"
 dependencies = [
- "accesskit",
+ "accesskit 0.24.1",
  "hashbrown 0.16.1",
+]
+
+[[package]]
+name = "accesskit_consumer"
+version = "0.39.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f3da8f27636015191b2264ee1df681503170a632cafd832fdc1edfdd4e3a2fd3"
+dependencies = [
+ "accesskit 0.25.2",
+ "hashbrown 0.17.1",
 ]
 
 [[package]]
@@ -28,8 +47,8 @@ version = "0.26.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ce02dc63b43f0c9296af9ac946312a2dc8814427d7a64d2d600971dac55b6076"
 dependencies = [
- "accesskit",
- "accesskit_consumer",
+ "accesskit 0.24.1",
+ "accesskit_consumer 0.38.0",
  "hashbrown 0.16.1",
  "objc2 0.5.3",
  "objc2-app-kit 0.2.2",
@@ -42,9 +61,23 @@ version = "0.34.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "106c2b961215864d1c2e703ee63269c25c4e80a577ffb2c1017b9c17dcdf83a1"
 dependencies = [
- "accesskit",
- "accesskit_consumer",
+ "accesskit 0.24.1",
+ "accesskit_consumer 0.38.0",
  "hashbrown 0.16.1",
+ "static_assertions",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+]
+
+[[package]]
+name = "accesskit_windows"
+version = "0.35.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "498668b90da9995302a0055aaecad4756932333da2ddef6baee1c00844c430fc"
+dependencies = [
+ "accesskit 0.25.2",
+ "accesskit_consumer 0.39.2",
+ "hashbrown 0.17.1",
  "static_assertions",
  "windows 0.62.2",
  "windows-core 0.62.2",
@@ -713,7 +746,7 @@ dependencies = [
 
 [[package]]
 name = "blenderui"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-macros",
  "blenderui-sys",
@@ -721,43 +754,47 @@ dependencies = [
  "blenderui-tailwind",
  "blenderui-vlist",
  "foldhash 0.2.0",
+ "miniz_oxide 0.8.9",
+ "ndk-context",
  "paste",
  "smallvec",
  "taffy 0.15.0",
+ "unicode-linebreak",
 ]
 
 [[package]]
 name = "blenderui-macros"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-tailwind",
 ]
 
 [[package]]
 name = "blenderui-paint"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "blenderui-sys"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
+ "bui-a11y",
  "cmake",
 ]
 
 [[package]]
 name = "blenderui-table"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-paint",
 ]
 
 [[package]]
 name = "blenderui-tailwind"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "blenderui-vlist"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-paint",
 ]
@@ -834,6 +871,14 @@ checksum = "6bb31b46c14244e20ee9984b11bf5c992b91fb6939fea616e3512c8baecdbe5f"
 dependencies = [
  "memchr",
  "serde_core",
+]
+
+[[package]]
+name = "bui-a11y"
+version = "0.6.0"
+dependencies = [
+ "accesskit 0.25.2",
+ "accesskit_windows 0.35.2",
 ]
 
 [[package]]
@@ -2581,7 +2626,7 @@ version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ee67914f779fdcfce4c7f59f6ba8fa68f680bd137648b25a801cd5d9cb1b8ab"
 dependencies = [
- "accesskit",
+ "accesskit 0.24.1",
  "anyhow",
  "async-channel 2.5.0",
  "async-task",
@@ -2691,7 +2736,7 @@ version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "59c465cccb420a54d2abc14af42ce82ecb1ea473b531ddbd299eb4e15ae2dd83"
 dependencies = [
- "accesskit",
+ "accesskit 0.24.1",
  "anyhow",
  "bytemuck",
  "calloop 0.14.5",
@@ -2719,7 +2764,7 @@ version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d809f618f836aff7fc654c00c3f6e64d41abd83713140998dd83e8ad6906b1e9"
 dependencies = [
- "accesskit",
+ "accesskit 0.24.1",
  "accesskit_macos",
  "anyhow",
  "block2 0.6.2",
@@ -2844,8 +2889,8 @@ version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "088654835f1408e1aaa79afcc316530461a14fa1c4e543d47b1881b6ced63f19"
 dependencies = [
- "accesskit",
- "accesskit_windows",
+ "accesskit 0.24.1",
+ "accesskit_windows 0.34.0",
  "anyhow",
  "dunce",
  "etagere",
@@ -2886,7 +2931,7 @@ version = "0.3.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9303c771abf2acff2a96d706f69d9a82088c4770173a07cce88f0002431d887d"
 dependencies = [
- "accesskit",
+ "accesskit 0.24.1",
  "anyhow",
  "async-channel 2.5.0",
  "async-task",
@@ -4439,6 +4484,12 @@ checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
 dependencies = [
  "getrandom 0.2.17",
 ]
+
+[[package]]
+name = "ndk-context"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "27b02d87554356db9e9a873add8782d4ea6e3e58ea071a9adb9a2e8ddb884a8b"
 
 [[package]]
 name = "ndk-sys"

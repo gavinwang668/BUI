@@ -3,6 +3,12 @@
 version = 4
 
 [[package]]
+name = "adler2"
+version = "2.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
+
+[[package]]
 name = "aho-corasick"
 version = "1.1.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -19,7 +25,7 @@ checksum = "2cb931c189b85683d69a5cfad41d4d418671e1ac413dd209f3f2fc31e3cfd902"
 
 [[package]]
 name = "blenderui"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-macros",
  "blenderui-sys",
@@ -27,51 +33,53 @@ dependencies = [
  "blenderui-tailwind",
  "blenderui-vlist",
  "foldhash",
+ "miniz_oxide",
  "ndk-context",
  "paste",
  "smallvec",
  "taffy",
+ "unicode-linebreak",
 ]
 
 [[package]]
 name = "blenderui-macros"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-tailwind",
 ]
 
 [[package]]
 name = "blenderui-paint"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "blenderui-sys"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "cmake",
 ]
 
 [[package]]
 name = "blenderui-table"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-paint",
 ]
 
 [[package]]
 name = "blenderui-tailwind"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "blenderui-vlist"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-paint",
 ]
 
 [[package]]
 name = "blenderui-web"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui",
  "blenderui-sys",
@@ -209,6 +217,15 @@ name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cf8baf1c55e62ffcace7a9f06f4bd9cd3f0c4beb022d3b367256b91b87513d98"
+
+[[package]]
+name = "miniz_oxide"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316"
+dependencies = [
+ "adler2",
+]
 
 [[package]]
 name = "ndk-context"
@@ -399,6 +416,12 @@ name = "unicode-ident"
 version = "1.0.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "unicode-linebreak"
+version = "0.1.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b09c83c3c29d37506a3e260c08c03743a6bb66a9cd432c6934ab501a190571f"
 
 [[package]]
 name = "unicode-segmentation"

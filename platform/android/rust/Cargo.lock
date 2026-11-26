@@ -10,7 +10,7 @@ checksum = "320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa"
 
 [[package]]
 name = "blenderui"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-macros",
  "blenderui-sys",
@@ -28,36 +28,36 @@ dependencies = [
 
 [[package]]
 name = "blenderui-macros"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-tailwind",
 ]
 
 [[package]]
 name = "blenderui-paint"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "blenderui-sys"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "cmake",
 ]
 
 [[package]]
 name = "blenderui-table"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-paint",
 ]
 
 [[package]]
 name = "blenderui-tailwind"
-version = "0.5.1"
+version = "0.6.0"
 
 [[package]]
 name = "blenderui-vlist"
-version = "0.5.1"
+version = "0.6.0"
 dependencies = [
  "blenderui-paint",
 ]
