@@ -13,7 +13,15 @@ Here's the story of BUI so far, in plain words: what each release gave you, and 
 
 ## Coming next
 
-These are on `main` and will ship in the next release; the details are under **Unreleased** in the changelog. Nothing here is on PyPI, crates.io or npm yet.
+Nothing is waiting on `main` yet. What lands after 0.6.0 shows up here first; the details are under **Unreleased** in the changelog.
+
+</Release>
+
+<Release id="0-6-0" date="26 Nov 2026" iso="2026-11-26">
+
+## In 0.6.0
+
+Released on 26 November 2026: a bigger step than any since 0.1.0. Blender's screen layout, animation, five new languages, a C# and a Ruby binding on their registries, GPU shaders of your own, screen readers, and a lot of CSS that now draws as browsers draw it. The details are under **0.6.0** in the changelog.
 
 ### Blender's widgets and screens
 
@@ -73,7 +81,7 @@ More ways to write your UI.
 - **D.** A DUB package with the whole C API, idiomatic wrappers and an HTML, CSS and RSX layer, on code.dlang.org: `dub add blenderui`. See [D](../../d/overview/).
 - **Go.** A cgo module with the C kit, and MyGo-style views: `ui.Column(c).Children(...)`, controls bound to your state, and a headless `Tester`. See [Go](../../go/overview/) and [MyGo-style views](../../go/mygo-syntax/).
 - **C#.** A first slice of a C# binding: every function of the C kit through generated interop, and `Node`, `Frame`, `Button`, `Label`, `Context` and `Window` on top, with a headless test suite and a hello example. See [C#](../../csharp/overview/).
-- **Ruby.** The `blenderui` gem, a C extension over the kit: nodes, layout managers, menus, canvas items, text areas, images, headless rendering to PNG, native windows that let other threads run, and `BUI::Builder` for interfaces made of blocks. It is not on RubyGems yet. See [Ruby](../../ruby/overview/).
+- **Ruby.** The `blenderui` gem, a C extension over the kit: nodes, layout managers, menus, canvas items, text areas, images, headless rendering to PNG, native windows that let other threads run, and `BUI::Builder` for interfaces made of blocks. Install it with `bundle add blenderui` or `gem install blenderui`. See [Ruby](../../ruby/overview/).
 - **Lua follows the kit.** Custom nodes get their callbacks (`on_event`, `on_frame`, `on_draw`, `on_free`), canvas items take images and effects, and areas split, join, dock and swap from Lua and D too.
 - **Rust conditionals.** An `Option` is an element: `None` draws nothing and `Some(x)` draws `x`, so `{ cond.then(|| <p>"hi"</p>) }` replaces an empty placeholder.
 - **Rust props as a struct.** `#[component] fn chat(ChatProps { title, .. }: ChatProps)` uses a `#[derive(Props)]` struct, optional props take an `Option` (`x={None}` leaves the prop out), and a missing required prop is reported on its tag (`<Card />`) instead of on the whole `rsx!`.

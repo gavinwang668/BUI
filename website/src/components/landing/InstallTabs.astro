@@ -13,7 +13,7 @@ const commands: { id: string; label: string; icon?: LangIconName; cmd: string; n
   { id: "npm", label: "npm", icon: "npm", cmd: "npm install @blender-ui/react react", note: "Node.js 18+ or Bun · prebuilt for Windows x64" },
   { id: "bun", label: "bun", icon: "bun", cmd: "bun add @blender-ui/react react", note: "Bun reads JSX directly: bun app.jsx" },
   { id: "svelte", label: "svelte", icon: "svelte", cmd: "npm install @blender-ui/svelte svelte", note: "Svelte 5 · Node.js 22.15+ or Bun · prebuilt for Windows x64" },
-  { id: "vue", label: "vue", icon: "vue", cmd: "npm install @blender-ui/vue vue", note: "Vue 3 · Node.js 22.15+ or Bun · on npm with the next release" },
+  { id: "vue", label: "vue", icon: "vue", cmd: "npm install @blender-ui/vue vue", note: "Vue 3 · Node.js 22.15+ or Bun" },
   {
     id: "cargo",
     label: "cargo",
@@ -29,8 +29,8 @@ const commands: { id: string; label: string; icon?: LangIconName; cmd: string; n
     cmd: `${clone} && cd BUI/bindings/go && go generate ./bui && go run ./examples/counter`,
     note: "Go 1.22+ with cgo, CMake and gcc or clang · runs the counter example; to use it in your own app, see the Go guide",
   },
-  { id: "dotnet", label: "dotnet", icon: "nuget", cmd: "dotnet add package BlenderUI", note: "C# · not on nuget.org yet: pack it from a clone and add the feed first (see the C# guide)" },
-  { id: "ruby", label: "ruby", icon: "ruby-gem", cmd: `${clone} && cd BUI/bindings/ruby && bundle install && rake compile`, note: "Ruby 3.1+, CMake and a C++20 compiler · builds from a clone: not on RubyGems yet" },
+  { id: "dotnet", label: "dotnet", icon: "nuget", cmd: "dotnet add package BlenderUI", note: "C# · .NET 8 or newer · the native kit ships in the package" },
+  { id: "ruby", label: "ruby", icon: "ruby-gem", cmd: "gem install blenderui", note: "Ruby 3.1+, CMake and a C++20 compiler · the gem builds the kit while it installs" },
   { id: "dub", label: "dub", icon: "dub", cmd: "dub add blenderui", note: "D with DUB, CMake and a C compiler · the first build builds the C kit; on code.dlang.org" },
   { id: "cmake", label: "cmake", icon: "cmake", cmd: `${clone} && cd BUI && cmake -S . -B build && cmake --build build`, note: "C, C++ and Dear ImGui, built from a clone of the repo" },
 ];

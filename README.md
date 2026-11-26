@@ -2053,8 +2053,9 @@ and on an NVIDIA GPU.
 | `blenderui` on crates.io                                                                  | Any platform with CMake and a C compiler                         | Rust 1.88+. `blenderui-imgui` (Dear ImGui) is on crates.io too.                         |
 | `@blender-ui/native`, `@blender-ui/react`, `@blender-ui/svelte`, `@blender-ui/vue` on npm | Windows x64, Linux x64 (glibc 2.35+), macOS arm64 and x64        | Node.js 18+ (22.15+ for Svelte and Vue) or Bun. Elsewhere, build the addon from source. |
 | `blenderui` on LuaRocks                                                                   | Linux, macOS (Windows untested)                                  | Lua 5.4; builds the kit from the release tag (CMake and a C and C++20 compiler).        |
-| Go (`bindings/go`), Ruby (`bindings/ruby`), D (`bindings/d`)                              | Windows, Linux (macOS for Ruby)                                  | From this repository for now; they build the kit with CMake.                            |
-| `BlenderUI` on NuGet                                                                      | Windows x64, Linux x64, macOS arm64 and x64                      | .NET 8+; the native kit ships in the package. Published from the next release.        |
+| `blenderui` on RubyGems (`gem install blenderui`), `blenderui` on DUB (`dub add blenderui`) | Windows, Linux (macOS for Ruby)                                | They build the kit with CMake (a C and C++20 compiler).                                 |
+| Go (`bindings/go`)                                                                        | Windows, Linux                                                   | From this repository for now; it builds the kit with CMake.                             |
+| `BlenderUI` on NuGet                                                                      | Windows x64, Linux x64, macOS arm64 and x64                      | .NET 8+; the native kit ships in the package.                                          |
 | C and C++ (CMake)                                                                         | Windows, Linux, macOS                                            | CMake 3.20+, a C11 and C++20 compiler.                                                  |
 
 ## 37. Environment variables
