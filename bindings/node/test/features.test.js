@@ -19,6 +19,19 @@ test('media files in string literals and <video> are detected', () => {
   assert.strictEqual(pickRuntime(detect(js)).name, 'media')
 })
 
+test('the desktop shell is detected in the app\'s calls, not in the library\'s own code', () => {
+  // the library defines `notify (` and calls `this.native.notify(`: every bundle has both
+  const library = 'class App { async notify ({ title }) { return this.native.notify(String(title)) }' +
+    ' async createTray () {} addRecentDocument (p) { return this.native.addRecentDocument(p) } }' +
+    ' Window.prototype.setProgressBar = setProgressBar; function setProgressBar (p) {}'
+  assert.deepStrictEqual(names(library), [])
+  assert.strictEqual(pickRuntime(detect(library)).name, 'base')
+  for (const call of ['app.createTray({})', 'await app.notify({ title: "x" })', 'win.setProgressBar(0.5)', 'app.addRecentDocument(p)']) {
+    assert.deepStrictEqual(names(library + ';' + call), ['shell'], call)
+    assert.strictEqual(pickRuntime(detect(library + ';' + call)).name, 'full', call)
+  }
+})
+
 test('the GPU and the file browser need the full runtime', () => {
   assert.strictEqual(pickRuntime(new Set(['gpu'])).name, 'full') // explicit: a gpu option is in every bundle's library code
   assert.strictEqual(pickRuntime(new Set(['filebrowser'])).name, 'full')

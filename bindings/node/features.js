@@ -10,7 +10,9 @@
 //      string literals ("intro.mp4", 'logo.webp') and file dialogs. Paths built
 //      at run time ("img." + ext) can't be seen, and the GPU renderer is
 //      never detected (every bundle's library code names its option): list
-//      those features explicitly.
+//      those features explicitly. A marker written ".name" is a call through an
+//      object (`app.notify(`): the library's own definition (`notify (`) and its
+//      calls on its `native` handle are in every bundle and do not count.
 // SPDX-License-Identifier: GPL-2.0-or-later
 'use strict'
 const fs = require('node:fs')
@@ -40,7 +42,10 @@ function detect (js, t = table()) {
       if (new RegExp(`["'\`]${escape(tag)}["'\`]`).test(js)) found.set(f.name, `<${tag}>`)
     }
     for (const m of f.markers || []) {
-      if (new RegExp(`\\b${escape(m)}\\b\\s*[:(=]`).test(js)) found.set(f.name, `${m}`)
+      const re = m.startsWith('.')
+        ? new RegExp(`(?<!\\bnative)${escape(m)}\\b\\s*\\(`)
+        : new RegExp(`\\b${escape(m)}\\b\\s*[:(=]`)
+      if (re.test(js)) found.set(f.name, `${m}`)
     }
   }
   // what a feature needs comes with it
