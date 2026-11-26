@@ -1,0 +1,110 @@
+# Extra checks that never hold back a release: release.yml runs ci.yml before it publishes, but not this
+# file. A job here that is red tells you something to fix; it does not stop a tag from publishing. Once a
+# job has been green for a while, move it into ci.yml to make it a gate.
+#
+#   js       the JavaScript packages' own tests (native, react, svelte, vue), which ci.yml does not run
+#   website  the documentation website builds, and none of its internal links is broken
+#   lint     cargo fmt and clippy (the warnings are counted in the run's summary, not failed on)
+#   rust-extras  the demos and the addons (charts, panels) still compile
+
+name: extras
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: extras-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  js:
+    name: JavaScript packages (npm test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - uses: oven-sh/setup-bun@v2 # the runtime tests build a Bun executable too (they skip it when Bun is missing)
+        continue-on-error: true
+      - uses: dtolnay/rust-toolchain@stable
+      - name: X11 headers and a virtual display
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev xvfb
+      - name: Install workspace dependencies
+        working-directory: bindings
+        run: npm ci
+      - name: Build the Node.js addon
+        working-directory: bindings/node
+        run: npm run build
+      - name: Test every package
+        working-directory: bindings
+        run: xvfb-run -a npm test
+
+  website:
+    name: website builds, links resolve
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build
+        working-directory: website
+        run: |
+          bun install
+          bun run build
+      - name: Internal links
+        run: python tools/check_site_links.py
+
+  lint:
+    name: cargo fmt and clippy
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    defaults:
+      run:
+        working-directory: bindings/rust
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: X11 headers
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev
+      - name: cargo fmt
+        run: cargo fmt --all -- --check
+      - name: cargo clippy (counted, not failed on)
+        continue-on-error: true
+        run: |
+          cargo clippy --workspace --all-targets 2>&1 | tee "$RUNNER_TEMP/clippy.log"
+          {
+            echo "### clippy"
+            echo
+            echo "warnings: $(grep -c '^warning' "$RUNNER_TEMP/clippy.log" || true)"
+            echo "errors: $(grep -c '^error' "$RUNNER_TEMP/clippy.log" || true)"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  rust-extras:
+    name: demos and addons compile
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        dir: [demos, addons/bui-charts, addons/bui-panels]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - name: X11 headers
+        run: sudo apt-get update && sudo apt-get install -y libx11-dev
+      - name: cargo check
+        working-directory: ${{ matrix.dir }}
+        run: cargo check

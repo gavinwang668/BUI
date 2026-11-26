@@ -215,6 +215,19 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y libx11-dev
       - name: Build and run the D test suite
         run: dub run --config=test --compiler=ldc2
+      # code.dlang.org serves the repository by its root dub.json, which hands over to bindings/d: a project
+      # that depends on the root (as `dub add blenderui` makes it) must resolve it, build the kit and link.
+      - name: A project that depends on the repository's root recipe
+        shell: bash
+        working-directory: .
+        run: |
+          mkdir -p .ci-consumer/source
+          cat > .ci-consumer/dub.json <<'EOF'
+          { "name": "consumer", "targetType": "executable", "dependencies": { "blenderui": { "path": ".." } } }
+          EOF
+          printf 'import bui;\nvoid main() { auto r = BUI_KIT_VERSION_MAJOR; }\n' > .ci-consumer/source/app.d
+          cd .ci-consumer
+          dub build --compiler=ldc2
 
   # bindings/go builds the C kit with cgo's compiler (gcc; MinGW on Windows) through
   # `go generate`, then runs the tests of both packages and the examples'. They are
