@@ -212,7 +212,8 @@ mod tests {
         let dir = scratch("broken");
         std::fs::write(dir.join("go.mod"), [0xff, 0xfe]).unwrap();
         assert!(GoApp {}.adopt(&dir, "demo").is_err());
-        assert!(GoApp {}.adopt(&scratch("none"), "demo").unwrap().is_empty());
+        std::fs::remove_file(dir.join("go.mod")).unwrap();
+        assert!(GoApp {}.adopt(&dir, "demo").unwrap().is_empty(), "no go.mod, nothing adopted");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
