@@ -1,0 +1,149 @@
+---
+title: GPU backends and adapters
+sidebarLabel: GPU backends
+description: Pick Direct3D 11 or 12 on Windows, choose which GPU of a hybrid laptop draws, run on WARP in CI, and turn on the debug layer. One page for every graphics switch.
+section: Concepts
+order: 31
+languages: ["rust", "c", "javascript"]
+sources: ["CHANGELOG.md", "gpu/include/GPU_raster.h", "gpu/intern/gpu_raster.c", "gpu/intern/gpu_device.c", "gpu/intern/gpu_d3d11.c", "gpu/intern/gpu_d3d12.c", "gpu/intern/gpu_dx.c", "gpu/intern/gpu_gl.c", "bindings/rust/blenderui/src/window.rs", "bindings/node/cli.js", "bindings/node/windows.js"]
+---
+
+[CPU and GPU rendering](../rendering/) says when to use the GPU. This page is about **which GPU, and which graphics API**, once you have turned it on. It matters most on Windows, where BUI can draw through Direct3D 11 or Direct3D 12 and a laptop often has two graphics cards.
+
+Everything here changes how the frame is *produced*, never what it looks like: all of the renderers draw the same pixels.
+
+## The short version
+
+| You want | Do this |
+| --- | --- |
+| The GPU renderer at all | `BUI_GPU=1` (see [rendering](../rendering/#turn-on-the-gpu)) |
+| Direct3D 12 instead of 11 | `BUI_GPU_API=d3d12` |
+| The discrete GPU of a hybrid laptop | `BUI_GPU_ADAPTER=high-performance` |
+| To see why the GPU didn't start | `BUI_GPU_DEBUG=1` |
+| A GPU in a VM or CI | `BUI_GPU_WARP=1` |
+| Direct3D's debug layer | `BUI_GPU_DEBUG=2` |
+
+Every row works for every language, because they are environment variables read by the C kit. Rust and C can also choose in code, and the `bui` command can bake a choice into an executable.
+
+## Direct3D 11 or 12 (Windows)
+
+**Direct3D 11 is the default**, and for most apps it is the right one: it costs the least CPU per frame. **Direct3D 12 is opt-in.**
+
+Both backends share one core (`gpu/intern/gpu_device.c`) and fill the same table of 15 device operations, and the frames they draw are byte-identical. Direct3D 12 costs about 0.4 to 1 ms more CPU per presented frame on the development machine, so choose it when:
+
+- your app embeds BUI next to other Direct3D 12 code, or
+- you profile it with a tool that wants Direct3D 12, such as NVIDIA Nsight's GPU Trace.
+
+A device that can't start on Direct3D 12 starts on Direct3D 11, so asking for it is safe on older machines. On Linux there is only OpenGL 3.3 and the choice is ignored.
+
+The order BUI follows, first match wins:
+
+1. The `BUI_GPU_API` environment variable (`d3d11` or `d3d12`; anything else is ignored).
+2. The app's choice in code.
+3. The default baked into the executable by the `bui` command.
+4. Direct3D 11.
+
+<LangTabs>
+<Tab label="Rust">
+
+```rust
+use blenderui::{Application, GpuApi};
+
+Application::new()
+    .gpu(true)
+    .gpu_api(GpuApi::D3d12)   // falls back to D3d11 where it can't start
+    .run(|cx| { /* ... */ });
+```
+
+</Tab>
+<Tab label="C">
+
+```c
+BUI_gpu_set_default(1);
+BUI_gpu_set_api(BUI_GPU_API_D3D12);   /* for devices created from now on */
+
+/* After a window exists: what its device really runs on. */
+BuiGpuApi api = BUI_raster_gpu_api(raster);   /* D3D11, D3D12, OPENGL or DEFAULT (CPU) */
+```
+
+</Tab>
+<Tab label="JavaScript">
+
+There is no option in the JavaScript API yet. Use the variable, or bake the choice into an executable:
+
+```sh
+BUI_GPU=1 BUI_GPU_API=d3d12 bun app.jsx
+bui build app.jsx --gpu d3d12
+```
+
+</Tab>
+</LangTabs>
+
+### Choosing in a built executable
+
+`bui build app.jsx --gpu d3d11|d3d12` stores the Direct3D the executable starts with. `bui package app.exe --gpu d3d12` does the same for any BUI executable, Rust and C apps included. The variable still wins when the app runs, so users and testers can switch back without a rebuild.
+
+Under the hood the program carries a fixed-size marker (`BUIGPUAPI=d3d11`) that the command patches in place; a program without the GPU renderer says so instead of silently ignoring the flag.
+
+## Which GPU draws (hybrid laptops)
+
+On a laptop with an integrated GPU and a discrete one, Windows hands Direct3D **the display's adapter**, which is usually the integrated GPU. That is deliberate: it uses less power and needs no copy of each frame between the two chips. It also means NVIDIA Nsight and other vendor profilers see *nothing*, because the work isn't on their GPU.
+
+Ask for the discrete one when you profile, or when the app is heavy enough to be worth the power:
+
+<LangTabs>
+<Tab label="Rust">
+
+```rust
+use blenderui::{Application, GpuAdapter};
+
+Application::new()
+    .gpu(true)
+    .gpu_adapter(GpuAdapter::HighPerformance)
+    .run(|cx| { /* ... */ });
+```
+
+</Tab>
+<Tab label="C">
+
+```c
+BUI_gpu_set_adapter(BUI_GPU_ADAPTER_HIGH_PERFORMANCE);
+BuiGpuAdapter now = BUI_gpu_adapter();   /* what new devices start on */
+```
+
+</Tab>
+<Tab label="Any language">
+
+```powershell
+$env:BUI_GPU = "1"
+$env:BUI_GPU_ADAPTER = "high-performance"
+python my_app.py
+```
+
+</Tab>
+</LangTabs>
+
+`high-performance` asks DXGI for its high-performance adapter (`EnumAdapterByGpuPreference`). `default` is the display's. The variable beats the call in code; other values are ignored, and `BUI_GPU_DEBUG=1` says so.
+
+## When something doesn't start
+
+Run with `BUI_GPU_DEBUG=1`. BUI prints to stderr which step failed (and on Linux, what it runs on), then draws on the CPU instead. Nothing crashes: where no device can start, the app quietly stays on the software renderer.
+
+`BUI_GPU_DEBUG=2` also turns on the **Direct3D 12 debug layer**. It prints the layer's warnings and errors and, at exit, any objects that were leaked.
+
+## Running without a graphics card
+
+`BUI_GPU_WARP=1` creates the Direct3D device (11 or 12) on **WARP**, Windows' software rasterizer. It is slow, but it makes the GPU path testable in a virtual machine or on a CI runner.
+
+On Linux, headless OpenGL picks its EGL platform with `BUI_GPU_EGL=surfaceless` or `BUI_GPU_EGL=default`.
+
+## Testing limits
+
+`BUI_GPU_MAX_TEXTURE=512` lowers the largest texture side the renderer gives one image, so big images are tiled the way they are on a small device. The GPU parity test uses 512.
+
+## See also
+
+- [CPU and GPU rendering](../rendering/): when the GPU pays off and how the two renderers work.
+- [Environment variables](../../reference/environment-variables/): every `BUI_GPU_*` variable in one table.
+- [Profiling](../../performance/profiling/): measuring a frame with `BUI_PROFILE=1`.
+- [Standalone executables](../../javascript/standalone-executables/): `bui build --gpu` and MSIX packages.

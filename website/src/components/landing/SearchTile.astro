@@ -74,6 +74,7 @@ const items = [
   .msearch-list :global(li) {
     padding: 3px 8px;
     border-radius: 3px;
+    cursor: default;
   }
   .msearch-list :global(li[hidden]) {
     display: none;
@@ -129,6 +130,13 @@ const items = [
         : `<li class="none">No match. Try “sh sm”, “shsm” or “subdivde”.</li>`;
     };
     input.addEventListener("input", render);
+    // As in Blender's menus, the row under the pointer becomes the highlighted one, and stays so when the pointer leaves.
+    list.addEventListener("mouseover", (e) => {
+      const li = (e.target as HTMLElement).closest("li");
+      if (!li || li.classList.contains("none") || li.classList.contains("first")) return;
+      list.querySelector("li.first")?.classList.remove("first");
+      li.classList.add("first");
+    });
     render();
   });
 </script>

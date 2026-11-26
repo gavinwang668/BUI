@@ -1,4 +1,5 @@
-import { TriangleLine } from "./zigzag"
+import { PageHead } from "../addon/page-head"
+import { PrevNext, linkCard } from "../addon/prev-next"
 import { Hatch, Section } from "./hatch"
 import { Bullets, Prose, Rich, Steps, Tex } from "./rich"
 import { bySlug, charts, imageOf, neighbours, sections, type ChartMeta } from "@/data/charts/registry"
@@ -6,7 +7,6 @@ import { loadDoc, loadGenerated, type Generated } from "@/data/charts/docs"
 import type { ChartDoc } from "@/data/charts/types"
 import { href } from "@/lib/href"
 
-const card = "group flex flex-col gap-1 bg-background p-5 transition-[background-color,color] duration-150 ease-out hover:bg-primary hover:text-white focus-visible:bg-primary focus-visible:text-white"
 
 export function staticPaths() {
   return charts.map((chart) => ({ params: { slug: chart.slug } }))
@@ -44,21 +44,24 @@ export default function ChartPage({ meta, doc, generated, stage, examples, media
 
   return (
     <article className="charts-doc">
-      <header className="border-b border-border px-4 pb-8 pt-8 sm:px-8 md:pt-12">
-        <p className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-(--muted)">
-          <a href={href("charts/all")} className="hover:text-foreground">
-            Charts
-          </a>
-          <span className="mx-2">/</span>
-          {meta.group === "base" ? "Base" : meta.family}
-        </p>
-        <h1 className="text-4xl font-light uppercase tracking-tight text-balance md:text-6xl">{meta.name}</h1>
+      <PageHead
+        kicker={
+          <>
+            <a href={href("charts/all")} className="hover:text-foreground">
+              Charts
+            </a>
+            <span className="mx-2">/</span>
+            {meta.group === "base" ? "Base" : meta.family}
+          </>
+        }
+        muted
+        title={meta.name}
+      >
         <p className="mt-3 font-mono text-sm text-primary">
           &lt;{meta.tag} /&gt; <span className="text-(--muted)">· {meta.examples} examples</span>
         </p>
         {doc && <p className="mt-5 max-w-2xl text-lg text-pretty md:text-xl">{doc.tagline}</p>}
-        <TriangleLine className="mt-8 w-full max-w-md" height={14} peakWidth={20} strokeWidth={2} />
-      </header>
+      </PageHead>
 
       <div className="xl:grid xl:grid-cols-[minmax(0,1fr)_220px]">
         <div className="min-w-0 xl:border-r xl:border-border">
@@ -151,7 +154,7 @@ export default function ChartPage({ meta, doc, generated, stage, examples, media
                   const target = bySlug.get(related.slug)
                   if (!target) return null
                   return (
-                    <a key={related.slug} href={href(`charts/${related.slug}`)} className={card}>
+                    <a key={related.slug} href={href(`charts/${related.slug}`)} className={linkCard}>
                       <span className="text-sm font-semibold uppercase tracking-[0.08em]">{target.name}</span>
                       <span className="text-sm text-(--muted) transition-[color] duration-150 ease-out group-hover:text-white/90 group-focus-visible:text-white/90">
                         <Rich text={related.why} />
@@ -163,24 +166,11 @@ export default function ChartPage({ meta, doc, generated, stage, examples, media
             </Section>
           )}
 
-          <nav aria-label="Previous and next chart" className="grid grid-cols-2 gap-px border-b border-border bg-border">
-            {previous ? (
-              <a href={href(`charts/${previous.slug}`)} className={`${card} min-h-20 justify-center`}>
-                <span className="text-xs uppercase tracking-[0.14em] text-(--muted) group-hover:text-white/80">Previous</span>
-                <span className="font-medium">{previous.name}</span>
-              </a>
-            ) : (
-              <span className="bg-background" />
-            )}
-            {next ? (
-              <a href={href(`charts/${next.slug}`)} className={`${card} min-h-20 items-end justify-center text-right`}>
-                <span className="text-xs uppercase tracking-[0.14em] text-(--muted) group-hover:text-white/80">Next</span>
-                <span className="font-medium">{next.name}</span>
-              </a>
-            ) : (
-              <span className="bg-background" />
-            )}
-          </nav>
+          <PrevNext
+            label="Previous and next chart"
+            previous={previous && { href: href(`charts/${previous.slug}`), label: previous.name }}
+            next={next && { href: href(`charts/${next.slug}`), label: next.name }}
+          />
           <div aria-hidden="true" className="hatch h-[45vh] min-h-48" />
         </div>
         {toc}

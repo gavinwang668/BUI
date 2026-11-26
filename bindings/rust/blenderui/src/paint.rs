@@ -288,6 +288,10 @@ enum Kind {
     Effect(Box<EffectItem>),
     /// A GPU pass into a render target (see [`Painter::effect_to`]): not drawn into the canvas.
     Pass(Box<PassItem>),
+    /// CSS `box-shadow` (an outer one): the coords are the shadow's box, then the box casting it (the
+    /// shadow shows only outside that); `radius` is the shadow's corner, `cast_radius` the caster's,
+    /// `sigma` the blur's (a Gaussian; 0 a hard edge).
+    Shadow { radius: f32, cast_radius: f32, sigma: f32 },
 }
 
 /// What [`Painter::effect_to`] records: the render target, the effect (0: a fill), its textures and floats.
@@ -399,6 +403,9 @@ pub struct Painter {
     gpu: bool,
     /// The text selection to highlight (set before each paint; None: nothing is selected).
     pub(crate) sel: Option<crate::selection::SelPaint>,
+    /// Device pixels per logical one of what this paints (0 before a frame sets it: 1), so that
+    /// clips cut along device rows ([`rounded_strips`]).
+    scale: f32,
 }
 
 impl Painter {
@@ -446,6 +453,11 @@ impl Painter {
         if let Kind::Text { start, size, .. } = kind {
             let len = self.text[*start as usize..].iter().position(|&b| b == 0).unwrap_or(0);
             return Some([c[0], c[1], c[0] + len as f32 * size, c[1] + size * 1.5]);
+        }
+        if let (Kind::Shadow { sigma, .. }, [x0, y0, x1, y1, ..]) = (kind, c) {
+            // the shadow's box (the caster's is under it) as far as the blur reaches
+            let g = 3.0 * sigma;
+            return Some([x0.min(*x1) - g, y0.min(*y1) - g, x0.max(*x1) + g, y0.max(*y1) + g]);
         }
         let (mut x0, mut y0, mut x1, mut y1) = (c[0], c[1], c[0], c[1]);
         for xy in c.as_chunks::<2>().0 {
@@ -534,6 +546,11 @@ impl Painter {
                     *width *= mean;
                 }
                 Kind::Oval { width, .. } | Kind::Line { width } => *width *= mean,
+                Kind::Shadow { radius, cast_radius, sigma } => {
+                    *radius *= sx.min(sy);
+                    *cast_radius *= sx.min(sy);
+                    *sigma *= mean;
+                }
                 // anchored at its top left: the size follows the height
                 Kind::Text { size, .. } => *size *= sy,
                 _ => {}
@@ -572,6 +589,8 @@ impl Painter {
                 Kind::Line { width } | Kind::Oval { width, .. } | Kind::Rect { width, .. } if width > 0.0 => {
                     width * 0.5 + 1.0
                 }
+                // a Gaussian's reach
+                Kind::Shadow { sigma, .. } => 3.0 * sigma + 1.0,
                 _ => 0.0,
             };
             for p in xy.as_chunks::<2>().0 {
@@ -633,6 +652,20 @@ impl Painter {
         self.push(Kind::Rect { radius: radius.clamp(0.0, max_r.max(0.0)), outline: border,
                                width: border_width },
                   Self::corners(bounds), fill);
+    }
+
+    /// CSS `box-shadow` (an outer one): the rounded box `shadow` (corner `radius`) blurred by a
+    /// Gaussian of `sigma`, in `color`, showing only outside the rounded box `cast` (corner
+    /// `cast_radius`) that casts it.
+    fn shadow(&mut self, (shadow, radius): (Bounds<f32>, f32), (cast, cast_radius): (Bounds<f32>, f32), sigma: f32,
+              color: Rgba) {
+        if color.is_transparent() || shadow.size.width <= 0.0 || shadow.size.height <= 0.0 {
+            return;
+        }
+        let corners = |b: Bounds<f32>| [b.origin.x, b.origin.y, b.origin.x + b.size.width, b.origin.y + b.size.height];
+        let coords: Vec<f32> = corners(shadow).into_iter().chain(corners(cast)).collect();
+        self.push(Kind::Shadow { radius: radius.max(0.0), cast_radius: cast_radius.max(0.0), sigma: sigma.max(0.0) },
+                  Coords::Heap(coords), color);
     }
 
     /// An ellipse inscribed in `bounds`.
@@ -826,6 +859,13 @@ impl Painter {
                 ci.width = (width * scale).max(1.0);
             }
             Kind::Polygon => ci.type_ = sys::BK_ITEM_POLYGON,
+            Kind::Shadow { radius, cast_radius, sigma } => {
+                ci.type_ = sys::BK_ITEM_SHADOW;
+                ci.radius = radius * scale;
+                ci.size = cast_radius * scale;
+                ci.width = sigma * scale;
+                ci.no_hit = 1;
+            }
             Kind::Arc { start, extent } => {
                 ci.type_ = sys::BK_ITEM_ARC;
                 ci.start = *start;
@@ -1006,6 +1046,9 @@ impl Painter {
                 Kind::Oval { outline, width } => (1u8, outline.to_array().map(f32::to_bits), width.to_bits()).hash(h),
                 Kind::Line { width } => (2u8, width.to_bits()).hash(h),
                 Kind::Polygon => 3u8.hash(h),
+                Kind::Shadow { radius, cast_radius, sigma } => {
+                    (11u8, radius.to_bits(), cast_radius.to_bits(), sigma.to_bits()).hash(h)
+                }
                 Kind::Arc { start, extent } => (4u8, start.to_bits(), extent.to_bits()).hash(h),
                 Kind::Text { start, size, flags } => {
                     let t = &self.text[*start as usize..];
@@ -1053,10 +1096,41 @@ pub(crate) fn border_widths(c: &Computed, w: f32) -> [f32; 4] {
     [lp(b.top, w), lp(b.right, w), lp(b.bottom, w), lp(b.left, w)]
 }
 
+/// The box's largest corner radius, at most half its shorter side: one radius for what draws a
+/// single one (shadows, outlines, layers' masks).
 fn radius_px(c: &Computed, b: Bounds<f32>, vp: (f32, f32)) -> f32 {
+    corner_radii(c, b, vp).into_iter().fold(0.0, f32::max).min(b.size.width.min(b.size.height) / 2.0)
+}
+
+/// The corner radii of box `b` (top-left, top-right, bottom-right, bottom-left), shrunk together
+/// where two on one side would overlap (CSS Backgrounds 3 §5.5).
+fn corner_radii(c: &Computed, b: Bounds<f32>, vp: (f32, f32)) -> [f32; 4] {
+    if c.radius.iter().all(|r| *r == crate::geometry::Length::Px(0.0)) {
+        return [0.0; 4];
+    }
     let u = c.units(vp);
-    let m = b.size.width.min(b.size.height);
-    c.radius.iter().map(|r| r.resolve(&u, m)).fold(0.0, f32::max).min(m / 2.0)
+    let (w, h) = (b.size.width, b.size.height);
+    let r: [f32; 4] = std::array::from_fn(|k| c.radius[k].resolve(&u, w.min(h)).max(0.0));
+    let f = [w / (r[0] + r[1]), h / (r[1] + r[2]), w / (r[2] + r[3]), h / (r[3] + r[0])]
+        .into_iter()
+        .filter(|f| f.is_finite())
+        .fold(1.0f32, f32::min)
+        .max(0.0);
+    r.map(|v| v * f)
+}
+
+/// Whether all four radii are one (the kit's rounded box draws those).
+fn one_radius(r: &[f32; 4]) -> bool {
+    r.iter().all(|v| (v - r[0]).abs() < 0.01)
+}
+
+/// The radii of box `b`'s corners on a box `d` inside it on every side (a border, padding or
+/// content box): each smaller by how far in it is, never below 0.
+fn radii_inside(r: [f32; 4], b: Bounds<f32>, d: Bounds<f32>) -> [f32; 4] {
+    let (l, t) = (d.origin.x - b.origin.x, d.origin.y - b.origin.y);
+    let rt = b.origin.x + b.size.width - d.origin.x - d.size.width;
+    let bm = b.origin.y + b.size.height - d.origin.y - d.size.height;
+    [(r[0] - l.max(t)).max(0.0), (r[1] - rt.max(t)).max(0.0), (r[2] - rt.max(bm)).max(0.0), (r[3] - l.max(bm)).max(0.0)]
 }
 
 /// Paint every box of `frame`, in stacking order. `scale`: device pixels
@@ -1075,6 +1149,7 @@ pub(crate) fn paint_frame(frame: &Frame, styles: &StyleStore, tc: &mut TextCache
 pub(crate) fn snapshot(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, keep: &dyn Fn(usize) -> bool,
                        area: Bounds<f32>, vp: (f32, f32), scale: f32, app: &crate::window::App) -> Option<Arc<Image>> {
     let mut p = Painter::new();
+    p.scale = scale;
     with_scratch(|s| {
         let PaintScratch { order, mats, .. } = s;
         order.clear();
@@ -1108,6 +1183,7 @@ pub(crate) fn snapshot(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, k
 fn paint_frame_with(s: &mut PaintScratch, frame: &Frame, styles: &StyleStore, tc: &mut TextCache, p: &mut Painter,
                     vp: (f32, f32), scale: f32, app: &crate::window::App) {
     let PaintScratch { order, mats, done, tour, subs } = s;
+    p.scale = scale;
     order.clear();
     match frame.order_modified(styles) {
         Some(o) => order.extend(o),
@@ -1558,7 +1634,8 @@ fn paint_list(cx: &mut LayerCx, list: &[usize], p: &mut Painter, root: Option<us
 /// How far a box paints past its bounds: its outline, shadows and border image.
 fn paint_reach(c: &Computed) -> f32 {
     let outline = c.outline.0 + c.outline.2.max(0.0);
-    let shadows = c.shadows.iter().filter(|s| !s.inset).map(|s| s.x.abs().max(s.y.abs()) + s.blur + s.spread.max(0.0));
+    // a blur is a Gaussian of half its radius: it reaches three of those (see `Painter::shadow`)
+    let shadows = c.shadows.iter().filter(|s| !s.inset).map(|s| s.x.abs().max(s.y.abs()) + 1.5 * s.blur + s.spread.max(0.0));
     let image = c.effects.as_ref().and_then(|e| e.border_image.as_ref()).into_iter().flat_map(|bi| bi.outset).filter_map(|o| match o {
         Side::Len(Length::Px(v)) => Some(v),
         _ => None,
@@ -1585,8 +1662,8 @@ fn spill(n: &BoxNode, c: &Computed) -> Option<(f32, f32)> {
         Content::Element | Content::Replaced(_) if n.taffy.is_some() && n.marker.is_none() => {
             Some((paint_reach(c), paint_reach(c)))
         }
-        Content::Word { .. } if c.text_shadow.is_none() => Some((c.font_size, c.font_size + decoration_reach(c))),
-        Content::Text(t) if (n.taffy.is_some() || n.folded) && c.text_shadow.is_none() => {
+        Content::Word { .. } if c.text_shadow.is_empty() => Some((c.font_size, c.font_size + decoration_reach(c))),
+        Content::Text(t) if (n.taffy.is_some() || n.folded) && c.text_shadow.is_empty() => {
             // each char advances by its width and the letter spacing (paint_text_line)
             let bytes = t.len() as f32 + 1.0;
             Some((bytes * (c.font_size + c.letter_spacing.abs()), bytes * c.line_px().max(c.font_size) + decoration_reach(c)))
@@ -1706,6 +1783,7 @@ fn paint_layer_inner(cx: &mut LayerCx, root: usize, list: &[usize], p: &mut Pain
     let rel_opacity = (n.opacity / base.max(1e-6)).min(1.0);
     // the content, painted at full opacity relative to the root
     let mut sub = Painter::new();
+    sub.scale = cx.scale;
     paint_list(cx, list, &mut sub, Some(root), n.opacity);
     inside.append(&mut sub.widgets);
     // the clip the layer is under is applied when its image is drawn: its
@@ -2127,16 +2205,7 @@ fn redundant_background(frame: &Frame, styles: &StyleStore, n: &BoxNode) -> bool
 fn paint_inline_boxes(frame: &Frame, styles: &StyleStore, i: usize, p: &mut Painter) {
     let n = &frame.nodes[i];
     let b = n.bounds;
-    let mut chain: smallvec::SmallVec<[usize; 4]> = smallvec::SmallVec::new();
-    let mut o = Some(n.owner);
-    while let Some(k) = o.filter(|&k| k < frame.nodes.len()) {
-        let m = &frame.nodes[k];
-        if m.taffy.is_some() || !matches!(m.content, Content::Element) || styles[m.style].display != DisplayKind::Inline {
-            break;
-        }
-        chain.push(k);
-        o = m.parent;
-    }
+    let chain = inline_boxes(frame, styles, i);
     // the item's baseline: where its own style's text sits in its box
     let c = &styles[n.style];
     let base = text::baseline(b.origin.y, b.size.height, c.font_size, c.font_id);
@@ -2212,10 +2281,15 @@ fn run_gap<'f>(frame: &'f Frame, styles: &StyleStore, tc: &mut TextCache, i: usi
     let looks = n.style == m.style
         || (c.font_size == d.font_size && text::flags(c) == text::flags(d) && c.color == d.color
             && c.underline == d.underline && c.line_through == d.line_through && c.overline == d.overline
-            && c.text_shadow.is_none() && d.text_shadow.is_none() && c.opacity == d.opacity);
+            && c.text_shadow.is_empty() && d.text_shadow.is_empty() && c.opacity == d.opacity);
     // (letter spacing paints per character, the same in a run: alike on both sides it joins)
     if !looks || (n.bounds.origin.y - m.bounds.origin.y).abs() > 0.01 || c.letter_spacing != d.letter_spacing
         || c.word_spacing != 0.0 || d.word_spacing != 0.0 {
+        return None;
+    }
+    // a word that paints a fragment of its inline box (a highlight) paints it after the run's first
+    // word drew the run: over the run's text, so it starts a run of its own
+    if inline_boxes(frame, styles, i).iter().any(|&b| paints_fragment(&styles[frame.nodes[b].style])) {
         return None;
     }
     let (prev, word) = (frame.text(k), frame.text(i));
@@ -2236,6 +2310,29 @@ fn run_gap<'f>(frame: &'f Frame, styles: &StyleStore, tc: &mut TextCache, i: usi
     }
 }
 
+/// The inline boxes line item `i` is in, innermost first (up to the first that isn't one).
+fn inline_boxes(frame: &Frame, styles: &StyleStore, i: usize) -> smallvec::SmallVec<[usize; 4]> {
+    let mut chain = smallvec::SmallVec::new();
+    let mut o = Some(frame.nodes[i].owner);
+    while let Some(k) = o.filter(|&k| k < frame.nodes.len()) {
+        let m = &frame.nodes[k];
+        if m.taffy.is_some() || !matches!(m.content, Content::Element) || styles[m.style].display != DisplayKind::Inline {
+            break;
+        }
+        chain.push(k);
+        o = m.parent;
+    }
+    chain
+}
+
+/// Whether an inline box paints a fragment under its words: a background or an image, borders, a
+/// shadow or an outline (see [`paint_inline_boxes`]).
+fn paints_fragment(c: &Computed) -> bool {
+    !c.background.is_transparent() || c.gradient.is_some() || c.images.is_some() || !c.shadows.is_empty()
+        || c.outline.0 > 0.0
+        || (0..4).any(|k| !c.border_color[k].is_transparent() && border_widths(c, 0.0)[k] > 0.0)
+}
+
 /// The last word box of the run word box `i` starts (`i` itself when none continues it).
 fn run_after(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize) -> usize {
     let mut j = i;
@@ -2247,6 +2344,18 @@ fn run_after(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize) -
 
 fn paint_node(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, p: &mut Painter,
               vp: (f32, f32), app: &crate::window::App) {
+    let n = &frame.nodes[i];
+    // under a box whose `overflow` rounds its corners: what this paints there is cut to them after
+    let rounded = (n.round != crate::layout::NONE).then_some((n.round as usize, p.items.len()));
+    paint_node_items(frame, styles, tc, i, p, vp, app);
+    if let Some((round, from)) = rounded {
+        clip_to_rounded(p, from, frame, styles, round, vp);
+    }
+}
+
+/// What box `i` paints (see [`paint_node`]).
+fn paint_node_items(frame: &Frame, styles: &StyleStore, tc: &mut TextCache, i: usize, p: &mut Painter,
+                    vp: (f32, f32), app: &crate::window::App) {
     let n = &frame.nodes[i];
     let c = &styles[n.style];
     p.through = !c.pointer_events;
@@ -2488,19 +2597,15 @@ fn paint_text_line_as(p: &mut Painter, tc: &mut TextCache, c: &Computed, s: &str
     let s: std::borrow::Cow<str> = if c.small_caps { s.to_uppercase().into() } else { s.into() };
     let size_draw = if c.small_caps { size * 0.8 } else { size };
     let top = text::item_top(base, size_draw);
-    if let Some(sh) = c.text_shadow {
-        p.styled_text(x + sh.x, top + sh.y, &s, size_draw, flags, sh.color);
-    }
-    if c.letter_spacing != 0.0 {
-        let mut cx = x;
-        for ch in s.chars() {
-            let t = ch.to_string();
-            p.styled_text(cx, top, &t, size_draw, flags, c.color);
-            cx += tc.width(&t, size_draw, flags) + c.letter_spacing;
+    // shadows under the text, the first on top: each the run itself, moved (and blurred)
+    for sh in c.text_shadow.iter().rev() {
+        if sh.blur > 0.0 {
+            blurred_run(p, tc, (&s, c.letter_spacing), (x + sh.x, top + sh.y), (size_draw, flags), sh.color, sh.blur / 2.0);
+        } else {
+            text_run(p, tc, (&s, c.letter_spacing), (x + sh.x, top + sh.y), (size_draw, flags), sh.color);
         }
-    } else {
-        p.styled_text(x, top, &s, size_draw, flags, c.color);
     }
+    text_run(p, tc, (&s, c.letter_spacing), (x, top), (size_draw, flags), c.color);
     if c.underline || c.line_through || c.overline {
         let w = width.unwrap_or_else(|| tc.width(s.trim_end(), size_draw, flags));
         let thick = decoration_thickness(c);
@@ -2516,6 +2621,71 @@ fn paint_text_line_as(p: &mut Painter, tc: &mut TextCache, c: &Computed, s: &str
         if c.overline {
             decoration(p, c.decoration_style, x, text::ascent_top(base, size, c.font_id), w, thick, dc);
         }
+    }
+}
+
+/// A line of text `s` at (`x`, `top`): one run, or with `letter-spacing` each character spaced
+/// out (the text and each of its shadows place their glyphs alike).
+fn text_run(p: &mut Painter, tc: &mut TextCache, (s, spacing): (&str, f32), (x, top): (f32, f32), (size, flags): (f32, i32),
+            color: Rgba) {
+    if spacing == 0.0 {
+        p.styled_text(x, top, s, size, flags, color);
+        return;
+    }
+    let mut cx = x;
+    let mut buf = [0u8; 4];
+    for ch in s.chars() {
+        let t: &str = ch.encode_utf8(&mut buf);
+        p.styled_text(cx, top, t, size, flags, color);
+        cx += tc.width(t, size, flags) + spacing;
+    }
+}
+
+/// [`text_run`] blurred by a Gaussian of `sigma` (a `text-shadow`'s blur): rasterized once,
+/// blurred, and kept as an image by what it looks like (a line that moves draws the same one).
+#[allow(clippy::too_many_arguments)]
+fn blurred_run(p: &mut Painter, tc: &mut TextCache, run: (&str, f32), at: (f32, f32), font: (f32, i32), color: Rgba,
+               sigma: f32) {
+    use std::hash::{Hash, Hasher};
+    thread_local! {
+        static BLURRED: std::cell::RefCell<HashMap<u64, Arc<Image>>> = std::cell::RefCell::new(HashMap::new());
+    }
+    let mut sub = Painter::new();
+    let scale = if p.scale > 0.0 { p.scale } else { 1.0 };
+    sub.scale = scale;
+    text_run(&mut sub, tc, run, at, font, color);
+    let Some(ink) = sub.extent(tc) else { return };
+    // as far as the blur reaches
+    let g = 3.0 * sigma;
+    let area = rect(ink.origin.x - g, ink.origin.y - g, ink.size.width + 2.0 * g, ink.size.height + 2.0 * g);
+    let (x0, y0, w, h) = device_rect(area, scale);
+    if w == 0 || h == 0 || w > crate::effects::MAX_RASTER || h > crate::effects::MAX_RASTER {
+        return;
+    }
+    let placed = rect(x0 / scale, y0 / scale, w as f32 / scale, h as f32 / scale);
+    let key = {
+        let mut hh = key_hasher();
+        sub.content_hash(&mut hh, placed, placed.origin.x, placed.origin.y);
+        (sigma.to_bits(), scale.to_bits(), w, h).hash(&mut hh);
+        hh.finish()
+    };
+    let img = BLURRED.with(|m| m.borrow().get(&key).cloned()).or_else(|| {
+        let mut px = sub.rasterize_argb(scale, x0, y0, w, h)?;
+        crate::effects::blur_argb(&mut px, sigma * scale);
+        let img = Arc::new(Image::from_argb(&px)?);
+        BLURRED.with(|m| {
+            let mut m = m.borrow_mut();
+            if m.len() > 128 {
+                m.clear();
+            }
+            m.insert(key, img.clone());
+        });
+        Some(img)
+    });
+    if let Some(img) = img {
+        let snap = std::mem::replace(&mut p.snap, false);
+        p.image(placed, &img);
+        p.snap = snap;
     }
 }
 
@@ -2569,21 +2739,21 @@ fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_ba
         return;
     }
     let r = radius_px(c, b, vp);
-    // outer shadows, the first on top (CSS Backgrounds 6.1); an empty box's spread still shows
+    // each corner's own radius (`border-radius: 56px 56px 6px 6px`): drawn as one rounded box when
+    // they are one, else as a polygon
+    let radii = corner_radii(c, b, vp);
+    // outer shadows, the first on top (CSS Backgrounds 6.1); an empty box's spread still shows. Each
+    // is the border box moved and spread, blurred by a Gaussian of half the blur radius (7.2), and
+    // shows only outside the border box (7.1.1)
     for s in c.shadows.iter().rev().filter(|s| !s.inset) {
-        let steps = (s.blur / 2.0).ceil().clamp(1.0, 8.0) as usize;
-        for k in 0..steps {
-            let grow = s.spread + s.blur * (k as f32 + 1.0) / (steps as f32 + 1.0);
-            let a = s.color.a / steps as f32 * if s.blur > 0.0 { 1.0 } else { steps as f32 };
-            let (w, h) = (b.size.width + 2.0 * grow, b.size.height + 2.0 * grow);
-            if w <= 0.0 || h <= 0.0 {
-                continue;
-            }
-            let sb = rect(b.origin.x + s.x - grow, b.origin.y + s.y - grow, w, h);
-            // square corners stay square under spread; the blur rounds them
-            let corner = if r > 0.0 { (r + grow).max(0.0) } else { (grow - s.spread).max(0.0) };
-            p.quad(sb, corner, s.color.alpha(a), Rgba::TRANSPARENT, 0.0);
+        let (w, h) = (b.size.width + 2.0 * s.spread, b.size.height + 2.0 * s.spread);
+        if w <= 0.0 || h <= 0.0 {
+            continue;
         }
+        let sb = rect(b.origin.x + s.x - s.spread, b.origin.y + s.y - s.spread, w, h);
+        // square corners stay square under spread
+        let corner = if r > 0.0 { (r + s.spread).max(0.0) } else { 0.0 };
+        p.shadow((sb, corner), (b, r), s.blur / 2.0, s.color);
     }
     if b.size.width <= 0.0 && b.size.height <= 0.0 {
         return;
@@ -2598,6 +2768,7 @@ fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_ba
     let clip_box = edge_box(c, b, c.bg_clip, &bw);
     let clip_box = if local { clip_box.intersect(&edge_box(c, b, BoxEdge::Padding, &bw)) } else { clip_box };
     let clip_r = (r - (clip_box.origin.x - b.origin.x)).max(0.0);
+    let clip_radii = radii_inside(radii, b, clip_box);
     let origin_area = |st: &crate::style::ImageStyle| {
         if st.bg_fixed {
             return rect(0.0, 0.0, vp.0, vp.1);
@@ -2611,7 +2782,11 @@ fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_ba
         }
     };
     if !(skip_background && c.bg_clip == BoxEdge::Border) && !c.background.is_transparent() {
-        p.quad(clip_box, clip_r, c.background, Rgba::TRANSPARENT, 0.0);
+        if one_radius(&clip_radii) {
+            p.quad(clip_box, clip_r, c.background, Rgba::TRANSPARENT, 0.0);
+        } else {
+            p.polygon(&rounded_points(clip_box, clip_radii), c.background);
+        }
     }
     if let Some(g) = &c.gradient {
         // a gradient is an image with no natural size: sized, positioned and repeated as one
@@ -2632,7 +2807,7 @@ fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_ba
                 None => p.with_clip(t, |p| paint_gradient(p, g, t)),
             }
         });
-        if clip_r > 0.0 { with_rounded_clip(p, clip_box, clip_r, tiles) } else { tiles(p) }
+        if clip_radii.iter().any(|r| *r > 0.0) { with_rounded_clip(p, clip_box, clip_radii, tiles) } else { tiles(p) }
     }
     if let Some(st) = c.images.as_deref().filter(|st| st.bg_url.is_some()) {
         // `background-origin` positions the image, `-attachment: fixed` against the viewport
@@ -2660,7 +2835,7 @@ fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_ba
             }
         };
         if pad_r > 0.0 {
-            with_rounded_clip(p, pad, pad_r, paint);
+            with_rounded_clip(p, pad, radii_inside(radii, b, pad), paint);
         } else {
             p.with_clip(pad, paint);
         }
@@ -2679,6 +2854,8 @@ fn paint_box(n: &BoxNode, c: &Computed, p: &mut Painter, vp: (f32, f32), skip_ba
         let styles: [BorderStyle; 4] = std::array::from_fn(|k| c.border_style[k]);
         let widths: [f32; 4] = std::array::from_fn(|k| if visible.contains(&k) { bw[k] } else { 0.0 });
         paint_edges(p, b, widths, c.border_color, styles);
+    } else if uniform && !one_radius(&radii) {
+        stroke_rounded4(p, b, radii, bw[0], c.border_color[0]);
     } else if uniform {
         // the kit draws an outline inside its rectangle, as a border is inside the border box
         p.quad(b, r, Rgba::TRANSPARENT, c.border_color[0], bw[0]);
@@ -2719,23 +2896,47 @@ const CORNERVEC: [[f32; 2]; 9] = [
 /// edge's start), with each point's outward normal direction: 0 top,
 /// 1 right, 2 bottom, 3 left (corners split at their middle).
 fn rounded_path(b: Bounds<f32>, r: f32) -> Vec<(f32, f32, usize)> {
-    let (x0, y0, x1, y1) = (b.origin.x, b.origin.y, b.origin.x + b.size.width, b.origin.y + b.size.height);
     let r = r.min(b.size.width / 2.0).min(b.size.height / 2.0).max(0.0);
+    rounded_path4(b, [r; 4])
+}
+
+/// [`rounded_path`] with a radius a corner (top-left, top-right, bottom-right, bottom-left; each
+/// fits its sides already, see [`corner_radii`]).
+fn rounded_path4(b: Bounds<f32>, r: [f32; 4]) -> Vec<(f32, f32, usize)> {
+    let (x0, y0, x1, y1) = (b.origin.x, b.origin.y, b.origin.x + b.size.width, b.origin.y + b.size.height);
+    let [tl, tr, br, bl] = r.map(|v| v.max(0.0));
     let mut pts = Vec::with_capacity(40);
     // top-right, bottom-right, bottom-left, top-left corners, like Blender's round_box edges
     for (k, v) in CORNERVEC.iter().enumerate() {
-        pts.push((x1 - r + v[0] * r, y0 + r - (1.0 - v[1]) * r, if k < 5 { 0 } else { 1 }));
+        pts.push((x1 - tr + v[0] * tr, y0 + tr - (1.0 - v[1]) * tr, if k < 5 { 0 } else { 1 }));
     }
     for (k, v) in CORNERVEC.iter().enumerate() {
-        pts.push((x1 - r + (1.0 - v[1]) * r, y1 - r + v[0] * r, if k < 5 { 1 } else { 2 }));
+        pts.push((x1 - br + (1.0 - v[1]) * br, y1 - br + v[0] * br, if k < 5 { 1 } else { 2 }));
     }
     for (k, v) in CORNERVEC.iter().enumerate() {
-        pts.push((x0 + r - v[0] * r, y1 - r + (1.0 - v[1]) * r, if k < 5 { 2 } else { 3 }));
+        pts.push((x0 + bl - v[0] * bl, y1 - bl + (1.0 - v[1]) * bl, if k < 5 { 2 } else { 3 }));
     }
     for (k, v) in CORNERVEC.iter().enumerate() {
-        pts.push((x0 + r - (1.0 - v[1]) * r, y0 + r - v[0] * r, if k < 5 { 3 } else { 0 }));
+        pts.push((x0 + tl - (1.0 - v[1]) * tl, y0 + tl - v[0] * tl, if k < 5 { 3 } else { 0 }));
     }
     pts
+}
+
+/// The points of a rounded box's outline ([`rounded_path4`]).
+fn rounded_points(b: Bounds<f32>, r: [f32; 4]) -> Vec<(f32, f32)> {
+    rounded_path4(b, r).into_iter().map(|(x, y, _)| (x, y)).collect()
+}
+
+/// The ring between the rounded box `b` (radii `r`) and the one `w` inside it: one polygon of
+/// both outlines (even-odd fills the ring), joined where each starts.
+fn stroke_rounded4(p: &mut Painter, b: Bounds<f32>, r: [f32; 4], w: f32, color: Rgba) {
+    let inner = rect(b.origin.x + w, b.origin.y + w, (b.size.width - 2.0 * w).max(0.0), (b.size.height - 2.0 * w).max(0.0));
+    let mut pts = rounded_points(b, r);
+    let hole = rounded_points(inner, r.map(|v| (v - w).max(0.0)));
+    pts.push(pts[0]);
+    pts.extend(hole.iter().copied());
+    pts.push(hole[0]);
+    p.polygon(&pts, color);
 }
 
 /// Non-solid uniform borders on a rounded box: dashes and dots follow the
@@ -2833,11 +3034,15 @@ fn gradient_image(g: &crate::style::Gradient, w: f32, h: f32) -> Option<Arc<Imag
     if let Some(i) = GRADIENTS.with(|m| m.borrow().get(&key).cloned()) {
         return Some(i);
     }
-    let mut gp = Painter::new();
-    let area = rect(0.0, 0.0, iw as f32, ih as f32);
-    gp.with_clip(area, |gp| paint_gradient(gp, g, area));
-    let px = gp.rasterize(1.0, 0.0, 0.0, iw, ih)?;
-    let img = Arc::new(Image::from_argb(&px.to_argb())?);
+    let img = Arc::new(match g.shape {
+        crate::style::GradientShape::Radial(r) => Image::from_argb(&radial_pixels(g, &r, iw, ih))?,
+        crate::style::GradientShape::Linear { .. } => {
+            let mut gp = Painter::new();
+            let area = rect(0.0, 0.0, iw as f32, ih as f32);
+            gp.with_clip(area, |gp| paint_gradient(gp, g, area));
+            Image::from_argb(&gp.rasterize(1.0, 0.0, 0.0, iw, ih)?.to_argb())?
+        }
+    });
     GRADIENTS.with(|m| {
         let mut m = m.borrow_mut();
         if m.len() > 64 {
@@ -2846,6 +3051,47 @@ fn gradient_image(g: &crate::style::Gradient, w: f32, h: f32) -> Option<Arc<Imag
         m.insert(key, img.clone());
     });
     Some(img)
+}
+
+/// A radial gradient over a `w` x `h` box, a colour per pixel (premultiplied ARGB): its ending
+/// shape sized and placed in the box (CSS Images 3 §3.2.2), the stops along its x radius.
+fn radial_pixels(g: &crate::style::Gradient, r: &crate::style::Radial, w: usize, h: usize) -> crate::effects::Argb {
+    use crate::style::RadialSize;
+    let (bw, bh) = (w as f32, h as f32);
+    let (cx, cy) = (r.at[0].at(bw), r.at[1].at(bh));
+    // the distances to the sides, and the corner farthest / closest
+    let (dx_near, dx_far) = (cx.abs().min((bw - cx).abs()), cx.abs().max((bw - cx).abs()));
+    let (dy_near, dy_far) = (cy.abs().min((bh - cy).abs()), cy.abs().max((bh - cy).abs()));
+    let (rx, ry) = match r.size {
+        RadialSize::Radii(x, y) => (x.at(bw), y.at(bh)),
+        RadialSize::Extent { corner, farthest } => {
+            let (sx, sy) = if farthest { (dx_far, dy_far) } else { (dx_near, dy_near) };
+            match (r.circle, corner) {
+                (true, false) => if farthest { (sx.max(sy), sx.max(sy)) } else { (sx.min(sy), sx.min(sy)) },
+                (true, true) => {
+                    let d = sx.hypot(sy);
+                    (d, d)
+                }
+                (false, false) => (sx, sy),
+                // the side's aspect, grown until it passes through the corner (that is, by √2)
+                (false, true) => (sx * std::f32::consts::SQRT_2, sy * std::f32::consts::SQRT_2),
+            }
+        }
+    };
+    let (rx, ry) = (rx.max(1e-3), ry.max(1e-3));
+    let stops = g.resolved(rx);
+    let mut px = vec![0u32; w * h];
+    for (j, row) in px.chunks_exact_mut(w).enumerate() {
+        let dy = (j as f32 + 0.5 - cy) / ry;
+        for (i, out) in row.iter_mut().enumerate() {
+            let dx = (i as f32 + 0.5 - cx) / rx;
+            let c = gradient_at(&stops, dx.hypot(dy));
+            let a = c.a.clamp(0.0, 1.0);
+            let ch = |v: f32| (v.clamp(0.0, 1.0) * a * 255.0 + 0.5) as u32;
+            *out = ((a * 255.0 + 0.5) as u32) << 24 | ch(c.r) << 16 | ch(c.g) << 8 | ch(c.b);
+        }
+    }
+    crate::effects::Argb { w, h, px }
 }
 
 /// A sub-rectangle of an image (whole pixels), cached.
@@ -3070,34 +3316,198 @@ fn mix(a: Rgba, b: Rgba, t: f32) -> Rgba {
            a: a.a + (b.a - a.a) * t }
 }
 
-/// Runs `f` clipped to the rounded box `b` (radius `r`): one clip for the
-/// straight middle, and thin rows across the corners, each as wide as the
-/// rounded outline at its height (gradients have no rounded fill of their own).
-fn with_rounded_clip(p: &mut Painter, b: Bounds<f32>, r: f32, f: impl Fn(&mut Painter)) {
+/// Runs `f` clipped to the rounded box `b` (radii as [`corner_radii`]): what it paints is cut to
+/// the corners after ([`round_items`]; gradients have no rounded fill of their own).
+fn with_rounded_clip(p: &mut Painter, b: Bounds<f32>, r: [f32; 4], f: impl FnOnce(&mut Painter)) {
+    let from = p.items.len();
+    p.with_clip(b, f);
+    round_items(p, from, b, r);
+}
+
+/// The rounded box `b` (radii `r`) as rectangles that cover it once: rows one device pixel tall
+/// across the corners (`scale` device pixels per logical one), each as wide as the rounded outline
+/// at its height, and the straight middle. Each sits inside its device rows (a clip is cut to whole
+/// pixels, so neighbours never share one), and rows with the same edges in device pixels are one.
+fn rounded_strips(b: Bounds<f32>, r: [f32; 4], scale: f32) -> Vec<Bounds<f32>> {
+    let s = if scale > 0.0 { scale } else { 1.0 };
     let (x, y, w, h) = (b.origin.x, b.origin.y, b.size.width, b.size.height);
-    let r = r.min(w / 2.0).min(h / 2.0);
-    if r < 0.5 {
-        p.with_clip(b, |p| f(p));
+    let [tl, tr, br, bl] = r;
+    let (top, bottom) = (tl.max(tr), bl.max(br));
+    if (top * s < 0.5 && bottom * s < 0.5) || w <= 0.0 || h <= 0.0 {
+        return vec![b];
+    }
+    // whole device rows from `k0` to `k1` (exclusive), as a clip
+    let rows = |k0: i64, k1: i64, l: f32, rr: f32| rect(l, (k0 as f32 + 0.02) / s, rr - l, (k1 - k0) as f32 / s - 0.04 / s);
+    // how far in the outline is at depth `d` into a corner of radius `r`
+    let inset = |r: f32, d: f32| if d >= r { 0.0 } else { r - (r * r - (r - d.max(0.0)).powi(2)).max(0.0).sqrt() };
+    // the top band's device rows, the straight middle's, the bottom band's
+    let t0 = (y * s).floor() as i64;
+    let t1 = ((y + top) * s).ceil() as i64;
+    let b1 = ((y + h) * s).ceil() as i64;
+    let b0 = (((y + h - bottom) * s).floor() as i64).max(t1).min(b1);
+    let t1 = t1.min(b1);
+    let mut out: Vec<Bounds<f32>> = Vec::new();
+    // a run of rows with the same edges in device pixels: (first row, left, right)
+    let mut run: Option<(i64, i64, i64)> = None;
+    let mut corner_rows = |ks: std::ops::Range<i64>, out: &mut Vec<Bounds<f32>>| {
+        for k in ks.clone() {
+            let yc = (k as f32 + 0.5) / s;
+            let (dt, db) = (yc - y, y + h - yc);
+            let left = inset(tl, dt).max(inset(bl, db));
+            let right = inset(tr, dt).max(inset(br, db));
+            let (l, rr) = (((x + left) * s).floor() as i64, ((x + w - right) * s).ceil() as i64);
+            match run {
+                Some((_, pl, pr)) if pl == l && pr == rr => continue,
+                Some((k0, pl, pr)) if pr > pl => out.push(rows(k0, k, (pl as f32 + 0.02) / s, (pr as f32 - 0.02) / s)),
+                _ => {}
+            }
+            run = Some((k, l, rr));
+        }
+        if let Some((k0, pl, pr)) = run.take()
+            && pr > pl
+        {
+            out.push(rows(k0, ks.end, (pl as f32 + 0.02) / s, (pr as f32 - 0.02) / s));
+        }
+    };
+    corner_rows(t0..t1, &mut out);
+    if b0 > t1 {
+        out.push(rows(t1, b0, x, x + w));
+    }
+    corner_rows(b0..b1, &mut out);
+    out
+}
+
+/// The items from `from` on (what one box painted) cut to the rounded corners of box `round`, whose
+/// `overflow` clips them (its padding box: see [`round_items`]).
+fn clip_to_rounded(p: &mut Painter, from: usize, frame: &Frame, styles: &StyleStore, round: usize, vp: (f32, f32)) {
+    // items over a widget start a canvas of their own at their index: leave those as they are
+    if p.segments.last().is_some_and(|&seg| seg as usize > from) {
         return;
     }
-    p.with_clip(rect(x, y + r, w, h - 2.0 * r), |p| f(p));
-    const ROW: f32 = 0.5; // device rows at 2x
-    let rows = (r / ROW).ceil() as usize;
-    for k in 0..rows {
-        let y0 = k as f32 * ROW;
-        let rh = ROW.min(r - y0);
-        let dy = r - (y0 + rh / 2.0); // distance from the corner centres' line
-        let inset = r - (r * r - dy * dy).max(0.0).sqrt();
-        let rw = w - 2.0 * inset;
-        if rw <= 0.0 {
+    let n = &frame.nodes[round];
+    let c = &styles[n.style];
+    let b = n.bounds;
+    let bw = border_widths(c, b.size.width);
+    let pad = rect(b.origin.x + bw[3], b.origin.y + bw[0], (b.size.width - bw[1] - bw[3]).max(0.0),
+                   (b.size.height - bw[0] - bw[2]).max(0.0));
+    round_items(p, from, pad, radii_inside(corner_radii(c, b, vp), b, pad));
+}
+
+/// The items from `from` on cut to the rounded box `b` (radii `r`): only those reaching into a
+/// corner (the rest are inside it already, as far as their rectangular clip lets them). A filled
+/// box or a convex polygon (a gradient's band) becomes its part inside, anti-aliased (the rounded
+/// box is convex too); anything else is drawn once in each of [`rounded_strips`].
+fn round_items(p: &mut Painter, from: usize, b: Bounds<f32>, r: [f32; 4]) {
+    if r.iter().all(|v| *v * p.scale.max(1.0) < 0.5) || p.items.len() <= from {
+        return;
+    }
+    let (x0, y0, x1, y1) = (b.origin.x, b.origin.y, b.origin.x + b.size.width, b.origin.y + b.size.height);
+    let corners = [rect(x0, y0, r[0], r[0]), rect(x1 - r[1], y0, r[1], r[1]), rect(x1 - r[2], y1 - r[2], r[2], r[2]),
+                   rect(x0, y1 - r[3], r[3], r[3])];
+    let mut strips: Option<Vec<Bounds<f32>>> = None;
+    let mut outline: Option<Vec<(f32, f32)>> = None;
+    for it in p.items.split_off(from) {
+        let Some([ax0, ay0, ax1, ay1]) = p.item_area(&it.kind, &it.coords) else {
+            p.items.push(it);
+            continue;
+        };
+        let area = rect(ax0, ay0, ax1 - ax0, ay1 - ay0);
+        let area = it.clip.map_or(area, |c| c.intersect(&area));
+        let reaches = corners.iter().any(|k| {
+            let o = k.intersect(&area);
+            k.size.width > 0.0 && o.size.width > 0.0 && o.size.height > 0.0
+        });
+        if !reaches {
+            p.items.push(it);
             continue;
         }
-        p.with_clip(rect(x + inset, y + y0, rw, rh), |p| f(p));
-        p.with_clip(rect(x + inset, y + h - y0 - rh, rw, rh), |p| f(p));
+        // its shape, when it is a convex one filled
+        let shape: Option<Vec<(f32, f32)>> = match (&it.kind, it.coords.as_slice()) {
+            (Kind::Rect { radius, width, .. }, [x, y, xe, ye, ..]) if *width <= 0.0 => {
+                let own = rect(x.min(*xe), y.min(*ye), (xe - x).abs(), (ye - y).abs());
+                Some(rounded_points(own, [radius.min(own.size.width.min(own.size.height) / 2.0); 4]))
+            }
+            (Kind::Polygon, xy) => {
+                let pts: Vec<(f32, f32)> = xy.as_chunks::<2>().0.iter().map(|q| (q[0], q[1])).collect();
+                convex(&pts).then_some(pts)
+            }
+            _ => None,
+        };
+        if let Some(shape) = shape {
+            let cut = clip_convex(&shape, outline.get_or_insert_with(|| rounded_points(b, r)));
+            if cut.len() >= 3 {
+                p.items.push(Item { kind: Kind::Polygon, coords: Coords::of_points(&cut), snap: false, ..it });
+            }
+            continue;
+        }
+        for strip in strips.get_or_insert_with(|| rounded_strips(b, r, p.scale)).iter() {
+            let cut = it.clip.map_or(*strip, |c| c.intersect(strip));
+            let o = cut.intersect(&area);
+            if o.size.width > 0.0 && o.size.height > 0.0 {
+                p.items.push(Item { clip: Some(cut), ..it.clone() });
+            }
+        }
     }
 }
 
-/// Colour at position `t` (0..1) along a gradient's resolved `stops`.
+/// Whether the polygon `pts` is convex (every turn the same way; a straight run turns neither).
+fn convex(pts: &[(f32, f32)]) -> bool {
+    let n = pts.len();
+    if n < 3 {
+        return false;
+    }
+    let mut sign = 0.0f32;
+    for k in 0..n {
+        let (a, b, c) = (pts[k], pts[(k + 1) % n], pts[(k + 2) % n]);
+        let turn = (b.0 - a.0) * (c.1 - b.1) - (b.1 - a.1) * (c.0 - b.0);
+        if turn.abs() < 1e-6 {
+            continue;
+        }
+        if sign == 0.0 {
+            sign = turn.signum();
+        } else if turn.signum() != sign {
+            return false;
+        }
+    }
+    sign != 0.0
+}
+
+/// The convex polygon `subject` cut to the convex polygon `clip` (Sutherland-Hodgman).
+fn clip_convex(subject: &[(f32, f32)], clip: &[(f32, f32)]) -> Vec<(f32, f32)> {
+    // which side is inside: the clip's winding
+    let area: f32 = clip.iter().zip(clip.iter().cycle().skip(1)).map(|(a, b)| a.0 * b.1 - b.0 * a.1).sum();
+    let sign = if area >= 0.0 { 1.0 } else { -1.0 };
+    let mut out = subject.to_vec();
+    for k in 0..clip.len() {
+        let (a, b) = (clip[k], clip[(k + 1) % clip.len()]);
+        if (b.0 - a.0).abs() < 1e-6 && (b.1 - a.1).abs() < 1e-6 {
+            continue;
+        }
+        let side = |q: (f32, f32)| sign * ((b.0 - a.0) * (q.1 - a.1) - (b.1 - a.1) * (q.0 - a.0));
+        let input = std::mem::take(&mut out);
+        for (j, &cur) in input.iter().enumerate() {
+            let prev = input[(j + input.len() - 1) % input.len()];
+            let (sc, sp) = (side(cur), side(prev));
+            if sc >= 0.0 {
+                if sp < 0.0 {
+                    let t = sp / (sp - sc);
+                    out.push((prev.0 + (cur.0 - prev.0) * t, prev.1 + (cur.1 - prev.1) * t));
+                }
+                out.push(cur);
+            } else if sp >= 0.0 {
+                let t = sp / (sp - sc);
+                out.push((prev.0 + (cur.0 - prev.0) * t, prev.1 + (cur.1 - prev.1) * t));
+            }
+        }
+        if out.is_empty() {
+            break;
+        }
+    }
+    out
+}
+
+/// Colour at position `t` (0..1) along a gradient's resolved `stops`, mixed in premultiplied
+/// alpha (CSS Images 4 §3.5.4: a fade to `transparent` is not darkened by its black).
 fn gradient_at(stops: &[(Rgba, f32)], t: f32) -> Rgba {
     let Some(&(first, p0)) = stops.first() else { return Rgba::TRANSPARENT };
     if t <= p0 {
@@ -3106,29 +3516,39 @@ fn gradient_at(stops: &[(Rgba, f32)], t: f32) -> Rgba {
     for w in stops.windows(2) {
         let ((c0, a), (c1, b)) = (w[0], w[1]);
         if t <= b {
-            return if b - a < 1e-6 { c1 } else { mix(c0, c1, (t - a) / (b - a)) };
+            return if b - a < 1e-6 { c1 } else { mix_premultiplied(c0, c1, (t - a) / (b - a)) };
         }
     }
     stops[stops.len() - 1].0
+}
+
+/// `a` to `b` by `t` with their colours weighted by their alpha.
+fn mix_premultiplied(a: Rgba, b: Rgba, t: f32) -> Rgba {
+    let alpha = a.a + (b.a - a.a) * t;
+    if alpha <= 1e-6 {
+        return Rgba::TRANSPARENT;
+    }
+    let ch = |x: f32, y: f32| (x * a.a + (y * b.a - x * a.a) * t) / alpha;
+    Rgba { r: ch(a.r, b.r), g: ch(a.g, b.g), b: ch(a.b, b.b), a: alpha }
 }
 
 /// Gradients as bands: horizontal/vertical strips, or rings for radial ones.
 fn paint_gradient(p: &mut Painter, g: &crate::style::Gradient, b: Bounds<f32>) {
     const BANDS: usize = 48;
     let (x, y, w, h) = (b.origin.x, b.origin.y, b.size.width, b.size.height);
-    if g.radial {
-        let stops = g.resolved((w * w + h * h).sqrt() / 2.0);
-        for k in (0..BANDS).rev() {
-            let t = (k as f32 + 0.5) / BANDS as f32;
-            let f = (k + 1) as f32 / BANDS as f32;
-            let (rw, rh) = (w * f * std::f32::consts::SQRT_2, h * f * std::f32::consts::SQRT_2);
-            p.oval(rect(x + (w - rw) / 2.0, y + (h - rh) / 2.0, rw, rh), gradient_at(&stops, t),
-                   Rgba::TRANSPARENT, 0.0);
+    let angle_deg = match g.shape {
+        crate::style::GradientShape::Radial(_) => {
+            // every pixel its own colour: rings of a colour each band where the stops fade, and
+            // stacked translucent ones add up
+            if let Some(img) = gradient_image(g, w, h) {
+                p.image(b, &img);
+            }
+            return;
         }
-        return;
-    }
+        crate::style::GradientShape::Linear { angle_deg } => angle_deg,
+    };
     // angle: 180deg = to bottom, 90deg = to right
-    let a = g.angle_deg.to_radians();
+    let a = angle_deg.to_radians();
     let (dx, dy) = (a.sin(), -a.cos());
     let len = (w * dx.abs() + h * dy.abs()).max(1.0);
     let (cx, cy) = (x + w / 2.0, y + h / 2.0);

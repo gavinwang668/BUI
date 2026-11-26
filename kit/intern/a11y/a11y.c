@@ -22,8 +22,8 @@
 #include "bui_a11y.h"
 #include "kit_intern.h"
 
-/* bui-a11y mirrors the struct (a11y/src/node.rs asserts the same size) */
-_Static_assert(sizeof(BKA11yNode) == 72 + 4 * sizeof(void *), "BKA11yNode changed: update a11y/src/node.rs");
+/* bui-a11y mirrors the struct (platform/a11y/src/node.rs asserts the same size) */
+_Static_assert(sizeof(BKA11yNode) == 72 + 4 * sizeof(void *), "BKA11yNode changed: update platform/a11y/src/node.rs");
 
 /* A host's subtree, copied: the nodes, then their strings (one block). */
 typedef struct BKA11ySub {

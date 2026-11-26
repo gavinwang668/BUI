@@ -71,7 +71,7 @@ pub enum Command {
 
 #[derive(Args)]
 pub struct RunArgs {
-    /// Arguments for the tool underneath (cargo, your package manager, uv, cmake), after `--`
+    /// Arguments for the tool underneath (cargo, your package manager, uv, cmake, dub, dotnet, go, bundler), after `--`
     #[arg(last = true)]
     pub args: Vec<String>,
 }
@@ -135,6 +135,11 @@ pub enum Lang {
     Python,
     Lua,
     C,
+    D,
+    #[value(alias = "cs", alias = "c#")]
+    Csharp,
+    Go,
+    Ruby,
 }
 
 #[derive(Args)]

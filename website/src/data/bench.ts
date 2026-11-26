@@ -1192,3 +1192,11 @@ export const highlights = [
   claim: string
   chart: ChartId
 }[]
+
+/** The landing page's four figures at a glance, each read from the data above. */
+export const glance = [
+  { value: `~${Math.round(Number.parseFloat(tables.linuxBuild.rows[2][3]))}`, unit: "MB", label: "Release binary" },
+  { value: highlights[0].value, unit: highlights[0].unit, label: highlights[0].label },
+  { value: `~${charts["memory-start"].bars[0].value}`, unit: "MB", label: "Memory while idle" },
+  { value: highlights[3].value, unit: highlights[3].unit, label: highlights[3].label },
+] as const

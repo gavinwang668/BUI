@@ -1,0 +1,25 @@
+---
+// An addon's site (/charts, /panels): the site's header, then the addon's shell (its bar, a sidebar
+// you filter, a search the header's button opens) around the page.
+import Base from "./Base.astro";
+import Header from "../components/site/Header.astro";
+import { AddonShell, type ShellProps } from "../components/addon/shell";
+
+interface Props {
+  /** The page's full title. */
+  title: string;
+  description: string;
+  /** Path of the OG image, relative to the site root. */
+  image?: string;
+  shell: ShellProps;
+}
+
+const { title, description, image, shell } = Astro.props;
+---
+
+<Base title={title} description={description} image={image}>
+  <Header current="Addons" searchLabel={`Search ${shell.name.toLowerCase()}`} />
+  <AddonShell client:load {...shell} pathname={Astro.url.pathname}>
+    <slot />
+  </AddonShell>
+</Base>

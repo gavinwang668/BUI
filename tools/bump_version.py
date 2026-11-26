@@ -141,7 +141,7 @@ def plan_edits(new: str, npm: str | None) -> tuple[dict[Path, str], list[Path]]:
     put(ws, text[: m.start(1)] + section + text[m.end(1):])
 
     # sibling path dependencies of the published crates: `blenderui-x = { path = "..", version = ".." }`
-    # (and `bui-a11y`, which lives in a11y/ but is versioned with the workspace)
+    # (and `bui-a11y`, which lives in platform/a11y/ but is versioned with the workspace)
     for toml in sorted(RUST.glob("*/Cargo.toml")):
         lines = read(toml).splitlines(keepends=True)
         out = []

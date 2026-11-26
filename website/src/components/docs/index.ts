@@ -13,6 +13,7 @@ export { default as Hatch } from "./Hatch.astro";
 export { default as Kbd } from "./Kbd.astro";
 export { default as LangTabs } from "./LangTabs.astro";
 export { default as Recap } from "./Recap.astro";
+export { default as Release } from "./Release.astro";
 export { default as StatusMark } from "./StatusMark.astro";
 export { default as StatusTable } from "./StatusTable.astro";
 export { default as Steps } from "./Steps.astro";

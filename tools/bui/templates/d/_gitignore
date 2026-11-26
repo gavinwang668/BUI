@@ -1,0 +1,7 @@
+.dub/
+/{{name}}
+/{{name}}.exe
+*.obj
+*.o
+*.pdb
+*.ilk

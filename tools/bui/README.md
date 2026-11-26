@@ -1,7 +1,7 @@
 # bui
 
-The `bui` command: makes, runs, checks and updates BUI apps in Rust, JavaScript, TypeScript, Python,
-Lua and C. Docs: [the bui command](https://bui.preetham.top/start/bui-command/).
+The `bui` command: makes, runs, checks and updates BUI apps in Rust, JavaScript, TypeScript (React, Svelte,
+Vue or plain DOM), Python, Lua, C, D, C#, Go and Ruby. Docs: [the bui command](https://bui.preetham.top/start/bui-command/).
 
 ```sh
 curl -LsSf https://bui.preetham.top/install.sh | sh     # Linux and macOS
@@ -22,7 +22,7 @@ cargo test
 
 ## How it is organised
 
-- `src/flavours/`: one module per language (`rust`, `js`, `python`, `lua`, `c`). Each implements the
+- `src/flavours/`: one module per language (`rust`, `js`, `python`, `lua`, `c`, `d`, `csharp`, `go`, `ruby`). Each implements the
   `Flavour` trait: the tools it needs, the files of a new project, the install steps (always the newest
   versions), how it runs and builds, and its `doctor` checks. A language is a module there and a variant
   of `project::Stack`.
@@ -33,8 +33,10 @@ cargo test
   without colors or a TTY falls back to plain lines in one place.
 - `src/tools.rs`: toolchain detection and the commands that install each tool on each system.
 - `src/doctor.rs`, `src/update.rs`, `src/create.rs`, `src/run.rs`: the commands.
-- `src/registry.rs`: the newest versions (crates.io, npm, PyPI, and GitHub's release redirect, not its
-  rate-limited API).
+- `src/registry.rs`: the newest versions (crates.io, npm, PyPI, code.dlang.org, nuget.org, rubygems.org, and
+  GitHub's release redirect, not its rate-limited API).
+- Go keeps one shallow checkout of the newest BUI release in `~/.bui/BUI` (`BUI_HOME` moves `~/.bui`): the Go
+  module needs BUI's C sources beside it, and every Go project's `go.mod` has a `replace` line for it.
 
 ## Rules it follows
 

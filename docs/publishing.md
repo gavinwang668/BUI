@@ -174,6 +174,49 @@ Try it without publishing: Actions > release > Run workflow, enter the tag and l
 "publish" unticked. That runs the checks and the CI suite, then `cargo publish --dry-run` and
 `npm publish --dry-run`.
 
+## Accounts and one-time setup for the first publish
+
+Everything below is done once; after that a tag publishes by itself. A job whose secret is missing
+builds its package and warns instead of failing, so a release is never blocked by an account you have
+not made yet (a missing registry *account* is not an error; a missing *token* on crates.io is).
+
+| Where | Account and setup | Secret | What the tag then does |
+|---|---|---|---|
+| **PyPI** | Done (`blenderui`). | none (trusted publishing) | wheels and sdist |
+| **crates.io** | Done. A new crate (`bui-a11y` is new) needs the token's `publish-new` scope. | `CARGO_REGISTRY_TOKEN` | nine crates in order |
+| **npm** | Done for `native`, `react`, `svelte` and the platform packages. **`@blender-ui/vue` is not on npm**: after `@blender-ui/native` of the release is out, `cd bindings/vue && npm publish --access public` once by hand (logged in as a member of the `@blender-ui` organization), then add its trusted publisher (same form as the others, workflow `release.yml`). | none | the packages |
+| **LuaRocks** | Done. | `LUAROCKS_API_KEY` | uploads the rockspec |
+| **NuGet** (`BlenderUI`) | Make an account on nuget.org (a Microsoft account). User menu > **Trusted Publishing** > add a policy: owner `ppmpreetham`, repository `BUI`, workflow file `release.yml`. Scopes: **Push**, and choose "Push new packages and package versions" (the first push creates the package). Glob patterns: `BlenderUI`. Environment: empty. The package id `BlenderUI` is yours from its first push. | `NUGET_USER`: your nuget.org profile name (not the e-mail) | packs, then pushes |
+| **RubyGems** (`blenderui`) | Make an account on rubygems.org and turn on multi-factor authentication. Profile > **Pending trusted publishers** > new: RubyGem name **`blenderui`** (exactly the gemspec's name, lowercase), publisher type GitHub Actions, owner `ppmpreetham`, repository `BUI`, workflow filename **`release.yml`**, environment empty. The page shows your account's id: save it as the repository **variable** `RUBYGEMS_OWNER_ID` (Settings > Secrets and variables > Actions > Variables). The first push creates the gem and the publisher stays attached to it. | variable `RUBYGEMS_OWNER_ID`, no secret | builds the gem (the kit's C sources inside) and pushes |
+| **Go** | No account. The `go-tag` job pushes the tag `bindings/go/vX.Y.Z` that Go needs to find a module that lives in a folder; pkg.go.dev picks the module up by itself the first time someone fetches it. | none (the job's own token) | tags |
+| **DUB** (`blenderui`) | Once: log in to code.dlang.org with GitHub, then **Register a package**: GitHub, owner `ppmpreetham`, repository `BUI`. The name `blenderui` comes from the root `dub.json` and was free when this was written. Do it before or after the tag; the registry reads the repository by itself. | none | nothing in CI: the registry watches the repository and publishes every new `v*` tag about twice an hour |
+| **GitHub Release** | Done. `cli.yml` attaches the `bui` archives to the same release. | none | creates the release |
+
+Set a secret in the repository: Settings > Secrets and variables > Actions > New repository secret.
+
+**How the DUB package is laid out.** code.dlang.org wants the recipe at the repository root and serves the
+repository as it is at each tag. The root `dub.json` is a thin recipe that only hands over to the real one
+(`"subPackages": ["./bindings/d"]`, depending on `blenderui:blenderui`), so there is one recipe to keep up to date:
+`bindings/d/dub.json`, whose version `tools/bump_version.py` moves. A user of `dub add blenderui` gets the whole
+repository at that tag (the C kit is built from its sources by `bindings/d/scripts/build_bui.*`), so the
+download is large. Only tags that have the root `dub.json` (0.6.0 onward) can be served. Check a release with a
+clean folder: `dub add-local <checkout> 0.6.0`, a project that depends on `"blenderui": "~>0.6.0"`, `dub build`.
+
+**Not published by the release (do by hand, or leave out):**
+
+- **`bui-charts` and `bui-panels`:** not on crates.io. They are not in the release's crate list.
+- **The editor extensions:** VS Code (`npx @vscode/vsce package`, publisher `ppmpreetham`, then `vsce publish`
+  with a Marketplace token; Open VSX takes the same file with its own token) and Zed (a pull request to
+  the `zed-industries/extensions` repository). They are versioned on their own.
+
+## Checks that do not hold back a release
+
+`ci.yml` is the gate: `release.yml` runs it before anything is published. `extras.yml` runs beside it and
+is never waited for: the JavaScript packages' own tests (`npm test`), the website build with a check that
+no internal link is broken (`tools/check_site_links.py`), `cargo fmt` and a count of clippy's warnings, and
+that the demos and the addons still compile. A red job there is something to fix, not a stopped release.
+Move a job into `ci.yml` once it has been green for a while.
+
 ## Release checklist
 
 1. Bump `bindings/python/bui/_version.py` (semantic versioning).
@@ -201,14 +244,14 @@ Try it without publishing: Actions > release > Run workflow, enter the tag and l
 
 `blenderui` is on [crates.io](https://crates.io/crates/blenderui)
 (`cargo add blenderui`). The workspace in `bindings/rust/` has thirteen crates
-(`bui-a11y` joins it from `a11y/`). A `v*` tag publishes nine of them to crates.io, in dependency order (see
+(`bui-a11y` joins it from `platform/a11y/`). A `v*` tag publishes nine of them to crates.io, in dependency order (see
 above); the others stay in the repository:
 
 | Crate | What it is | Depends on | crates.io |
 |---|---|---|---|
 | `blenderui-tailwind` | Tailwind v4 class compiler (std only) | none | Published |
 | `blenderui-macros` | `rsx!` / `view!`, `#[component]`, `css!`, `tw!` | `blenderui-tailwind` | Published |
-| `bui-a11y` | screen readers: the kit's accessibility trees as AccessKit trees (lives in `a11y/`, a member of this workspace) | none | Published |
+| `bui-a11y` | screen readers: the kit's accessibility trees as AccessKit trees (lives in `platform/a11y/`, a member of this workspace) | none | Published |
 | `blenderui-sys` | FFI over the C kit; builds it with CMake | `bui-a11y` (`a11y` feature; `cmake` at build time) | Published |
 | `blenderui-paint` | shared painting types: geometry, colors, `PaintSink`, the text cache | none | Published |
 | `blenderui-table` | the data table's core | `blenderui-paint` | Published |
@@ -220,7 +263,7 @@ above); the others stay in the repository:
 | `blenderui-qjs` | `bui-runtime`: BUI with embedded QuickJS, for `bui build` | `blenderui`, `blenderui-jsview` | `publish = false` (ships on npm) |
 | `blenderui-web` | A blenderui app in a web page (`wasm32-wasip1`, `js/bui-web.js`) | `blenderui`, `blenderui-sys` | Not published by `release.yml` |
 
-`bui-a11y` (screen readers through AccessKit) lives in `a11y/` but is a member of
+`bui-a11y` (screen readers through AccessKit) lives in `platform/a11y/` but is a member of
 this workspace, so it shares the version and lock. `blenderui-sys` depends on it
 with the `a11y` feature (it is published first), and the C kit's CMake build builds
 it with cargo. It is new in 0.5.x: until it is on crates.io, package `blenderui-sys`

@@ -1,0 +1,6 @@
+{
+    "name": "{{name}}",
+    "description": "A BUI app in D",
+    "targetType": "executable",
+    "dependencies": {}
+}

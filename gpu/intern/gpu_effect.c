@@ -22,7 +22,8 @@
  *   types float int bool vec2 vec3 vec4 (also float2 float3 float4); no matrices, no arrays of
  *   other than U; the GLSL built-ins mix fract mod clamp step smoothstep abs sign floor ceil min
  *   max pow exp exp2 log sqrt inversesqrt sin cos tan asin acos atan length distance dot
- *   normalize, and atan2(y, x) (as Blender's compat does for GLSL).
+ *   normalize, atan(y, x) and atan2(y, x) (as Blender's compat does for GLSL); integer >> << & | ^.
+ *   Names HLSL reserves (`line`, `point`, `sample`...) are free to use: they are renamed for it.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */
 
@@ -321,6 +322,27 @@ static size_t call_end(const char *src, size_t n, size_t open, int *r_comma)
   return n;
 }
 
+/* Words HLSL keeps for itself that GLSL leaves free to name things with (a variable called `line`):
+ * renamed `bui_<word>` where they are names. */
+static int hlsl_reserved(const char *w, size_t len)
+{
+  static const char *const words[] = {
+      "line",      "lineadj",       "point",        "triangle",    "triangleadj", "sample",
+      "matrix",    "vector",        "string",       "pass",        "technique",   "compile",
+      "register",  "packoffset",    "half",         "snorm",       "unorm",       "linear",
+      "nointerpolation", "groupshared", "shared",   "extern",      "inline",      "cbuffer",
+      "tbuffer",   "texture",       "sampler",      "export",      "row_major",   "column_major",
+      "globallycoherent", "stateblock", "dword",    "fixed",       "interface",   "class",
+      "noise",
+  };
+  for (size_t k = 0; k < sizeof(words) / sizeof(words[0]); k++) {
+    if (len == strlen(words[k]) && strncmp(w, words[k], len) == 0) {
+      return 1;
+    }
+  }
+  return 0;
+}
+
 static void hlsl_rewrite(StrBuf *s, const char *src, size_t n)
 {
   size_t i = 0;
@@ -360,8 +382,25 @@ static void hlsl_rewrite(StrBuf *s, const char *src, size_t n)
       sb_add(s, "))");
       i = close + 1;
     }
-    else {
+    else if (hlsl_reserved(src + i, j - i) && !(i > 0 && src[i - 1] == '#')) { /* not `#line` */
+      sb_add(s, "bui_");
       sb_range(s, src + i, j - i);
+      i = j;
+    }
+    else {
+      /* GLSL's two-argument atan(y, x) is HLSL's atan2 */
+      size_t at = j;
+      while (at < n && (src[at] == ' ' || src[at] == '\t')) {
+        at++;
+      }
+      int two = 0;
+      if (j - i == 4 && strncmp(src + i, "atan", 4) == 0 && at < n && src[at] == '(') {
+        call_end(src, n, at, &two);
+      }
+      sb_add(s, two ? "atan2" : "");
+      if (!two) {
+        sb_range(s, src + i, j - i);
+      }
       i = j;
     }
   }

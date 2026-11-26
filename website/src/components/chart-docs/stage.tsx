@@ -68,7 +68,7 @@ export function Stage({ name, image, items }: { name: string; image: string; ite
   }
 
   return (
-    <section id="live" className="scroll-mt-20 border-b border-border">
+    <section id="live" className="scroll-mt-28 border-b border-border">
       <div className="flex flex-wrap items-center gap-1 border-b border-border px-2 py-1.5 sm:px-3">
         <button type="button" className={button} onClick={() => step(-1)} aria-label="Previous example">
           <ChevronLeft size={18} strokeWidth={1.5} />

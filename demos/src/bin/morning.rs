@@ -11,13 +11,13 @@
 //! `cargo run --release --bin morning`, `-- --storyboard DIR` for headless frames.
 
 use std::sync::OnceLock;
-use std::time::Duration;
 
 use blenderui::motion::MotionValue;
 use blenderui::prelude::*;
 use blenderui::vars;
 use bui_demos::canvas::{rem, rem_css, Fit};
-use bui_demos::{arg, run_with, save_png, Script};
+use bui_demos::ease::{ease_in, ease_out, lerp, progress};
+use bui_demos::{arg, focus_root, run_with, size_arg, story::story, Script};
 
 const DESIGN: (f32, f32) = (390.0, 844.0);
 /// Seconds for a whole fold (the reference: the stack settles 1 s after the fingers close).
@@ -58,23 +58,6 @@ impl Rect {
     }
 }
 
-fn lerp(a: f32, b: f32, t: f32) -> f32 {
-    a + (b - a) * t
-}
-
-/// `u` through `a..b` as 0..1.
-fn span(u: f32, a: f32, b: f32) -> f32 {
-    ((u - a) / (b - a)).clamp(0.0, 1.0)
-}
-
-fn ease_in(t: f32) -> f32 {
-    t * t * t
-}
-
-fn ease_out(t: f32) -> f32 {
-    1.0 - (1.0 - t).powi(3)
-}
-
 /// Where the fold is at `u` (0 the page, 1 the stack), read off the reference frame by frame.
 struct Fold {
     /// The stack's zoom about the screen centre and its drop (it starts small and low).
@@ -100,21 +83,21 @@ const HOME: Rect = rect(12.0, 290.0, 366.0, 244.0);
 impl Fold {
     fn at(u: f32) -> Self {
         // times as fractions of the second the fold takes (ms / 1000)
-        let z = ease_out(span(u, 0.44, 1.0));
+        let z = ease_out(progress(u, 0.44, 1.0));
         let (zoom, drop) = (lerp(0.72, 1.0, z), lerp(70.0, 0.0, z));
-        let card = ease_in(span(u, 0.0, 0.528));
+        let card = ease_in(progress(u, 0.0, 0.528));
         let target = Self::through(zoom, drop, HOME);
-        let up = span(u, 0.317, 0.484).min(1.0 - span(u, 0.546, 0.85));
+        let up = progress(u, 0.317, 0.484).min(1.0 - progress(u, 0.546, 0.85));
         Self {
             zoom,
             drop,
-            stack_alpha: span(u, 0.22, 0.484),
+            stack_alpha: progress(u, 0.22, 0.484),
             page: FULL.lerp(target, card),
             card,
-            wash: 0.6 * span(u, 0.044, 0.37) * (1.0 - span(u, 0.396, 0.546)),
-            dark: span(u, 0.37, 0.546),
+            wash: 0.6 * progress(u, 0.044, 0.37) * (1.0 - progress(u, 0.396, 0.546)),
+            dark: progress(u, 0.37, 0.546),
             blur: 5.0 * up,
-            chrome: 1.0 - span(u, 0.07, 0.334),
+            chrome: 1.0 - progress(u, 0.07, 0.334),
         }
     }
 
@@ -419,10 +402,7 @@ fn i_() -> Div {
 impl Render for Morning {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         w.request_animation_frame();
-        if w.focused_id().is_none() && self.frames > 0 {
-            w.focus_id("root");
-        }
-        self.frames += 1;
+        focus_root(w, &mut self.frames);
         // a pinch that has gone quiet has let go: on to the end it was heading for
         if let Some((at, dir)) = self.pinch
             && self.frames - at > LET_GO
@@ -473,51 +453,45 @@ impl Render for Morning {
 /// The reference's timing: 120 ms at rest, the fold, rest; then the way back, then a pinch and a
 /// spread.
 fn storyboard(dir: String) -> Script {
-    Box::new(move |cx, win| {
-        let shot = |cx: &mut App, name: &str| {
-            let (w, h, px) = cx.draw(win);
-            save_png(&format!("{dir}/{name}.png"), w, h, &px);
-        };
-        let tick = |cx: &mut App, ms: u64| cx.advance_clock(Duration::from_millis(ms));
+    story(dir, move |s| {
         // a first frame, then the pointer comes in (the kit takes keys once it has)
-        shot(cx, "start");
-        tick(cx, 300);
-        cx.simulate_mouse_move(win, 5.0, 5.0);
+        s.shot("start");
+        s.tick(300);
+        s.cx.simulate_mouse_move(s.win, 5.0, 5.0);
         // fold: frame n at n x 40 ms, numbered like the reference's (0001 = 0 ms)
         for n in 0..44u64 {
             if n == 3 {
-                cx.simulate_key(win, "", "space");
+                s.key("space");
             }
-            shot(cx, &format!("fold-{:04}", n + 1));
-            tick(cx, 40);
+            s.shot(&format!("fold-{:04}", n + 1));
+            s.tick(40);
         }
-        cx.simulate_key(win, "", "Escape");
+        s.key("Escape");
         for n in 0..26u64 {
-            shot(cx, &format!("open-{:04}", n + 1));
-            tick(cx, 40);
+            s.shot(&format!("open-{:04}", n + 1));
+            s.tick(40);
         }
         // fingers closing a little (to 0.8): the page follows them, then on letting go folds
         for n in 0..30u64 {
             if n < 6 {
-                cx.simulate_magnify(win, 195.0, 420.0, -0.037);
+                s.cx.simulate_magnify(s.win, 195.0, 420.0, -0.037);
             }
-            shot(cx, &format!("pinch-{:04}", n + 1));
-            tick(cx, 40);
+            s.shot(&format!("pinch-{:04}", n + 1));
+            s.tick(40);
         }
         // spreading them opens it again
         for n in 0..30u64 {
             if n < 6 {
-                cx.simulate_magnify(win, 195.0, 420.0, 0.04);
+                s.cx.simulate_magnify(s.win, 195.0, 420.0, 0.04);
             }
-            shot(cx, &format!("spread-{:04}", n + 1));
-            tick(cx, 40);
+            s.shot(&format!("spread-{:04}", n + 1));
+            s.tick(40);
         }
     })
 }
 
 fn main() {
-    let (w, h) = arg("--size").and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
-        .unwrap_or(DESIGN);
+    let (w, h) = size_arg(DESIGN);
     let make = || Morning { progress: MotionValue::new(0.0), pinch: None, frames: 0 };
     run_with(w, h, "BUI · Morning", make, arg("--storyboard").map(storyboard));
 }

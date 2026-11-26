@@ -63,11 +63,14 @@
     Write-Host (C '38;5;208' (Glyphs '4666663  4666663 463'))
     Write-Host ''
 
-    $arch = [System.Runtime.InteropServices.RuntimeInformation]::OSArchitecture.ToString()
+    # the processor comes from the environment: [RuntimeInformation]::OSArchitecture is missing (null) on
+    # Windows PowerShell 5.1 with a .NET Framework older than 4.7.1. A 32-bit PowerShell on a 64-bit
+    # Windows names the real processor in PROCESSOR_ARCHITEW6432.
+    $arch = if ($env:PROCESSOR_ARCHITEW6432) { $env:PROCESSOR_ARCHITEW6432 } else { $env:PROCESSOR_ARCHITECTURE }
     $triple = switch ($arch) {
-        'X64' { 'x86_64-pc-windows-msvc' }
-        'Arm64' { 'aarch64-pc-windows-msvc' }
-        default { Fail "there is no bui build for the $arch processor" }
+        'AMD64' { 'x86_64-pc-windows-msvc' }
+        'ARM64' { 'aarch64-pc-windows-msvc' }
+        default { Fail "there is no bui build for the '$arch' processor" }
     }
 
     $tag = $env:BUI_VERSION

@@ -42,20 +42,25 @@ dub run --config=rsx        # an HTML/CSS page in a native window
 dub run --config=test       # the integration suite
 ```
 
-Use the package from another DUB project with a path dependency:
+Use the package from another DUB project. It is on [code.dlang.org](https://code.dlang.org/packages/blenderui):
+
+```sh
+dub add blenderui
+dub run --compiler=ldc2
+```
+
+DUB downloads the repository at that version (the repository's root `dub.json` hands over to this
+folder, and the C kit is built from the repository's sources). To use a checkout instead, point a
+path dependency at the repository root or at this folder:
 
 ```json
 {
     "name": "my-app",
     "targetType": "executable",
     "dependencies": {
-        "bui": { "path": "../BUI/bindings/d" }
+        "blenderui": { "path": "../BUI" }
     }
 }
-```
-
-```sh
-dub run --compiler=ldc2
 ```
 
 To build another BUI checkout, set `BUI_SOURCE_DIR` before DUB runs. Set

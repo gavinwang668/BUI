@@ -948,6 +948,9 @@ static bool citem_bbox_ex(const CItem *ci, float b[4], bool tight)
   /* a line has no area: a hit gets it at least a few pixels of thickness around it */
   float m = tight ? (it->type == BK_ITEM_LINE ? BK_MAX(it->width * 0.5f, 3.0f) : 0.0f) :
                     (it->width > 0 ? it->width : 1.0f) + 3.0f;
+  if (it->type == BK_ITEM_SHADOW && !tight) {
+    m = 3.0f * it->width + 2.0f; /* a Gaussian's reach (3 sigma) */
+  }
   if (it->type == BK_ITEM_TEXT && tight) {
     if (!ci->text) {
       return false;
@@ -1316,6 +1319,17 @@ static void canvas_item_draw(BuiRaster *r, const CItem *ci, float ox, float oy, 
           BUI_raster_frame_rect(r, ox + x0, oy + y0, w, h, lw, it->outline);
         }
       }
+      break;
+    }
+    case BK_ITEM_SHADOW: {
+      if (it->ncoords < 8 || !fill) {
+        return;
+      }
+      const float shape[4] = {ox + BK_MIN(p[0], p[2]), oy + BK_MIN(p[1], p[3]), fabsf(p[2] - p[0]),
+                              fabsf(p[3] - p[1])};
+      const float box[4] = {ox + BK_MIN(p[4], p[6]), oy + BK_MIN(p[5], p[7]), fabsf(p[6] - p[4]),
+                            fabsf(p[7] - p[5])};
+      BUI_raster_box_shadow(r, shape, it->radius, it->width, it->fill, box, it->size);
       break;
     }
     case BK_ITEM_OVAL: {
@@ -1792,8 +1806,11 @@ int BK_canvas_rasterize(const BKCanvasItem *items, int n, float x0, float y0, in
     for (int i = 0; i < n; i++) {
       const BKCanvasItem *it = &ci[i].it;
       if (it->clip_on) {
-        BUI_raster_set_clip(r, (int)floorf(it->clip[0] - x0), (int)floorf(it->clip[1] - y0),
-                            (int)ceilf(it->clip[2]), (int)ceilf(it->clip[3]));
+        const int cw = (int)ceilf(it->clip[2]), ch = (int)ceilf(it->clip[3]);
+        if (cw <= 0 || ch <= 0) {
+          continue; /* an empty clip shows nothing (set_clip would take it as none), as on screen */
+        }
+        BUI_raster_set_clip(r, (int)floorf(it->clip[0] - x0), (int)floorf(it->clip[1] - y0), cw, ch);
       }
       canvas_item_draw(r, &ci[i], -x0, -y0, NULL);
       if (it->clip_on) {

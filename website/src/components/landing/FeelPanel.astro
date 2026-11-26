@@ -173,6 +173,12 @@ const toggles = [
   .fp-check:focus-visible {
     box-shadow: 0 0 0 1.5px #8cb0ea;
   }
+  /* A click focuses a control from script (to take its keys), which browsers show as keyboard
+     focus: no ring while the pointer is in use, as in Blender; the next key brings it back. */
+  .feel-panel[data-pointer] :focus-visible {
+    outline: none;
+    box-shadow: none;
+  }
   .fp-num[data-dragging] {
     background: var(--bl-sel);
   }
@@ -377,6 +383,8 @@ const toggles = [
   };
 
   document.querySelectorAll<HTMLElement>("[data-feel]").forEach((root) => {
+    root.addEventListener("pointerdown", () => root.setAttribute("data-pointer", ""), true);
+    root.addEventListener("keydown", () => root.removeAttribute("data-pointer"), true);
     const status = root.querySelector<HTMLElement>("[data-status]")!;
     const undoBtn = root.querySelector<HTMLButtonElement>("[data-undo]")!;
     const redoBtn = root.querySelector<HTMLButtonElement>("[data-redo]")!;

@@ -1,0 +1,69 @@
+---
+// The /panels pages (bui-panels): src/content/panels, in the addon shell as /charts is.
+import { getCollection, render } from "astro:content";
+import AddonLayout from "../../layouts/AddonLayout.astro";
+import { PageHead } from "../../components/addon/page-head";
+import { PrevNext } from "../../components/addon/prev-next";
+import { Toc } from "../../components/addon/toc";
+import type { ShellProps } from "../../components/addon/shell";
+import Prose from "../../components/site/Prose.astro";
+import PageFoot from "../../components/site/PageFoot.astro";
+import * as mdxComponents from "../../components/docs";
+import { panelHref, panelsInOrder, type PanelPage } from "../../lib/panels";
+import { href } from "../../lib/href";
+
+export async function getStaticPaths() {
+  const pages = panelsInOrder(await getCollection("panels"));
+  return pages.map((page, i) => ({
+    params: { slug: page.id === "index" ? undefined : page.id },
+    props: { page, pages, previous: pages[i - 1], next: pages[i + 1] },
+  }));
+}
+
+interface Props {
+  page: PanelPage;
+  pages: PanelPage[];
+  previous?: PanelPage;
+  next?: PanelPage;
+}
+
+const { page, pages, previous, next } = Astro.props;
+const { Content, headings } = await render(page);
+const label = (p: PanelPage) => p.data.sidebarLabel ?? p.data.title;
+const link = (p: PanelPage | undefined) => p && { href: panelHref(p), label: label(p) };
+
+const shell: ShellProps = {
+  name: "Panels",
+  home: href("panels/"),
+  groups: (["Guide", "Reference"] as const).map((group) => ({
+    label: group,
+    links: pages.filter((p) => p.data.group === group).map((p) => ({ href: panelHref(p), label: label(p) })),
+    filter: group === "Reference",
+  })),
+  filterHint: "Filter pages",
+  searchHint: "Search the panels docs",
+  emptyHint: "Nothing matches that. Try a page name, like Workspace.",
+};
+const toc = headings.filter((h) => h.depth === 2).map((h) => ({ id: h.slug, label: h.text }));
+---
+
+<AddonLayout title={`${page.data.title} · Panels`} description={page.data.description} {shell}>
+  <article>
+    <PageHead kicker={page.data.group} title={page.data.title}>
+      <p class="mt-5 max-w-2xl text-lg text-pretty text-(--muted)">{page.data.description}</p>
+    </PageHead>
+    <div class="xl:grid xl:grid-cols-[minmax(0,1fr)_220px]">
+      <div class="min-w-0">
+        <div class="max-w-[48rem] px-4 py-8 sm:px-8 md:py-12">
+          <Prose>
+            <Content components={mdxComponents} />
+          </Prose>
+          <PageFoot sources={page.data.sources} filePath={page.filePath} />
+        </div>
+        <PrevNext label="Previous and next page" previous={link(previous)} next={link(next)} />
+        <div aria-hidden="true" class="hatch h-[45vh] min-h-48"></div>
+      </div>
+      <Toc client:idle items={toc} />
+    </div>
+  </article>
+</AddonLayout>

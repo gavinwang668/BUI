@@ -1,0 +1,25 @@
+---
+// Four figures at a glance (src/data/bench.ts `glance`); the full benchmarks are on /benchmarks.
+import { glance } from "../../data/bench";
+---
+
+<ul class="grid grid-cols-2 lg:grid-cols-4" aria-label="BUI at a glance">
+  {
+    glance.map((g, i) => (
+      <li
+        class:list={[
+          "flex flex-col gap-3 border-border px-5 py-8 sm:px-10 sm:py-10 lg:px-12",
+          i % 2 === 0 && "border-r",
+          i < 2 && "border-b lg:border-b-0",
+          i === 1 && "lg:border-r",
+        ]}
+      >
+        <p class="tabular flex items-baseline gap-1.5">
+          <span class="text-[2.6rem] font-semibold leading-none tracking-[-0.04em] sm:text-5xl">{g.value}</span>
+          <span class="text-lg text-muted">{g.unit}</span>
+        </p>
+        <p class="font-mono text-[11px] uppercase tracking-[0.14em] text-muted">{g.label}</p>
+      </li>
+    ))
+  }
+</ul>

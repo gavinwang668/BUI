@@ -1,0 +1,334 @@
+---
+title: The layout document
+sidebarLabel: Layout document
+description: The JSON a bui-panels workspace saves, field by field, the builder that makes one from Rust, and the functions in model::document that edit one.
+group: Reference
+order: 60
+sources: ["addons/bui-panels/src/model/types.rs", "addons/bui-panels/src/model/builder.rs", "addons/bui-panels/src/model/document.rs", "addons/bui-panels/src/model/tree.rs", "addons/bui-panels/src/workspace.rs", "addons/bui-panels/src/lib.rs", "addons/bui-panels/layout.json", "addons/bui-panels/examples/basic.rs", "addons/bui-panels/tests/panels.rs"]
+---
+
+Everything a workspace shows is one value, a `LayoutDocument`: the tree of docked panels, the floating and hidden panels, a record per view and the framing. It serializes to plain JSON with `serde`, so saving a layout is writing a file, and restoring one is reading it. `persist` does both for you.
+
+The documents are plain data. Every function on this page takes a document and returns a new one; none of them touch a workspace. Hand the result to `Workspace::set_document` to show it.
+
+## The JSON
+
+The crate's own `layout.json`, shortened:
+
+```json title="layout.json (shortened)"
+{
+  "schema": 1,
+  "version": "2",
+  "root": {
+    "kind": "split", "id": "split-1", "axis": "x",
+    "weights": [0.15, 0.7, 0.15],
+    "children": [
+      { "kind": "panel", "id": "left", "views": ["files"], "selected": "files" },
+      { "kind": "stage", "id": "stage", "child": {
+          "kind": "panel", "id": "docs", "views": ["src/b.ts"], "selected": "src/b.ts" } },
+      { "kind": "panel", "id": "tools", "views": ["canvas", "search"], "selected": "search" }
+    ]
+  },
+  "floating": [],
+  "hidden": [
+    { "panel": { "id": "panel-6e4e50", "views": ["outline"], "selected": "outline" },
+      "restore": { "kind": "tab", "panel": "right" } }
+  ],
+  "views": {
+    "canvas": { "type": "zopra-view:canvas", "title": "Canvas" },
+    "files": { "type": "zopra-view:files", "title": "Files" },
+    "outline": { "type": "zopra-view:outline", "title": "Outline" },
+    "search": { "type": "zopra-view:search", "title": "Search" },
+    "src/b.ts": { "type": "zopra-view:src/b.ts", "title": "b.ts" }
+  },
+  "navigation": { "frame": [], "framings": [] }
+}
+```
+
+Read one in Rust with `serde_json`, as the tests do:
+
+```rust title="tests/panels.rs"
+fn layout_json() -> LayoutDocument {
+    serde_json::from_str(include_str!("../layout.json")).expect("layout.json is a layout document")
+}
+```
+
+### LayoutDocument
+
+| Field | JSON | Type | Required | What it is |
+| --- | --- | --- | --- | --- |
+| `schema` | `schema` | `u32` | yes | The format's version. Always `1`; a persisted file with another value is ignored. |
+| `version` | `version` | `Option<String>` | no | Your layout's version. `persist` writes `Persist::version` here and ignores a file whose value differs. Left out when `None`. |
+| `root` | `root` | `Option<Node>` | no | The docked layout. `null` when nothing is docked. |
+| `floating` | `floating` | `Vec<FloatingPanel>` | no | The floating panels. Default empty. |
+| `hidden` | `hidden` | `Vec<HiddenPanel>` | no | The hidden panels. Default empty. |
+| `views` | `views` | `BTreeMap<Id, ViewRecord>` | no | A record per view, by view id. Default empty. |
+| `navigation` | `navigation` | `Option<NavigationState>` | no | The framing and saved framings. Left out when `None`. |
+
+`Id` is `Arc<str>`: ids are strings in JSON.
+
+### Node
+
+A node of the docked tree, tagged by `kind`.
+
+| Variant | `kind` | Fields |
+| --- | --- | --- |
+| `Split(SplitNode)` | `"split"` | `id`, `axis`, `weights`, `children` |
+| `Panel(PanelNode)` | `"panel"` | `id`, `views`, `selected` |
+| `Stage(StageNode)` | `"stage"` | `id`, `child` (optional) |
+
+`Node::id(&self) -> &Id` returns any node's id, and `Node::is_stage(&self) -> bool` tells a stage apart.
+
+| Struct | Field | Type | What it is |
+| --- | --- | --- | --- |
+| `SplitNode` | `id` | `Id` | The split's id. Dividers are named after it (`zopra-div-<id>-<index>`). |
+| | `axis` | `Axis` | `"x"` lays the children side by side; `"y"` stacks them. |
+| | `weights` | `Vec<f64>` | One per child. Sizes are proportional to them; the workspace keeps them summing to 1. |
+| | `children` | `Vec<Node>` | Two or more nodes. |
+| `PanelNode` | `id` | `Id` | The panel's id. |
+| | `views` | `Vec<Id>` | Its tabs, in order. Never empty in a clean document. |
+| | `selected` | `Id` | The tab it shows. |
+| `StageNode` | `id` | `Id` | The stage's id. |
+| | `child` | `Option<Box<Node>>` | What the stage holds; left out when it is empty. Never another stage. |
+
+### Axis and Edge
+
+| `Axis` | JSON | Method |
+| --- | --- | --- |
+| `X` | `"x"` | `cross(self) -> Axis` returns the other axis. |
+| `Y` | `"y"` | |
+
+| `Edge` | JSON | `axis()` | `before()` |
+| --- | --- | --- | --- |
+| `Left` | `"left"` | `X` | `true` |
+| `Right` | `"right"` | `X` | `false` |
+| `Top` | `"top"` | `Y` | `true` |
+| `Bottom` | `"bottom"` | `Y` | `false` |
+
+`before()` says whether something put on that edge comes before the node in its split.
+
+### FloatingPanel
+
+| Field | Type | What it is |
+| --- | --- | --- |
+| `panel` | `PanelNode` | The panel (no `kind` here). |
+| `rect` | `Rect` | Where it is, in fractions of the area it floats over: `{ "x": 0.25, "y": 0.2, "w": 0.5, "h": 0.6 }`. |
+| `z` | `i64` | Its stacking order: higher is in front. Pressing a floating panel raises it. |
+| `layer` | `FloatingLayer` | What it floats over. |
+
+| `FloatingLayer` | JSON | It floats over |
+| --- | --- | --- |
+| `Stage` | `"stage"` | The stage, and moves with it. |
+| `Overlay` | `"overlay"` | The whole workspace. Overlay panels sit above stage ones. |
+
+### HiddenPanel
+
+| Field | Type | What it is |
+| --- | --- | --- |
+| `panel` | `PanelNode` | The panel. |
+| `restore` | `RestoreTarget` | Where `restore` puts it back. |
+
+`RestoreTarget` is tagged by `kind`:
+
+| Variant | `kind` | Fields | Restores |
+| --- | --- | --- | --- |
+| `Floating { rect, layer }` | `"floating"` | `rect: Rect`, `layer: FloatingLayer` | Floating at `rect` on `layer`. |
+| `Docked { beside, edge, share }` | `"docked"` | `beside: Id`, `edge: Edge`, `share: f64` | Docked on `edge` of the node `beside`, taking `share` of the space. |
+| `Tab { panel }` | `"tab"` | `panel: Id` | As tabs in `panel` (or in the stage, given the stage's id). |
+
+When the target is gone (the `beside` node or the `panel` no longer exists), the panel floats in the middle of the workspace, or becomes the whole layout if nothing is docked.
+
+### ViewRecord
+
+| Field | JSON | Type | What it is |
+| --- | --- | --- | --- |
+| `ty` | `type` | `String` | The view's type: a key of the workspace's view types. Markup views are `zopra-view:<id>`. |
+| `params` | `params` | `Option<Value>` | Any JSON. `title_fn` and `<Template>` content read it. Left out when `None`. |
+| `title` | `title` | `Option<String>` | A title that wins over the type's. Left out when `None`. |
+
+### NavigationState and Framing
+
+| Field | Type | What it is |
+| --- | --- | --- |
+| `frame` | `Vec<Id>` | The ids of the panels the current framing holds. Empty when everything shows. Default empty. |
+| `framings` | `Vec<Framing>` | The saved framings. Default empty. |
+
+| `Framing` field | Type | What it is |
+| --- | --- | --- |
+| `id` | `Id` | Its id, made by `save_framing`. |
+| `name` | `String` | The name it was saved under. |
+| `frame` | `Vec<Id>` | The ids of the panels it holds. |
+
+### Rect
+
+`Rect { x, y, w, h }`, all `f64`, used for fractions in the document and for pixels elsewhere.
+
+| Member | What it is |
+| --- | --- |
+| `Rect::UNIT` | `0, 0, 1, 1`: all of it. |
+| `Rect::ZERO` | All zeros. |
+| `new(x, y, w, h) -> Rect` | A rect. |
+| `right(&self) -> f64`, `bottom(&self) -> f64` | `x + w`, `y + h`. |
+| `contains(&self, x: f64, y: f64) -> bool` | Whether the point is inside, edges included. |
+| `lo(&self, axis: Axis) -> f64` | `x` or `y`. |
+| `len(&self, axis: Axis) -> f64` | `w` or `h`. |
+| `inset(&self, d: f64) -> Rect` | Shrunk by `d` on every side, never below zero size. |
+| `lerp(&self, to: &Rect, t: f64) -> Rect` | `t` of the way to `to`. |
+| `approx_eq(&self, o: &Rect, eps: f64) -> bool` | Every field within `eps`. |
+| `center(&self) -> (f64, f64)` | The middle point. |
+
+## Build a document in Rust
+
+`create_document` turns a tree of specs into a clean document. The `layout` module has short constructors for the specs:
+
+```rust title="examples/basic.rs"
+let doc = create_document(
+    Some(
+        &row(
+            [
+                panel([view("files").id("files"), view("search").id("search")])
+                    .id("left")
+                    .into(),
+                stage(Some(
+                    panel([
+                        view("editor").id("a").params(json!({ "name": "a.ts" })),
+                        view("editor").id("b").params(json!({ "name": "b.ts" })),
+                    ])
+                    .id("docs")
+                    .into(),
+                ))
+                .into(),
+                panel([view("outline").id("outline")]).id("right").into(),
+            ],
+            Some(vec![1.0, 3.0, 1.0]),
+        )
+        .into(),
+    ),
+    vec![],
+    None,
+)
+.expect("valid layout");
+```
+
+```rust
+pub fn create_document(
+    root: Option<&LayoutSpec>,
+    floating: Vec<FloatSpec>,
+    version: Option<String>,
+) -> Result<LayoutDocument, LayoutError>
+```
+
+- **View ids.** A view without `.id(..)` gets `<type>-<n>`, counting per type and skipping ids already taken: two `view("editor")`s become `editor-1` and `editor-2`.
+- **Other ids.** A panel without an id gets a random `panel-…` id, a split a random `split-…` id, and the stage `stage`.
+- **Weights.** Given weights are used when there is one per child; otherwise the children share equally. They are then scaled to sum to 1.
+- **Clean-up.** The tree is normalized: empty panels go, one-child splits are replaced by their child, and a split inside a split along the same axis is merged into it.
+- **Floating panels** get `z` in order (1, 2, ...) and the `Overlay` layer unless the spec names one. Their rects are used as given.
+- The document has `schema` 1, your `version`, no hidden panels and no navigation.
+
+### The layout constructors
+
+In `bui_panels::layout` (that is, `model::builder::layout`):
+
+| Function | Returns |
+| --- | --- |
+| `view(ty: impl Into<String>) -> ViewSpec` | A view of type `ty`. |
+| `panel(views: impl IntoIterator<Item = ViewSpec>) -> PanelSpec` | A panel of those tabs. |
+| `split(axis: Axis, children: impl IntoIterator<Item = LayoutSpec>, weights: Option<Vec<f64>>) -> SplitSpec` | A split. |
+| `row(children, weights) -> SplitSpec` | `split(Axis::X, ..)`. |
+| `column(children, weights) -> SplitSpec` | `split(Axis::Y, ..)`. |
+| `stage(child: Option<LayoutSpec>) -> StageSpec` | The stage, empty or holding `child`. |
+
+### The specs
+
+In `bui_panels::model::builder`. Every field is public.
+
+| Type | Fields | Builders |
+| --- | --- | --- |
+| `ViewSpec` | `ty: String`, `id: Option<String>`, `params: Option<Value>`, `title: Option<String>` | `id(impl Into<String>)`, `params(Value)`, `title(impl Into<String>)` |
+| `PanelSpec` | `id: Option<String>`, `views: Vec<ViewSpec>`, `selected: Option<usize>` | `id(impl Into<String>)`, `selected(usize)`: the index of the selected tab (default 0) |
+| `SplitSpec` | `id: Option<String>`, `axis: Axis`, `children: Vec<LayoutSpec>`, `weights: Option<Vec<f64>>` | `id(impl Into<String>)` |
+| `StageSpec` | `id: Option<String>`, `child: Option<Box<LayoutSpec>>` | |
+| `FloatSpec` | `panel: PanelSpec`, `rect: Rect`, `layer: Option<FloatingLayer>` | (`FloatSpec` is also exported from the crate root) |
+
+`LayoutSpec` is any of them as a tree node: `View(ViewSpec)`, `Panel(PanelSpec)`, `Split(SplitSpec)` or `Stage(StageSpec)`. Each spec converts with `.into()`. A bare `View` node becomes a panel of one tab.
+
+### LayoutError
+
+| Variant | Message | When |
+| --- | --- | --- |
+| `DuplicateView(String)` | `Zopra: duplicate view id "<id>"` | Two views have the same id. |
+| `MultipleStages` | `Zopra: a layout may contain one stage` | More than one stage. |
+| `NestedStage` | `Zopra: a stage cannot contain a stage` | A stage's child is a stage. |
+
+`LayoutError` implements `Display` and `std::error::Error`.
+
+## Edit a document
+
+The functions in `bui_panels::model::document`. Each takes the document by reference and returns a new one; an id that matches nothing returns an unchanged copy. `DockTarget` and `empty_document` are also exported from the crate root.
+
+### Find things
+
+| Function | Returns |
+| --- | --- |
+| `empty_document() -> LayoutDocument` | A document with nothing in it (`schema` 1). |
+| `all_panels(doc) -> Vec<&PanelNode>` | Every panel: docked in tree order, then floating, then hidden. |
+| `locate_panel(doc, panel_id: &str) -> Option<PanelLocation>` | Where a panel is, with the panel. |
+| `panel_of_view(doc, view_id: &str) -> Option<&PanelNode>` | The panel holding a view. |
+| `view_ids(doc) -> Vec<Id>` | Every view id, in `all_panels` order. |
+| `parent_split(root: Option<&Node>, id: &str) -> Option<&SplitNode>` | The split whose direct child has `id`. |
+| `restore_target_for(doc, panel_id: &str) -> Option<RestoreTarget>` | Where a panel would come back to if hidden now: its float rect, its hidden target, beside its neighbour in its split (with its share of the pair), or into the stage when it is the stage's only child. |
+| `uid(prefix: &str) -> Id` | A fresh id, `prefix-` followed by hex digits, unique in this process. |
+
+`PanelLocation<'a>` is `Docked(&PanelNode)`, `Floating(&PanelNode, &FloatingPanel)` or `Hidden(&PanelNode, &RestoreTarget)`. `panel(&self)` returns the panel and `place(&self) -> Where` the place: `Where::Docked`, `Where::Floating` or `Where::Hidden`.
+
+### Change panels and tabs
+
+| Function | What it does |
+| --- | --- |
+| `update_panel(doc, panel: PanelNode)` | Replaces the panel with the same id, wherever it is. A panel with no views is removed; a `selected` that isn't among its views becomes the first. |
+| `remove_panel(doc, panel_id: &str)` | Removes a panel. A docked panel's space goes to its neighbour; the stage itself is never removed. |
+| `select_view(doc, view_id: &str)` | Selects a tab. |
+| `add_tab(doc, panel_id: &str, view_id: &str, index: Option<usize>, select: bool)` | Puts a view in a panel at `index` (or at the end), moving it if it is already there. Selects it when `select` is set or the panel had no selection. |
+| `reorder_tabs(doc, panel_id: &str, order: &[Id])` | Puts a panel's tabs in `order`, which must hold exactly its views. |
+| `detach_view(doc, view_id: &str)` | Takes a view out of its panel but keeps its record. The tab next to it becomes selected. |
+| `close_view(doc, view_id: &str)` | Takes a view out and drops its record. |
+
+### Dock, float and hide
+
+| Function | What it does |
+| --- | --- |
+| `insert_panel(doc, panel: PanelNode, target: &DockTarget)` | Docks a panel (one not already in the document; remove it first). |
+| `float_panel(doc, panel: PanelNode, rect: Rect, layer: FloatingLayer)` | Removes the panel from wherever it is and floats it in front of the others, at `rect` clamped by `clamp_float`. |
+| `raise_float(doc, panel_id: &str)` | Brings a floating panel to the front. |
+| `clamp_float(rect: Rect) -> Rect` | Keeps a float rect sane: width and height between 0.02 and 1, and at least 5% of it inside the area. |
+| `hide_panel(doc, panel_id: &str)` | Moves a docked or floating panel to `hidden`, with its restore target. |
+| `restore_panel(doc, panel_id: &str, fallback_layer: FloatingLayer)` | Puts a hidden panel back at its target. When the target is gone it floats at `0.25, 0.2, 0.5, 0.6` on `fallback_layer`, or becomes the root when nothing is docked. |
+
+`DockTarget` has two variants:
+
+| Variant | What `insert_panel` does |
+| --- | --- |
+| `Beside { beside: Id, edge: Edge, share: Option<f64> }` | Wraps the node `beside` in a new split with the panel on `edge`, taking `share` (default 0.5, kept between 0.1 and 0.9). An unknown `beside` means the whole layout; an empty layout makes the panel the root. |
+| `Into { panel: Id, index: Option<usize> }` | Adds the panel's tabs to `panel` at `index` (or at the end) and selects the incoming one. Given the stage's id: an empty stage takes the panel as its child; otherwise its tabs go into the stage's first panel. |
+
+### Check and repair
+
+```rust
+pub fn sanitize(input: &LayoutDocument, is_known_type: &dyn Fn(&str) -> bool) -> LayoutDocument
+```
+
+Makes any document safe to show. The workspace runs it, accepting every type, on everything it is given: the starting layout, the persisted file and `set_document`.
+
+- Views whose record is missing, whose type `is_known_type` rejects, or that already appeared in another panel are dropped.
+- A panel id seen twice keeps only its first panel. A panel left without views goes; a `selected` that's gone becomes the first tab.
+- Only the first stage stays a stage; any other stage, nested in it or not, is replaced by its child.
+- Weights that aren't positive numbers become 1, and the tree is normalized.
+- Float rects are clamped with `clamp_float`.
+- Records of views that no panel holds are dropped.
+- `schema` becomes 1; `version` and `navigation` are kept.
+
+## Persistence
+
+With `persist`, the workspace writes `document()` (the layout plus its navigation) as JSON to `Persist::path` 120 ms after the last change, with `version` set to `Persist::version`. On start it reads the file back when it parses, has `schema` 1 and the same `version`. `Workspace::reset` deletes the file.
+
+You can do the same by hand: listen for `WorkspaceEvent::Change`, serialize the `LayoutDocument` it carries with `serde_json`, and pass a stored one back as `WorkspaceOptions::document`.

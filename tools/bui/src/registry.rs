@@ -5,7 +5,8 @@ use std::time::Duration;
 
 use serde_json::Value;
 
-const REPO: &str = "ppmpreetham/BUI";
+/// BUI's repository on GitHub (`owner/name`).
+pub const REPO: &str = "ppmpreetham/BUI";
 
 fn get(url: &str) -> Option<Value> {
     let agent: ureq::Agent = ureq::Agent::config_builder()
@@ -30,6 +31,30 @@ pub fn npm_version(package: &str) -> Option<String> {
 
 pub fn pypi_version(package: &str) -> Option<String> {
     text(&get(&format!("https://pypi.org/pypi/{package}/json"))?, &["info", "version"])
+}
+
+/// The newest version of a package on code.dlang.org: its `latest` answer is the version as a JSON string.
+pub fn dub_version(package: &str) -> Option<String> {
+    dub_latest(&get(&format!("https://code.dlang.org/api/packages/{package}/latest"))?)
+}
+
+fn dub_latest(answer: &Value) -> Option<String> {
+    answer.as_str().or_else(|| answer.get("version")?.as_str()).map(str::to_owned)
+}
+
+/// The newest release of a NuGet package (nuget.org lists a package's versions oldest first).
+pub fn nuget_version(package: &str) -> Option<String> {
+    nuget_latest(&get(&format!("https://api.nuget.org/v3-flatcontainer/{}/index.json", package.to_ascii_lowercase()))?)
+}
+
+/// The last version of the list that is not a pre-release (the last one when all are).
+fn nuget_latest(index: &Value) -> Option<String> {
+    let versions: Vec<&str> = index.get("versions")?.as_array()?.iter().filter_map(Value::as_str).collect();
+    versions.iter().rev().find(|v| !v.contains('-')).or_else(|| versions.last()).map(|v| (*v).to_owned())
+}
+
+pub fn gem_version(gem: &str) -> Option<String> {
+    text(&get(&format!("https://rubygems.org/api/v1/gems/{gem}.json"))?, &["version"])
 }
 
 /// The tag of the newest GitHub release of the `bui` program (`v0.5.1`). It follows the page's redirect
@@ -84,5 +109,28 @@ pub fn download(url: &str, mut on_chunk: impl FnMut(u64, Option<u64>)) -> Option
         }
         bytes.extend_from_slice(&buf[..n]);
         on_chunk(bytes.len() as u64, total);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    #[test]
+    fn dub_answers_with_the_version_as_a_string() {
+        assert_eq!(dub_latest(&json!("0.5.1")).as_deref(), Some("0.5.1"));
+        assert_eq!(dub_latest(&json!({ "version": "0.6.0" })).as_deref(), Some("0.6.0"));
+        assert_eq!(dub_latest(&json!(null)), None);
+    }
+
+    #[test]
+    fn nuget_lists_versions_oldest_first() {
+        assert_eq!(nuget_latest(&json!({ "versions": ["0.4.0", "0.5.0", "0.5.1"] })).as_deref(), Some("0.5.1"));
+        assert_eq!(nuget_latest(&json!({ "versions": ["0.5.1", "0.6.0-beta.1"] })).as_deref(), Some("0.5.1"), "not a pre-release");
+        assert_eq!(nuget_latest(&json!({ "versions": ["0.6.0-beta.1"] })).as_deref(), Some("0.6.0-beta.1"));
+        assert_eq!(nuget_latest(&json!({ "versions": [] })), None);
+        assert_eq!(nuget_latest(&json!({})), None);
     }
 }

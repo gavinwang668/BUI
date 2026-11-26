@@ -1,24 +1,25 @@
 ---
 // From README.md "Platforms". Works (check) · experimental (flask): written and checked by CI,
-// little hands-on testing · partial (half circle).
+// little hands-on testing · partial (half circle) · not yet (hourglass).
 import StatusMark from "../docs/StatusMark.astro";
 import { repoFile } from "../../lib/docs";
 
-type Cell = { text?: string; status?: "done" | "experimental" | "partial" };
-const cols = ["Windows", "Linux", "macOS"];
-const rows: [string, Cell, Cell, Cell][] = [
-  ["Window", { text: "Native (Win32)" }, { text: "Native (X11, Wayland experimental)" }, { text: "Native (Cocoa)" }],
-  ["Python (pip install)", { text: "Wheels", status: "done" }, { text: "Wheels", status: "done" }, { text: "Wheels", status: "done" }],
-  ["Rust", { status: "done" }, { text: "Build from source", status: "done" }, { status: "done" }],
-  ["JavaScript / React", { text: "Prebuilt on npm", status: "done" }, { text: "Build the addon from source", status: "done" }, { text: "Headless for now", status: "partial" }],
-  ["C, C++, Dear ImGui", { status: "done" }, { status: "done" }, { status: "done" }],
-  ["Renderer", { text: "CPU raster, or GPU (Direct3D 11)" }, { text: "CPU raster, or GPU (OpenGL 3.3)" }, { text: "CPU raster" }],
-  ["HiDPI", { text: "Per-monitor DPI" }, { text: "Xft.dpi" }, { text: "Retina" }],
+type Cell = { text?: string; status?: "done" | "experimental" | "partial" | "planned" };
+const cols = ["Windows", "Linux", "macOS", "Android", "iOS"];
+const notYet: Cell = { text: "Not yet", status: "planned" };
+const rows: [string, ...Cell[]][] = [
+  ["Window", { text: "Native (Win32)" }, { text: "Native (X11, Wayland experimental)" }, { text: "Native (Cocoa)" }, { text: "Native (NativeActivity)" }, notYet],
+  ["Python (pip install)", { text: "Wheels", status: "done" }, { text: "Wheels", status: "done" }, { text: "Wheels", status: "done" }, notYet, notYet],
+  ["Rust", { status: "done" }, { text: "Build from source", status: "done" }, { status: "done" }, { text: "android_main!", status: "done" }, notYet],
+  ["JavaScript / React", { text: "Prebuilt on npm", status: "done" }, { text: "Prebuilt on npm (glibc 2.35+)", status: "done" }, { text: "Headless for now", status: "partial" }, { text: "React, Vue, Svelte on QuickJS", status: "done" }, notYet],
+  ["C, C++, Dear ImGui", { status: "done" }, { status: "done" }, { status: "done" }, { status: "done" }, notYet],
+  ["Renderer", { text: "CPU raster, or GPU (Direct3D 11)" }, { text: "CPU raster, or GPU (OpenGL 3.3)" }, { text: "CPU raster" }, { text: "CPU raster" }, { text: "—" }],
+  ["HiDPI", { text: "Per-monitor DPI" }, { text: "Xft.dpi" }, { text: "Retina" }, { text: "Display density" }, { text: "—" }],
 ];
 ---
 
 <div class="relative overflow-x-auto">
-  <table class="w-full min-w-[640px] border-collapse text-sm leading-6">
+  <table class="w-full min-w-[960px] border-collapse text-sm leading-6">
     <caption class="sr-only">What runs where</caption>
     <thead>
       <tr>

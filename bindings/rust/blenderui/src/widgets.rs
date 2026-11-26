@@ -69,11 +69,16 @@ pub(crate) struct WidgetSpec {
     pub min: f64,
     pub max: f64,
     pub step: f64,
+    /// `precision`: the decimals a number field or slider shows (Blender's property precision);
+    /// `None`: none for a whole-number step, else Blender's default.
+    pub precision: Option<u8>,
     pub items: Vec<String>,
     pub color: Option<Rgba>,
     pub placeholder: String,
     /// `<input live>`: on_input / on_change fire per keystroke (the kit's "live"), not on Enter or blur.
     pub live: bool,
+    /// The element's own `checked` attribute (the app's), which a user's change is kept against.
+    pub attr_checked: bool,
     pub disabled: bool,
     pub name: Option<String>,
     /// Drawn like a browser's form control (plain HTML outside `styled`);
@@ -169,10 +174,12 @@ impl WidgetSpec {
             min: num("min").unwrap_or(f64::NEG_INFINITY),
             max: num("max").unwrap_or(f64::INFINITY),
             step: num("step").unwrap_or(1.0),
+            precision: num("precision").map(|p| p.clamp(0.0, 6.0) as u8),
             items: Vec::new(),
             color: None,
             placeholder: attr(attrs, "placeholder").unwrap_or("").to_owned(),
             live: attr(attrs, "live").is_some(),
+            attr_checked: false,
             disabled: attr(attrs, "disabled").is_some(),
             name: attr(attrs, "name").map(str::to_owned),
             html: false,
@@ -195,9 +202,7 @@ impl WidgetSpec {
     /// `attrs`: the element's attributes (already moved out of `d`).
     pub(crate) fn from_element(d: &Div, attrs: &Attrs, key: Key, state: &UiState) -> Option<WidgetSpec> {
         let num = |k: &str| attr(attrs, k).and_then(|v| v.trim().parse::<f64>().ok());
-        let checked = || {
-            state.checked.get(&key).copied().unwrap_or(attr(attrs, "checked").is_some())
-        };
+        let checked = || state.checked(key, attr(attrs, "checked").is_some());
         let mut s;
         match d.tag {
             "button" => {
@@ -314,6 +319,7 @@ impl WidgetSpec {
             }
             _ => return None,
         }
+        s.attr_checked = attr(attrs, "checked").is_some();
         Some(s)
     }
 }
@@ -620,7 +626,7 @@ fn sync(n: *mut sys::BKNode, old: Option<&WidgetSpec>, spec: &WidgetSpec) {
                 }
             }
         }
-        if old.is_none_or(|o| (o.min, o.max, o.step) != (spec.min, spec.max, spec.step))
+        if old.is_none_or(|o| (o.min, o.max, o.step, o.precision) != (spec.min, spec.max, spec.step, spec.precision))
             && matches!(spec.kind, WKind::Number | WKind::Slider)
         {
             if spec.min.is_finite() {
@@ -630,9 +636,10 @@ fn sync(n: *mut sys::BKNode, old: Option<&WidgetSpec>, spec: &WidgetSpec) {
                 set_num(c"max", spec.max);
             }
             set_num(c"step", spec.step);
-            if spec.step.fract() == 0.0 {
-                set_num(c"precision", 0.0);
-            }
+            // Blender's default (3) unless asked, or the step is a whole number; set every time, so a
+            // step that turns fractional shows its decimals again
+            let whole = spec.step.fract() == 0.0;
+            set_num(c"precision", f64::from(spec.precision.unwrap_or(if whole { 0 } else { 3 })));
         }
         if old.is_none_or(|o| (&o.items, &o.groups, o.html) != (&spec.items, &spec.groups, spec.html))
             && spec.kind == WKind::Select {

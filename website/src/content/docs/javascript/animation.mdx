@@ -1,18 +1,48 @@
 ---
 title: Animation with GSAP and Motion
 sidebarLabel: Animation
-description: gsap and motion on BUI's engine, motion props on every element and in React, springs solved in closed form, and frame-exact tests with advanceClock.
+description: gsap and motion on BUI's engine, motion props on every element and in React, Web Animations, springs solved in closed form, and frame-exact tests with advanceClock. Every function, option and control.
 section: JavaScript & React
 order: 35
 languages: ["javascript"]
-sources: ["examples/animation/README.md", "examples/animation/hero.js", "docs/animation-api.md", "bindings/node/README.md", "bindings/node/gsap.d.ts", "bindings/node/motion.d.ts", "bindings/node/anim.js", "bindings/node/validate.js", "bindings/node/waapi.js", "bindings/svelte/test/svelte.test.js", "bindings/node/dom.js", "bindings/node/test/anim.test.js", "bindings/react/README.md", "bindings/react/motion.js", "bindings/react/motion.d.ts", "kit/include/BUI_anim.h"]
+sources: ["examples/animation/README.md", "examples/animation/hero.js", "examples/animation/cards.js", "examples/animation/magnetic.js", "examples/animation/playground.js", "docs/animation-api.md", "bindings/node/README.md", "bindings/node/gsap.d.ts", "bindings/node/gsap.js", "bindings/node/motion.d.ts", "bindings/node/motion.js", "bindings/node/anim.js", "bindings/node/validate.js", "bindings/node/waapi.js", "bindings/node/dom.js", "bindings/node/host.js", "bindings/node/index.js", "bindings/node/index.d.ts", "bindings/node/test/anim.test.js", "bindings/svelte/test/svelte.test.js", "bindings/react/README.md", "bindings/react/motion.js", "bindings/react/motion.d.ts", "bindings/react/index.js", "bindings/react/test/motion.test.js", "bindings/rust/blenderui/src/motion/object.rs", "bindings/rust/blenderui/src/motion/vars.rs", "bindings/rust/blenderui/src/motion/value.rs", "bindings/rust/blenderui/src/motion/ease.rs", "bindings/rust/blenderui-jsview/src/lib.rs", "kit/include/BUI_anim.h", "kit/intern/anim/motion.c"]
 ---
 
 A box that slides in with an elastic ease, a timeline of three steps, a card that springs when you hover it: **GSAP's and Motion's APIs, run by BUI.** You import `gsap` or `motion`, call them as you would anywhere, and the animation runs in BUI's engine. JavaScript hands over each call's values once, and hears from the engine only for the callbacks you ask for.
 
+This page is the full reference: every function, option, control and callback the JavaScript side has for animation, with its defaults and units.
+
+## Pick an API
+
+All five run on the same engine, so they mix freely: a `gsap` tween can take over a property that a Motion prop set.
+
+| You want | Use | Import |
+| --- | --- | --- |
+| Tweens and timelines you start from code | `gsap.to`, `gsap.timeline` ... | `@blender-ui/native/gsap` |
+| One call that animates elements, numbers or motion values | `animate`, `motionValue`, `stagger` | `@blender-ui/native/motion` |
+| Animation declared on an element (enter, hover, tap, drag, exit) | `el.setMotion(name, value)` | none: every element has it |
+| The same props in JSX | `motion.div`, `useMotionValue` ... | `@blender-ui/react/motion` |
+| Browser code that calls `el.animate()` | Web Animations | none: every element has it |
+
+Every one needs an `App` first. Selectors and new motion values belong to the newest `App`. Without one, a call throws `blenderui: no App is running`.
+
+## Units and values
+
+These hold for every API on this page:
+
+- **Times** are in **seconds** (`duration: 0.5`). The one exception is Web Animations, which uses milliseconds, as the browser does.
+- **Lengths** given as a number are pixels. **Angles** (`rotate`) are degrees. `opacity` is 0 to 1. `scale` is a factor (1 is its size).
+- **A CSS value** works too: `'50%'`, `'2rem'`, `'45deg'`, `'#f80'`, `'rgb(255, 136, 0)'`, `'red'`.
+- **A relative value** adds to where it is: `'+=50'`, `'-=50'`.
+- **Keyframes** are an array: `{ x: [0, 100, 0] }`. A `null` keyframe means "where it is now".
+
+The properties with their own fast path are `x`, `y`, `z`, `scale`, `scaleX`, `scaleY`, `rotate`, `rotateX`, `rotateY`, `skewX`, `skewY`, `opacity`, `width`, `height`, `color`, `backgroundColor` and `value`. Any other CSS property that interpolates works too, in camelCase or kebab-case.
+
+`x`, `y`, `scale`, `rotate` and `opacity` are draw-time transforms: they move what is drawn, not the layout, so nothing is laid out again while they change. They apply to HTML elements. A Blender widget has no draw transform; it animates its own values (`value`, colors, sizes).
+
 ## GSAP
 
-```js
+```js title="gsap.js"
 import { gsap } from '@blender-ui/native/gsap'
 
 gsap.to('.box', { x: 200, duration: 1, ease: 'elastic.out(1, 0.3)', stagger: 0.1 })
@@ -30,14 +60,192 @@ t.pause(); t.seek(0.5); t.reverse(); t.progress(0.25)
 await t // resolves when it ends
 ```
 
-- **Targets:** selectors (`'#id'`, `.class`, `tag`, `[attr=v]`), elements, motion values, or one plain object, whose numbers are tweened and written back each frame.
-- **Properties:** `x`, `y`, `scale`, `rotate`, `opacity`, and any CSS property that interpolates.
-- **Options:** `duration`, `delay`, `ease`, `repeat`, `repeatDelay`, `yoyo`, `stagger`, `paused`, `reversed`, `overwrite`, `immediateRender`, `timeScale`, and the callbacks `onStart`, `onUpdate`, `onComplete`, `onRepeat`, `onReverseComplete`, `onInterrupt`.
-- **Overwrite:** a new tween on a property takes over from the old one and keeps its velocity.
+The module exports `gsap` (also the default export), `CustomEase`, and the classes `Tween` and `Timeline`.
+
+### Targets
+
+The first argument of `to`, `from`, `fromTo` and `set` is what to animate:
+
+| Target | Example | What moves |
+| --- | --- | --- |
+| A selector | `'#id'`, `'.class'`, `'div'`, `'[data-x=v]'` | Every element that matches. A comma list works. |
+| An element | `el` | That element. It must be in a window, or the call throws. |
+| A list | `[el, '#b']`, `win.body.childNodes` | Each item. Elements and selectors mix. |
+| A motion value, or a list of them | `mv`, `[mv1, mv2]` | The value: animate the key `value` (`gsap.to(mv, { value: 100 })`). Values of different Apps can't be animated together. |
+| One plain object | `{ score: 0 }` | Its numbers. The engine writes them back to the object every frame. |
+
+Anything else throws a `TypeError`.
+
+```js title="counter.js"
+const state = { score: 0 }
+gsap.to(state, { score: 100, duration: 2, onUpdate () { label.textContent = Math.round(state.score) } })
+```
+
+### gsap.to, from, fromTo, set
+
+```ts
+gsap.to(targets, vars): Tween
+gsap.from(targets, vars): Tween
+gsap.fromTo(targets, fromVars, toVars): Tween
+gsap.set(targets, vars): Tween
+```
+
+- **`to`** animates from where the targets are to `vars`.
+- **`from`** animates from `vars` to where the targets are. It jumps to `vars` at once.
+- **`fromTo`** animates from `fromVars` to `toVars`. The timing options come from `toVars`.
+- **`set`** sets `vars` now: a tween with no duration.
+
+`vars` mixes properties and options in one object. A key that is one of the options below is an option; every other key is a property to animate. Option names ignore case, `-` and `_`.
+
+### Tween options
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `duration` | seconds | `0.5` | How long one play takes. Negative is 0. |
+| `delay` | seconds | `0` | Wait before it starts. Negative is 0. |
+| `ease` | name or `[x1, y1, x2, y2]` | `'power1.out'` | The curve. See [Eases](#eases). |
+| `repeat` | count | `0` | Extra plays after the first. `-1` or `Infinity` repeats forever. |
+| `repeatDelay` | seconds | `0` | Wait between repeats. |
+| `yoyo` | boolean | `false` | Every other repeat plays backward. |
+| `stagger` | seconds, or `{ each }` | none | With several targets, each starts this long after the one before. |
+| `paused` | boolean | `false` | Make it paused; start it with `play()`. |
+| `reversed` | boolean | `false` | Make it play backward. |
+| `immediateRender` | boolean | on for `from`, `fromTo`, `set` | Apply the start values at once instead of when it starts. |
+| `overwrite` | `true`, `false`, `'auto'` | `true` | A new tween on a property takes it over from the one moving it, with its velocity. `false` lets both run. `'auto'` is the same as `true`. |
+| `timeScale` | number | `1` | Its speed: `2` plays twice as fast. |
+| `type`, `stiffness`, `damping` ... | | | The spring and inertia options of Motion also work here. See [Transition options](#transition-options). |
+
+`stagger` takes a number of seconds or `{ each }`. GSAP's `from`, `amount`, `grid`, `axis` and `ease` keys throw an error that names them.
+
+### Callbacks
+
+| Callback | Called when | Arguments |
+| --- | --- | --- |
+| `onStart` | it starts playing (after its delay) | `onStartParams` |
+| `onUpdate` | every frame it moves | `onUpdateParams` |
+| `onComplete` | it reaches its end | `onCompleteParams` |
+| `onRepeat` | a repeat begins | `onRepeatParams` |
+| `onReverseComplete` | playing backward, it reaches its start | `onReverseCompleteParams` |
+| `onInterrupt` | another tween took over its properties | none |
+
+Inside a callback, `this` is the tween. A callback that throws doesn't stop the animation; the error is thrown again on its own, so you still see it. Each callback costs one event from the engine each time it runs, so an `onUpdate` costs one per frame.
+
+```js
+gsap.to('#bar', { width: 300, onComplete: log, onCompleteParams: ['bar', 'done'] })
+function log (name, what) { console.log(name, what, this.progress()) } // this: the tween
+```
+
+### Tween controls
+
+`gsap.to` and the rest return a `Tween`. The methods that set something return the tween, so calls chain. A getter takes no argument; the same method with an argument sets.
+
+| Method | What it does |
+| --- | --- |
+| `play(from?)` | Play forward. With `from` (seconds, or a label in a timeline), jump there first. |
+| `pause(atTime?)` | Pause. With `atTime`, jump there first. |
+| `resume()` | Play on in the direction it was going. |
+| `reverse(from?)` | Play backward. With `from`, jump there first. |
+| `restart()` | Start again from the beginning. |
+| `kill()` | Stop it where it is, for good. |
+| `seek(time)` | Jump to `time` in seconds, or to a label of a timeline. An unknown label throws a `RangeError`. |
+| `progress()`, `progress(value)` | Where it is in one play, 0 to 1. |
+| `totalProgress()`, `totalProgress(value)` | The same over every repeat. |
+| `time()`, `time(seconds)` | The playhead in one play. Setting it is `seek`. |
+| `totalTime()` | The playhead over every repeat. Getter only. |
+| `timeScale()`, `timeScale(value)` | Its speed. |
+| `duration()` | One play's length in seconds. Setting it throws a `TypeError`: give `duration` in the vars. |
+| `totalDuration()` | Every repeat and repeat delay included. |
+| `isActive()` | Whether it is playing now. |
+| `paused()`, `paused(bool)` | Whether it is paused; `paused(true)` pauses, `paused(false)` resumes. |
+| `reversed()`, `reversed(bool)` | Whether it plays backward; setting it turns it around. |
+| `then(onDone)` | A tween is a thenable: `await t` waits for its end. |
+
+`await t` resolves when the tween reaches its end, or its start when it plays backward. A tween you `kill()` never ends, so an `await` on it waits forever.
+
+### Timelines
+
+```ts
+gsap.timeline(vars?: TimelineVars): Timeline
+```
+
+A timeline places tweens in time. It takes every tween option above (`repeat`, `yoyo`, `paused`, `timeScale`, the callbacks) plus `defaults`: options that its children's vars leave out.
+
+```js title="intro.js"
+const tl = gsap.timeline({ defaults: { duration: 0.6, ease: 'power2.out' }, repeat: -1, repeatDelay: 1 })
+tl.from('.title', { y: 40, opacity: 0 })
+  .from('.subtitle', { y: 20, opacity: 0 }, '-=0.3')
+  .addLabel('buttons')
+  .from('.cta', { scale: 0.8, opacity: 0, stagger: 0.1 }, 'buttons')
+  .call(() => console.log('shown'), null, '>')
+```
+
+A `Timeline` has every control of a `Tween`, and these methods. Each returns the timeline.
+
+| Method | What it does |
+| --- | --- |
+| `to(targets, vars, position?)` | Add a `to` tween at `position`. |
+| `from(targets, vars, position?)` | Add a `from` tween. |
+| `fromTo(targets, fromVars, toVars, position?)` | Add a `fromTo` tween. |
+| `set(targets, vars, position?)` | Set values when the playhead reaches `position`. |
+| `add(child, position?)` | Add a tween or timeline made with `gsap.to` or `gsap.timeline`, a label (a string), a function (as `call`), or an array of them. Anything else throws a `TypeError`. |
+| `addLabel(name, position?)` | Name a point in time, to seek to or place tweens at. |
+| `call(fn, params?, position?)` | Run `fn(...params)` when the playhead passes `position`. `this` is the timeline. |
+
+Without a `position`, a child goes at the end of the timeline.
+
+### Position parameter
+
+The last argument of the timeline methods says where a child starts:
+
+| Position | Where |
+| --- | --- |
+| `1.5` | 1.5 s from the timeline's start. |
+| `'+=1'`, `'-=0.5'` | 1 s after (0.5 s before) the end of the timeline. |
+| `'<'`, `'>'` | The start (the end) of the child added last. |
+| `'<0.2'`, `'>-0.2'`, `'<+=1'` | An offset from the start or end of the child added last. |
+| `'mid'` | The label `mid`. A label that doesn't exist yet is made at the end. |
+| `'mid+=0.5'`, `'mid-=0.5'` | An offset from a label. |
+| `'50%'`, `'+=25%'`, `'<50%'` | A percent of the child's duration. |
+
+A label starts with a letter or `_`, then letters, digits, `_`, `.` or `-`. A position outside this grammar (`'<=1'`, `'a b'`, `{}`) throws instead of being taken as a label or as 0.
+
+### gsap.delayedCall
+
+```ts
+gsap.delayedCall(delay: number, fn: (...args) => void, params?: unknown[]): Timeline
+```
+
+Runs `fn(...params)` after `delay` seconds. It returns a timeline, so you can `pause()` or `kill()` it.
+
+### gsap.ticker.lagSmoothing
+
+```ts
+gsap.ticker.lagSmoothing(threshold = 500, adjusted = 33): void
+```
+
+A frame that comes more than `threshold` milliseconds after the last one counts as `adjusted` milliseconds. A stall (a slow load, a breakpoint) then doesn't jump every animation to its end. `lagSmoothing(0)` turns it off. It applies to every animation of the newest `App`, not only GSAP's.
+
+### CustomEase and registerPlugin
+
+```ts
+CustomEase.create(name: string, svgPath: string): string
+gsap.registerPlugin(...plugins): void
+```
+
+`CustomEase.create` turns an SVG path from (0, 0) to (1, 1) into an ease and gives it a name. It returns the name, which any `ease` option then takes. A path it can't read throws a `SyntaxError`.
+
+```js
+import { gsap, CustomEase } from '@blender-ui/native/gsap'
+
+CustomEase.create('hop', 'M0,0 C0.2,0.8 0.4,1 1,1')
+gsap.to('#ball', { y: -80, ease: 'hop' })
+```
+
+`gsap.registerPlugin(CustomEase)` does nothing, so code that registers it keeps working. Any other plugin throws a `TypeError`, because it isn't here.
 
 ## Motion
 
-```js
+```js title="motion.js"
 import { animate, motionValue, stagger } from '@blender-ui/native/motion'
 
 animate('.card', { opacity: 1, y: 0 }, { duration: 0.4, delay: stagger(0.05) })
@@ -47,6 +255,148 @@ const x = motionValue(0)
 animate(x, 100, { type: 'spring', bounce: 0.25, duration: 0.5 })
 animate(0, 100, { onUpdate: v => console.log(v) })
 ```
+
+The module exports `animate`, `stagger`, `motionValue`, `MotionValue`, `isMotionValue` and `AnimationPlaybackControls`.
+
+### animate
+
+```ts
+animate(targets, keyframes, options?): AnimationPlaybackControls
+animate(value: MotionValue, to, options?): AnimationPlaybackControls
+animate(from: number, to: number, options?): AnimationPlaybackControls
+```
+
+- **Elements, selectors or an object:** `targets` is what [GSAP takes](#targets). `keyframes` is an object of properties: `{ x: 100, opacity: [0, 1] }`. It may hold a `transition` too.
+- **A motion value:** animates it to `to`, a value or an array of keyframes.
+- **A number:** animates from `from` to `to`, and gives each frame's value to `onUpdate`.
+
+```js title="count.js"
+animate(0, 1250, { duration: 1.5, ease: 'easeOut', onUpdate: (v) => { label.textContent = Math.round(v) } })
+```
+
+`animate` uses Motion's defaults: a spring for `x`, `y`, `scale` and `rotate` when you give one target value and no `duration` or `ease`, and a 0.3 s eased tween for everything else (0.8 s for keyframes). With a `type` or a `duration`, the default ease is `easeInOut`.
+
+Animation sequences (`animate([[a, {...}], [b, {...}]])`) throw a `TypeError`: they aren't built.
+
+### Transition options
+
+`animate`'s `options`, a Motion prop's `transition`, and GSAP's vars all take these.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `'tween'`, `'keyframes'`, `'spring'`, `'inertia'`, `'decay'` | see above | How it moves. `keyframes` is the same as `tween`; `decay` the same as `inertia`. Any other name throws. |
+| `duration` | seconds | Motion's: 0.3, 0.8 for keyframes | One play's length. For a spring, the time it settles in (with `bounce`). |
+| `delay` | seconds, or `stagger(each)` | `0` | Wait before it starts. |
+| `ease` | name, `[x1, y1, x2, y2]`, or a name per keyframe | Motion's ease | The curve. With keyframes, an array of names gives each segment its own. |
+| `times` | numbers, 0 to 1 | evenly spaced | Where each keyframe falls in the duration. |
+| `repeat` | count | `0` | Extra plays; `Infinity` or `-1` forever. |
+| `repeatType` | `'loop'`, `'reverse'`, `'mirror'` | `'loop'` | `reverse` and `mirror` play every other repeat backward (both are `yoyo: true`). |
+| `repeatDelay` | seconds | `0` | Wait between repeats. |
+
+**Spring options** (`type: 'spring'`). Give `stiffness`, `damping` and `mass`; or `duration` and `bounce`; or `visualDuration` and `bounce`.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `stiffness` | 100 (Motion's own default spring: 500, 550 for `scale`) | How hard it pulls toward the target. |
+| `damping` | 10 (Motion's own: 25, 30 for `scale`) | How fast it loses energy. Low values overshoot. |
+| `mass` | 1 | How heavy it is. Heavier is slower. |
+| `bounce` | 0.25 | 0 settles without overshoot; 1 bounces most. Used with `duration` or `visualDuration`. |
+| `visualDuration` | none | The time it takes to look done, with `bounce`. |
+| `velocity` | its speed now (0 at rest) | Its speed at the start, units per second. An interrupted motion hands over its own. |
+| `restDelta`, `restSpeed` | chosen from the distance | It is settled within this distance, and below this speed. |
+
+**Inertia options** (`type: 'inertia'`): it glides from a velocity and slows down.
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `velocity` | 0 | The speed it starts with, units per second. |
+| `power` | 0.8 | How far it glides. |
+| `timeConstant` | 0.325 | How fast it slows down, in seconds. |
+| `min`, `max` | none | Bounds. At a bound, a spring stops it. |
+| `bounceStiffness`, `bounceDamping` | 500, 10 | The spring at a bound. |
+| `restDelta` | 0.5 | It is settled within this distance. |
+
+**Per property:** a key of the transition that isn't an option is a property's own transition. `default` holds the options for the rest.
+
+```js
+animate('#card', { x: 200, opacity: 1 }, {
+  x: { type: 'spring', stiffness: 300 },
+  default: { duration: 0.2, ease: 'linear' },
+})
+```
+
+### Callbacks of animate
+
+| Option | Called when | Arguments |
+| --- | --- | --- |
+| `onUpdate` | every frame it moves | the value now: the number of `animate(from, to)`, the motion value's value, or an object's first property |
+| `onStart`, `onAnimationStart` | it starts | none |
+| `onComplete`, `onAnimationComplete` | it reaches its end | none |
+| `onRepeat` | a repeat begins | none |
+
+GSAP's `onReverseComplete` and `onInterrupt` work here too.
+
+### Playback controls
+
+`animate` returns an `AnimationPlaybackControls`:
+
+| Member | What it does |
+| --- | --- |
+| `play()` | Play, or play on after a pause. |
+| `pause()` | Pause where it is. |
+| `stop()` | Stop where it is, for good. |
+| `complete()` | Jump to its end now. |
+| `cancel()` | Go back to its start and stop. |
+| `time` | The playhead in seconds. Setting it seeks. |
+| `speed` | Its speed: `0.5` is half speed. |
+| `duration` | Its length in seconds. Read only. |
+| `state` | `'running'`, `'paused'` or `'finished'`. Read only. |
+| `finished` | A promise that resolves when it ends. |
+| `then()` | The controls are a thenable: `await c` waits for its end. |
+
+`stop()` and `cancel()` end it without finishing, so `finished` (and `await c`) never resolves after them.
+
+### stagger
+
+```ts
+stagger(each: number): Stagger
+```
+
+As `delay: stagger(0.05)`, each target starts `each` seconds after the one before. Motion's second argument (`from`, `startDelay`, `ease`) throws a `TypeError`.
+
+### Motion values
+
+A motion value is a number (or a CSS value) the engine animates. Bind it to a style property and the element follows it every frame, with no JavaScript per frame.
+
+```js title="follow.js"
+import { motionValue, animate } from '@blender-ui/native/motion'
+
+const x = motionValue(0)
+box.style = { width: 40, height: 40, x }          // bound: the box follows x
+x.on('change', (v) => { readout.textContent = v.toFixed(0) })
+animate(x, 300, { type: 'spring', bounce: 0.4 })
+```
+
+```ts
+motionValue<T>(init = 0, app?: App): MotionValue<T>
+new MotionValue<T>(init = 0, app?: App)
+isMotionValue(v): boolean
+```
+
+`app` is the `App` it belongs to; without it, the newest `App`.
+
+| Method | What it does |
+| --- | --- |
+| `get()` | Its value now, asked of the UI thread. |
+| `getVelocity()` | Its speed now, units per second. 0 when it isn't moving. |
+| `set(value)` | Set it now. This stops whatever animates it. |
+| `jump(value)` | The same as `set`. |
+| `on('change', fn)` | Call `fn(value)` on every change JavaScript sees. Returns a function that unsubscribes. Any other event throws a `TypeError`. |
+| `destroy()` | Free it now. Otherwise it is freed when it is garbage. |
+
+`on('change')` hears your own `set()` calls, and each frame of an animation that **started after** you subscribed. Subscribe first, then animate. `get()` always reads the true value.
+
+## Motion props on every element
 
 Any element takes Motion's props with `setMotion`:
 
@@ -60,38 +410,158 @@ el.setMotion('layout', true)
 el.style = { x: motionValue(0) }        // a motion value bound to a property
 ```
 
-The props are `initial`, `animate`, `exit`, `whileHover`, `whileTap`, `whileFocus`, `whileInView` (with `viewport`), `whileDrag`, `transition`, `variants`, `drag` (`true`, `'x'`, `'y'`) with `dragConstraints`, `dragElastic`, `dragMomentum` and `dragSnapToOrigin`, and `layout` (`true`, `'position'`, `'size'`). `setMotion(name, null)` removes one, and an unknown name throws.
+```ts
+el.setMotion(name: keyof MotionProps, value: MotionProps[name] | null): void
+```
+
+`setMotion(name, null)` removes a prop. An unknown name throws a `TypeError`. Times and repeats are checked when you call it. The rest of a value is read when the window sends its changes, at the end of the tick, so a bad value (`drag: 'diagonal'`) throws from that flush, not from `setMotion`.
+
+| Prop | Value | What it does |
+| --- | --- | --- |
+| `initial` | target, variant name, or `false` | Where it starts when it appears. `false` starts it at `animate`, with no enter animation. |
+| `animate` | target or variant name | Where it goes. Setting a new one animates from where it is now. |
+| `exit` | target or variant name | Where it goes when it is removed. It stays until that ends. |
+| `whileHover` | target or variant name | Held while the pointer is over it. |
+| `whileTap` | target or variant name | Held while it is pressed. |
+| `whileFocus` | target or variant name | Held while it has focus. |
+| `whileInView` | target or variant name | Held while it is in the window's view. |
+| `viewport` | `{ once, amount }` | For `whileInView`: `once` keeps it after it leaves; `amount` is how much must show, 0 to 1, or `'some'` (0) or `'all'` (1). |
+| `whileDrag` | target or variant name | Held while it is dragged. |
+| `transition` | [transition options](#transition-options) | How every change above moves, unless a target has its own `transition`. |
+| `variants` | `{ name: target }` | Named targets the props above can refer to. |
+| `drag` | `true`, `'x'`, `'y'` | Drag it with the pointer, on both axes or one. |
+| `dragConstraints` | `{ left, right, top, bottom }` | How far it may go, in pixels from where the drag started. |
+| `dragElastic` | 0 to 1, or a boolean | How far past the constraints it stretches. |
+| `dragMomentum` | boolean | Glide on with inertia after the pointer lets go. |
+| `dragSnapToOrigin` | boolean | Go back to where it started on release. |
+| `layout` | `true`, `'position'`, `'size'` | A change of its box (from layout) animates from the old box to the new one. `'position'` animates only the move, `'size'` only the size. |
+
+A **target** is an object of properties, optionally with its own `transition`: `{ opacity: 1, transition: { duration: 0.2 } }`.
+
+### Variants
+
+```js
+card.setMotion('variants', { hidden: { opacity: 0, y: 20 }, shown: { opacity: 1, y: 0 } })
+card.setMotion('initial', 'hidden')
+card.setMotion('animate', 'shown')
+```
+
+### Exit animations
+
+An element with an `exit` that you remove (`parent.removeChild(el)`) stays where it is and animates out, then goes. Put it back in the tree during the exit and it stays.
+
+```js
+toast.setMotion('exit', { opacity: 0, height: 0 })
+toast.setMotion('transition', { duration: 0.25 })
+list.removeChild(toast) // fades and shrinks, then leaves
+```
+
+### Motion values in style
+
+`el.style = { x: mv, width: 40 }` binds every motion value in the object; the plain values become the inline style. Setting the style to a string, or to `null`, lets go of the values. A signal of a style object, or a signal whose value is a motion value, binds the same way.
 
 ## In React
 
-```jsx
+```jsx title="Card.jsx"
 import { motion, useMotionValue, useSpring, useTransform } from '@blender-ui/react/motion'
 
 <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}
             whileHover={{ scale: 1.05 }} transition={{ type: 'spring', stiffness: 400 }} />
 ```
 
-- **Host elements:** `motion.div`, `motion.span` and the rest take the props above; `motion.Button`, `motion.NumberSlider` and the other Blender widgets animate their own values.
+Every host element takes the props of the [table above](#motion-props-on-every-element) as JSX props, with `"jsxImportSource": "@blender-ui/react"` for their types. `motion.div` is only a name for `div`: there is no wrapper component, and a render sends only the props that changed.
+
+| Export | What it is |
+| --- | --- |
+| `motion.div`, `motion.span` ... | The host element of that name. |
+| `motion.Button`, `motion.NumberSlider` ... | The Blender widget of that name. It animates its own values: `<motion.NumberSlider animate={{ value: 0.8 }} />`. |
+| `motion.create(Component)`, `motion(Component)` | `Component` itself. It animates when it passes the props on to the element it renders. |
+| `useMotionValue(init)` | A motion value that stays the same across renders. |
+| `useSpring(source, options?)` | A motion value that follows `source` (a number, or a motion value) with a spring. `options` are spring options. |
+| `useTransform(source, input, output)` | A motion value that maps `source` from the `input` ranges into the `output` ranges, linearly and clamped at the ends. Numbers only. |
+| `useTransform(source, fn)` | A motion value that is `fn(source)`. |
+| `useMotionValueEvent(value, 'change', fn)` | Calls `fn(v)` on each change, and unsubscribes when the component unmounts. |
+| `transform(input, output)` | The mapping `useTransform` uses, as a function: `transform([0, 100], [0, 1])(50)` is `0.5`. |
+| `AnimatePresence` | Passes its children through. Exits already work everywhere, so code that uses it keeps working. |
+| `animate`, `stagger`, `motionValue`, `MotionValue`, `isMotionValue` | The functions of `@blender-ui/native/motion`. |
+
+```jsx title="Progress.jsx"
+function Progress () {
+  const progress = useMotionValue(0)
+  const smooth = useSpring(progress, { stiffness: 200, damping: 30 })
+  const width = useTransform(smooth, [0, 1], [0, 300])
+  return <div style={{ height: 6, width }} onClick={() => progress.set(Math.random())} />
+}
+```
+
 - **Motion values:** `style={{ width: mv }}` follows a value without rendering the component again.
-- **Exit animations:** an element with an `exit` that you remove stays and animates out before it goes; `AnimatePresence` passes its children through.
-- **Not there yet:** `layoutId`.
+- **Derived values:** `useSpring` and `useTransform` update each time JavaScript sees the source change: a `set()`, or a frame of an animation started after the hook subscribed.
+- **Exit animations:** an element with an `exit` that React removes stays and animates out before it goes. `AnimatePresence`'s `mode` and `custom` aren't there.
+- **Not there yet:** `layoutId`, and the callback props (`onAnimationComplete` and the rest) on elements.
 
 ## Springs and eases
 
-`type: 'spring'` is a real spring: the engine solves the damped spring equation in closed form, for the underdamped, critically damped and overdamped cases. A frame reads the value at its time, so the frame rate doesn't change the result, and interrupting a spring hands its position and velocity to the next motion. Give `stiffness`, `damping` and `mass`, or `duration` and `bounce`. `type: 'inertia'` decays from a velocity.
+`type: 'spring'` is a real spring: the engine solves the damped spring equation in closed form, for the underdamped, critically damped and overdamped cases. A frame reads the value at its time, so the frame rate doesn't change the result, and interrupting a spring hands its position and velocity to the next motion. A spring in a timeline lasts until it settles, at most 20 s. `type: 'inertia'` decays from a velocity.
 
-Every ease of GSAP, Motion, CSS and Blender works by name: `'none'`, `'power2.out'`, `'sine.inOut'`, `'expo.out'`, `'back.out(1.7)'`, `'elastic.out(1, 0.3)'`, `'bounce.out'`, `'steps(4)'`, `'easeInOut'`, `'anticipate'`, `'cubic-bezier(0.2, 0.8, 0.4, 1)'`, a `[x1, y1, x2, y2]` array, or a name you registered with `CustomEase`.
+### Eases
+
+Every ease of GSAP, Motion, CSS and Blender works by name. Case doesn't matter.
+
+| From | Names |
+| --- | --- |
+| GSAP | `none`, `power0` to `power4`, `quad`, `cubic`, `quart`, `quint`, `strong`, `sine`, `expo`, `circ`, `back(overshoot)`, `elastic(amplitude, period)`, `bounce`, each with `.in`, `.out` or `.inOut` (alone it is `.out`); the old `Power2.easeOut` and `.config(...)` forms; `steps(n)`, `slow(ratio, power, yoyo)`, `rough({...})`, `expoScale(start, end, ease)`, `wiggle(n, type)`, `customBounce(strength)` |
+| Motion | `linear`, `easeIn`, `easeOut`, `easeInOut`, `circIn`, `circOut`, `circInOut`, `backIn`, `backOut`, `backInOut`, `anticipate`, and a `[x1, y1, x2, y2]` array |
+| CSS | `ease`, `ease-in`, `ease-out`, `ease-in-out`, `step-start`, `step-end`, `steps(n, jump-start)` and the other step positions, `cubic-bezier(x1, y1, x2, y2)`, `linear(0, 0.25 75%, 1)` |
+| Blender | `constant`, `linear`, `bezier`, and its easing types (`sine` to `elastic`) with `.in`, `.out` or `.inOut` |
+| Yours | a name made with [`CustomEase.create`](#customease-and-registerplugin) |
+
+<Callout type="warning" title="A misspelled ease is linear">
+A name the engine doesn't know falls back to `linear`, as GSAP does. It doesn't throw. If a motion looks too even, check the spelling.
+</Callout>
 
 ## Web Animations
 
-`el.animate(keyframes, options)` runs for real, on the same engine. **Status: built**, with `play`, `pause`, `reverse`, `finish`, `cancel`, `playbackRate`, `currentTime`, `onfinish` and `finished`.
+`el.animate(keyframes, options)` runs for real, on the same engine. It returns an `Animation`.
 
 ```js
 const a = el.animate([{ opacity: 0 }, { opacity: 1 }], { duration: 300, easing: 'ease-out', fill: 'forwards' })
 await a.finished
 ```
 
-`endDelay` and a `composite` other than `'replace'` throw. `cancel()` stops it and rejects `finished` with an `AbortError`, but the engine cannot yet revert an animated style, so the first keyframe's values stay until you set the style yourself.
+**Keyframes** are an array of frames (`[{ opacity: 0 }, { opacity: 1 }]`) or an object of arrays (`{ opacity: [0, 1] }`). A frame may have an `offset` (0 to 1) and an `easing` for the segment that starts at it.
+
+**Options** are a number (the duration in milliseconds) or an object:
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `duration` | `0` | Milliseconds. |
+| `delay` | `0` | Milliseconds before it starts. |
+| `easing` | `'linear'` | Any ease name of the [table above](#eases). |
+| `iterations` | `1` | How many plays; `Infinity` forever. A fraction rounds up. |
+| `direction` | `'normal'` | `'reverse'`, `'alternate'` or `'alternate-reverse'`. |
+| `playbackRate` | `1` | Its speed. |
+| `fill` | | Accepted, but the values always stay where it ends, as `'forwards'` does. |
+| `endDelay` | | Not built: a non-zero value throws a `TypeError`. |
+| `composite` | `'replace'` | Anything else throws a `TypeError`. |
+
+**The `Animation`:**
+
+| Member | What it does |
+| --- | --- |
+| `play()` | Play. After it finished or was canceled, play again from the start. |
+| `pause()` | Pause. |
+| `reverse()` | Play backward. After it finished, `finished` is a new promise. |
+| `finish()` | Jump to its end. |
+| `cancel()` | Go back to its start and stop. A pending `finished` rejects with an `AbortError`. |
+| `updatePlaybackRate(rate)` | Set `playbackRate`. |
+| `playState` | `'running'`, `'paused'`, `'finished'` or `'idle'` (after `cancel()`). |
+| `pending` | Always `false`. |
+| `currentTime` | The playhead in milliseconds. Setting it seeks. |
+| `playbackRate` | Its speed. |
+| `finished` | A promise that resolves with the animation when it ends. |
+| `onfinish`, `oncancel` | Called with `{ type, target }` when it finishes or is canceled. |
+
+The engine can't yet put a style back the way it was. After `cancel()`, the first keyframe's values stay until you set the style yourself.
 
 ## Svelte transitions
 
@@ -107,19 +577,60 @@ await a.finished
 
 An outro keeps the element until it ends, and showing it again during the outro keeps one element. Svelte cancels a finished animation, so give an element that transitions explicit styles (see the `cancel()` note above). `app.advanceClock(ms)` steps a transition in tests (`bindings/svelte/test/svelte.test.js`). `use:motion` and the `spring` and `tweened` stores are not built.
 
+## Other ways to move things
+
+- **CSS:** `transition`, `animation` and `@keyframes` work in a stylesheet or an inline style.
+- **`win.requestAnimationFrame(cb)`** runs `cb(time)` before the next frame, paced by the display; `time` is `performance.now()`. `win.cancelAnimationFrame(id)` cancels it. Use it when JavaScript must compute each frame; the APIs above don't need it. See [Frames and measuring](../native-api/#frames-and-measuring).
+- **`win.startViewTransition(update)`** pictures the window, runs `update` (which may return a promise), and moves boxes with a `view-transition-name` to their new place while the page cross-fades. All three promises it returns (`updateCallbackDone`, `ready`, `finished`) resolve once the update is committed, not when the animation ends, and `skipTransition()` does nothing.
+
 ## Numbers and positions
 
-Every call checks its numbers where you make it: a NaN or infinite `duration`, `delay`, `repeatDelay`, `seek` or `timeScale` throws a `RangeError`, a negative duration or delay is 0, `repeat: -1` (or `Infinity`) is forever and a repeat above 1,000,000 is clamped, and a position that is not GSAP's grammar (`'<=1'`, `{}`) throws instead of being taken as a label. The whole contract is under [Numbers and positions](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#numbers-and-positions).
+Every call checks its numbers where you make it:
+
+| Input | Rule |
+| --- | --- |
+| `duration`, `delay`, `repeatDelay`, `stagger` | A finite number of seconds. Negative is 0. NaN or infinite throws a `RangeError`. A non-number (`'1'`) throws a `TypeError`. |
+| `repeat` | `-1` or `Infinity` is forever. Other negatives are 0. A fraction is cut to a whole number. Above 1,000,000 is clamped to 1,000,000. NaN throws. |
+| `timeScale`, `seek`, `progress`, `currentTime` | A finite number. NaN or infinite throws a `RangeError`, and nothing changes. |
+| position | A finite number, or [GSAP's grammar](#position-parameter). Anything else throws. |
+
+The same checks apply inside `transition` and `defaults`, and to Web Animations' `duration`, `delay` and `iterations`. The whole contract is under [Numbers and positions](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#numbers-and-positions).
 
 ## Testing animations
 
 A headless app's clock stands still. Move it by hand to check a value frame by frame:
 
-```js
-const app = new App({ headless: true })
-// ...open a window, start an animation...
-await app.advanceClock(500)   // half a second later, every window has rendered that frame
+```ts
+app.advanceClock(ms: number): Promise<void>
 ```
+
+It sends every window's pending changes, moves the animation clock `ms` milliseconds forward, and renders that frame in every window. The promise resolves once that step's callbacks (`onUpdate` and the rest) have run.
+
+```js title="slide.test.js"
+const test = require('node:test')
+const assert = require('node:assert')
+const { App } = require('@blender-ui/native')
+const { gsap } = require('@blender-ui/native/gsap')
+
+test('the box slides halfway in half the time', async (t) => {
+  const app = new App({ headless: true })
+  t.after(() => app.quit())
+  gsap.ticker.lagSmoothing(0) // a 500 ms step is not a stall
+  const win = app.window({ width: 400, height: 300 })
+  const box = win.createElement('div')
+  box.style = { width: 10, height: 10 }
+  win.body.appendChild(box)
+
+  gsap.to(box, { width: 110, duration: 1, ease: 'none' })
+  await app.advanceClock(500)
+  const { width } = await box.getBoundingClientRect()
+  assert.ok(Math.abs(width - 60) < 1)
+})
+```
+
+<Callout type="tip" title="Turn lag smoothing off in tests">
+A step longer than 500 ms counts as a stall and moves the clock only 33 ms. Call `gsap.ticker.lagSmoothing(0)` once before steps that long.
+</Callout>
 
 ## Examples
 
@@ -130,14 +641,51 @@ await app.advanceClock(500)   // half a second later, every window has rendered 
 - `magnetic.js`: buttons that lean toward the pointer and snap back with a spring.
 - `playground.js`: a marquee, a draggable puck and an equalizer.
 
-React and Svelte: `bindings/react/test/motion.test.js` and `bindings/svelte/test/svelte.test.js` are small runnable examples of `motion.div`, `useTransform`, `AnimatePresence` and Svelte transitions.
+React and Svelte: `bindings/react/test/motion.test.js` and `bindings/svelte/test/svelte.test.js` are small runnable examples of `motion.div`, `useTransform`, `AnimatePresence` and Svelte transitions. `bindings/node/test/anim.test.js` covers GSAP, `animate`, the Motion props and Web Animations.
 
 ## Limits
 
 - **Widgets:** a Blender widget has no draw transform or opacity; `x`, `y`, `scale`, `rotate` and `opacity` apply to HTML elements. A widget animates its own values.
-- **QuickJS:** `bui build` without `--bun` runs on QuickJS, which has no animation commands yet: `gsap`, `animate` and `el.animate` throw an error that says so. Node and Bun have them.
-- **Not built:** `gsap.quickTo`, `context`, `matchMedia`, `utils`, `ScrollTrigger`, `Flip`, `Draggable`, `Observer`, Motion's `spring`, `scroll`, `inView`, `hover`, `press`, animation sequences, and in React `useVelocity`, `useScroll`, `useInView`, `useAnimate`, `LayoutGroup`, `MotionConfig` and `layoutId`. [The full table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point).
 - **Cost:** a frame that only animates skips rendering, the cascade and layout and repaints only what changed. It is not allocation-free: each call hands its values over once, and a callback such as `onUpdate` costs an event per frame it runs.
+
+## Not done yet
+
+<ComingSoon feature="The rest of GSAP and Motion in JavaScript">
+
+**GSAP**
+
+- `gsap.quickTo`, `gsap.killTweensOf`, `gsap.context`, `gsap.matchMedia` and `gsap.utils`.
+- The plugins: `ScrollTrigger`, `Flip`, `Draggable` and `Observer`.
+- Stagger options: a stagger object takes only `each`. `from`, `amount`, `grid`, `axis` and `ease` throw.
+
+**Motion**
+
+- The functions `spring`, `scroll`, `inView`, `hover`, `press`, `mix` and `frame`. `transform` exists only in `@blender-ui/react/motion`.
+- Animation sequences: `animate([[a, {...}], [b, {...}]])`.
+- Options to `stagger(each, options)`. It throws a `TypeError` if you pass any.
+
+**React, Svelte and Vue**
+
+- The hooks `useVelocity`, `useScroll`, `useInView`, `useAnimate`, `useAnimationFrame`, `useReducedMotion` and `useDragControls`.
+- `LayoutGroup`, `MotionConfig`, `layoutId`, and `mode` on `AnimatePresence`.
+- Svelte's `use:motion` and its `tweened` and `spring` stores. Vue's `<Motion>`.
+
+**Runtimes**
+
+- QuickJS: `bui build` without `--bun` runs on QuickJS, which has no animation commands yet. `gsap`, `animate` and `el.animate` throw an error that says so. Node and Bun have them.
+
+**Partly done**
+
+- **Typos:** a key that isn't an option is taken as a property to animate, and an unknown ease is linear. Neither throws.
+- **Late checks:** `el.setMotion` checks only times and repeats when you call it. A bad value such as `drag: 'diagonal'` throws later, from `win.flush()`.
+- **Promises:** a tween you `kill()`, or controls you `stop()` or `cancel()`, never complete. `await t`, `await c` and `c.finished` wait forever.
+- **Web Animations:** `fill` is ignored, and values always stay at the end as with `'forwards'`. `pending` is always `false`. A nonzero `endDelay` throws. `iterationStart`, `id` and the other options not listed above are ignored.
+- **View transitions:** the promises from `startViewTransition` resolve when the update is committed, not when the animation ends. `skipTransition()` does nothing.
+- **Types:** `MotionProps` has no `style`, though `setMotion('style', ...)` works.
+
+The [status table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point) covers every language.
+
+</ComingSoon>
 
 ## Next steps
 
@@ -147,5 +695,8 @@ React and Svelte: `bindings/react/test/motion.test.js` and `bindings/svelte/test
   </Card>
   <Card title="Signals" href="docs/javascript/signals/" icon="broadcast" kicker="JavaScript & React">
     State that updates one node without rendering again.
+  </Card>
+  <Card title="The native API" href="docs/javascript/native-api/" icon="code" kicker="JavaScript & React">
+    Apps, windows, elements, events and headless tests.
   </Card>
 </CardGrid>

@@ -1,0 +1,27 @@
+---
+// A page's written content (an MDX page's body): the site's prose styles, "#" links on its
+// headings, and wide tables wrapped so they scroll on phones.
+---
+
+<div class="prose" data-prose>
+  <slot />
+</div>
+
+<script>
+  document.querySelectorAll("[data-prose]").forEach((prose) => {
+    prose.querySelectorAll<HTMLElement>(":scope > h2[id], :scope > h3[id]").forEach((h) => {
+      const a = document.createElement("a");
+      a.href = `#${h.id}`;
+      a.className = "heading-anchor unstyled";
+      a.setAttribute("aria-label", `Link to ${h.textContent}`);
+      a.textContent = "#";
+      h.append(a);
+    });
+    prose.querySelectorAll(":scope > table").forEach((t) => {
+      const wrap = document.createElement("div");
+      wrap.className = "table-wrap";
+      t.replaceWith(wrap);
+      wrap.append(t);
+    });
+  });
+</script>

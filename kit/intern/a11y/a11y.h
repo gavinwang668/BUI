@@ -1,6 +1,6 @@
 /* Accessibility, the kit's side (BUI_kit.h "accessibility"): each context's tree, built from its
  * nodes and the subtrees hosts attach (a11y.c), served to the platform by the window hosts through
- * bui-a11y (a11y/include/bui_a11y.h). Without the "a11y" feature (BUI_A11Y off) a11y_off.c keeps
+ * bui-a11y (platform/a11y/include/bui_a11y.h). Without the "a11y" feature (BUI_A11Y off) a11y_off.c keeps
  * the API and builds nothing.
  *
  * SPDX-License-Identifier: GPL-2.0-or-later */

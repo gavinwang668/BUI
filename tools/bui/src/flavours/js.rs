@@ -1,4 +1,4 @@
-//! JavaScript and TypeScript: React, Svelte or BUI's own DOM-like API, on Bun, npm or pnpm, with
+//! JavaScript and TypeScript: React, Svelte, Vue or BUI's own DOM-like API, on Bun, npm or pnpm, with
 //! Biome for lint and format and TypeScript's strict mode.
 
 use std::path::Path;
@@ -7,11 +7,11 @@ use anyhow::{Context, Result, bail};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::{Adopted, File, Flavour, Step, Vars, read, render, step};
+use super::{Adopted, File, Flavour, Step, Vars, read, read_manifest, render, step};
 use crate::check::{self, Check, Fix};
 use crate::project::{Framework, Language, PackageManager};
 use crate::registry;
-use crate::sys::Cmd;
+use crate::sys::{Cmd, semver, version_of};
 use crate::tools::Tool;
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -69,7 +69,7 @@ impl JsApp {
         match (self.framework, self.language) {
             (Framework::React, Language::TypeScript) => "src/main.tsx",
             (Framework::React, Language::JavaScript) => "src/main.jsx",
-            (Framework::Svelte, _) | (Framework::Vanilla, Language::JavaScript) => "src/main.js",
+            (Framework::Svelte | Framework::Vue, _) | (Framework::Vanilla, Language::JavaScript) => "src/main.js",
             (Framework::Vanilla, Language::TypeScript) => "src/main.ts",
         }
     }
@@ -77,7 +77,7 @@ impl JsApp {
     /// Run by `tsx` (TypeScript and JSX on Node): in CommonJS mode, as Node cannot import the named
     /// exports of BUI's CommonJS packages from an ES module.
     fn uses_tsx(&self) -> bool {
-        self.pm != PackageManager::Bun && self.framework != Framework::Svelte && (self.typed() || self.framework == Framework::React)
+        self.pm != PackageManager::Bun && !self.framework.has_loader() && (self.typed() || self.framework == Framework::React)
     }
 
     /// The command that runs the entry, as `bun`, `tsx` or `node` do, with the Svelte loader where needed.
@@ -87,6 +87,9 @@ impl JsApp {
         match self.framework {
             // @blender-ui/svelte's loader does not work under Bun (its compiler call fails there): Node runs it
             Framework::Svelte => format!("node --import @blender-ui/svelte/register {}{entry}", flag("--watch ")),
+            // @blender-ui/vue's loader runs on Node.js 22.15+ (`--import`) and on Bun (`--preload`)
+            Framework::Vue if self.pm == PackageManager::Bun => format!("bun --preload @blender-ui/vue/register {}{entry}", flag("--watch ")),
+            Framework::Vue => format!("node --import @blender-ui/vue/register {}{entry}", flag("--watch ")),
             _ if self.pm == PackageManager::Bun => format!("bun {}{entry}", flag("--watch ")),
             _ if self.uses_tsx() => format!("tsx {}{entry}", flag("watch ")),
             _ => format!("node {}{entry}", flag("--watch ")),
@@ -150,6 +153,7 @@ impl JsApp {
         match self.framework {
             Framework::React => prod.extend(["@blender-ui/react", "react"]),
             Framework::Svelte => prod.extend(["@blender-ui/svelte", "svelte"]),
+            Framework::Vue => prod.extend(["@blender-ui/vue", "vue"]),
             Framework::Vanilla => {}
         }
         let mut dev = vec!["@biomejs/biome"];
@@ -179,7 +183,49 @@ impl JsApp {
         let bui: Vec<&str> = bui.iter().map(String::as_str).collect();
         [self.pm.add(dir, false, &bui), self.pm.update(dir)]
     }
+
+    /// The loaders of Svelte and Vue need Node.js 22.15 or newer (module hooks) when Node runs the app.
+    fn loader_node_check(&self) -> Option<Check> {
+        if !self.framework.has_loader() || (self.pm == PackageManager::Bun && self.framework != Framework::Svelte) {
+            return None;
+        }
+        let have = version_of("node", &["--version"])?;
+        (semver(&have) < LOADER_NODE).then(|| {
+            Check::fail("Node.js", format!("{have}: the Svelte and Vue loaders need 22.15 or newer"), Some(Fix::install("installs the newest Node.js", Tool::Node.install().cmds)))
+        })
+    }
+
+    fn package_checks(&self, dir: &Path) -> Vec<Check> {
+        let manifest = read(dir, "package.json").and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok());
+        // BUI and the tooling apart: a tooling add that failed after BUI's is offered again
+        let (prod, dev) = self.packages();
+        let missing = |pkgs: Vec<&'static str>| pkgs.into_iter().find(|p| !manifest.as_ref().is_some_and(|m| depends_on(m, p)));
+        let [bui, tooling] = self.adds(dir);
+        let add = match (missing(prod), missing(dev)) {
+            (None, None) => None,
+            (Some(p), None) => Some((p, "adds BUI at its newest", vec![bui])),
+            (None, Some(p)) => Some((p, "adds the tooling at its newest", vec![tooling])),
+            (Some(p), Some(_)) => Some((p, "adds BUI and the tooling at their newest", vec![bui, tooling])),
+        };
+        if let Some((package, what, cmds)) = add {
+            return vec![Check::fail(package, "not a dependency in package.json", Some(Fix::run(what, cmds)))];
+        }
+        let install = Fix::run("installs the packages", vec![Cmd::new(self.pm.bin(), ["install"]).in_dir(dir)]);
+        if !dir.join("node_modules").is_dir() {
+            return vec![Check::fail("node_modules", "packages are not installed", Some(install))];
+        }
+        let manifest = read(dir, "node_modules/@blender-ui/native/package.json");
+        let have = manifest.and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok()).and_then(|v| v["version"].as_str().map(str::to_owned));
+        let Some(have) = have else {
+            return vec![Check::fail("@blender-ui/native", "not installed", Some(install))];
+        };
+        let fix = Fix::run("moves BUI's packages to the newest", self.upgrade(dir).into());
+        vec![check::newest("@blender-ui/native", &have, registry::npm_version("@blender-ui/native").as_deref(), fix)]
+    }
 }
+
+/// The oldest Node.js the Svelte and Vue loaders run on (their `engines`).
+const LOADER_NODE: [u64; 3] = [22, 15, 0];
 
 /// Whether the manifest lists `package` among its dependencies.
 fn depends_on(manifest: &serde_json::Value, package: &str) -> bool {
@@ -191,6 +237,7 @@ impl Flavour for JsApp {
         let fw = match self.framework {
             Framework::React => "React",
             Framework::Svelte => "Svelte",
+            Framework::Vue => "Vue",
             Framework::Vanilla => "plain DOM",
         };
         let lang = if self.typed() { "TypeScript" } else { "JavaScript" };
@@ -219,12 +266,10 @@ impl Flavour for JsApp {
     }
 
     /// An existing `package.json` keeps everything it has; the scripts the commands run are added when absent.
-    fn adopt(&self, dir: &Path) -> Result<Vec<Adopted>> {
+    fn adopt(&self, dir: &Path, _name: &str) -> Result<Vec<Adopted>> {
         let path = dir.join("package.json");
-        let text = match std::fs::read_to_string(&path) {
-            Ok(text) => text,
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(e) => return Err(e).with_context(|| format!("reading {}: fix it first, then run `bui init` again", path.display())),
+        let Some(text) = read_manifest(dir, "package.json")? else {
+            return Ok(Vec::new());
         };
         let mut doc: serde_json::Value = serde_json::from_str(&text).with_context(|| format!("{} is not valid JSON: fix it first, then run `bui init` again", path.display()))?;
         let Some(root) = doc.as_object_mut() else {
@@ -261,6 +306,7 @@ impl Flavour for JsApp {
             (Framework::React, Language::TypeScript) => "js/react-ts",
             (Framework::React, Language::JavaScript) => "js/react-js",
             (Framework::Svelte, _) => "js/svelte",
+            (Framework::Vue, _) => "js/vue",
             (Framework::Vanilla, Language::TypeScript) => "js/vanilla-ts",
             (Framework::Vanilla, Language::JavaScript) => "js/vanilla-js",
         };
@@ -291,31 +337,9 @@ impl Flavour for JsApp {
     }
 
     fn checks(&self, dir: &Path) -> Vec<Check> {
-        let manifest = read(dir, "package.json").and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok());
-        // BUI and the tooling apart: a tooling add that failed after BUI's is offered again
-        let (prod, dev) = self.packages();
-        let missing = |pkgs: Vec<&'static str>| pkgs.into_iter().find(|p| !manifest.as_ref().is_some_and(|m| depends_on(m, p)));
-        let [bui, tooling] = self.adds(dir);
-        let add = match (missing(prod), missing(dev)) {
-            (None, None) => None,
-            (Some(p), None) => Some((p, "adds BUI at its newest", vec![bui])),
-            (None, Some(p)) => Some((p, "adds the tooling at its newest", vec![tooling])),
-            (Some(p), Some(_)) => Some((p, "adds BUI and the tooling at their newest", vec![bui, tooling])),
-        };
-        if let Some((package, what, cmds)) = add {
-            return vec![Check::fail(package, "not a dependency in package.json", Some(Fix::run(what, cmds)))];
-        }
-        let install = Fix::run("installs the packages", vec![Cmd::new(self.pm.bin(), ["install"]).in_dir(dir)]);
-        if !dir.join("node_modules").is_dir() {
-            return vec![Check::fail("node_modules", "packages are not installed", Some(install))];
-        }
-        let manifest = read(dir, "node_modules/@blender-ui/native/package.json");
-        let have = manifest.and_then(|m| serde_json::from_str::<serde_json::Value>(&m).ok()).and_then(|v| v["version"].as_str().map(str::to_owned));
-        let Some(have) = have else {
-            return vec![Check::fail("@blender-ui/native", "not installed", Some(install))];
-        };
-        let fix = Fix::run("moves BUI's packages to the newest", self.upgrade(dir).into());
-        vec![check::newest("@blender-ui/native", &have, registry::npm_version("@blender-ui/native").as_deref(), fix)]
+        let mut checks: Vec<Check> = self.loader_node_check().into_iter().collect();
+        checks.extend(self.package_checks(dir));
+        checks
     }
 
     fn update(&self, dir: &Path) -> Vec<Step> {
@@ -344,7 +368,7 @@ mod tests {
         let dir = scratch("adopt");
         let manifest = r#"{"name":"mine","zeta":1,"scripts":{"dev":"vite","test":"vitest"},"alpha":2}"#;
         std::fs::write(dir.join("package.json"), manifest).unwrap();
-        let adopted = app().adopt(&dir).unwrap();
+        let adopted = app().adopt(&dir, "demo").unwrap();
         assert_eq!(adopted.len(), 1);
         let doc: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(dir.join("package.json")).unwrap()).unwrap();
         assert_eq!(doc["scripts"]["dev"], "vite", "their script is kept");
@@ -354,7 +378,7 @@ mod tests {
         let keys: Vec<&String> = doc.as_object().unwrap().keys().collect();
         assert_eq!(keys, ["name", "zeta", "scripts", "alpha"], "their order is kept");
         let again = std::fs::read_to_string(dir.join("package.json")).unwrap();
-        assert!(app().adopt(&dir).unwrap()[0].note.contains("left as it was"));
+        assert!(app().adopt(&dir, "demo").unwrap()[0].note.contains("left as it was"));
         assert_eq!(again, std::fs::read_to_string(dir.join("package.json")).unwrap(), "a second pass changes nothing");
         std::fs::remove_dir_all(&dir).unwrap();
     }
@@ -363,10 +387,10 @@ mod tests {
     fn a_manifest_that_cannot_be_read_stops_init() {
         let dir = scratch("broken");
         std::fs::write(dir.join("package.json"), "{ not json").unwrap();
-        assert!(app().adopt(&dir).is_err());
+        assert!(app().adopt(&dir, "demo").is_err());
         assert_eq!(std::fs::read_to_string(dir.join("package.json")).unwrap(), "{ not json", "it is not touched");
         std::fs::write(dir.join("package.json"), r#"{"scripts": []}"#).unwrap();
-        assert!(app().adopt(&dir).is_err());
+        assert!(app().adopt(&dir, "demo").is_err());
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -374,12 +398,12 @@ mod tests {
     fn unreadable_manifests_and_module_type_with_tsx_stop_init() {
         let dir = scratch("stop");
         std::fs::write(dir.join("package.json"), [0xff, 0xfe, 0x7b]).unwrap();
-        assert!(app().adopt(&dir).is_err(), "invalid UTF-8 is an error, not an absent file");
+        assert!(app().adopt(&dir, "demo").is_err(), "invalid UTF-8 is an error, not an absent file");
         let tsx = JsApp { framework: Framework::React, language: Language::TypeScript, pm: PackageManager::Npm };
         std::fs::write(dir.join("package.json"), r#"{"type":"module"}"#).unwrap();
-        assert!(tsx.adopt(&dir).is_err(), "tsx cannot import the CommonJS react package as ESM");
-        assert!(app().adopt(&dir).is_ok(), "plain JavaScript can");
-        assert_eq!(app().adopt(&scratch("none")).unwrap().len(), 0, "no manifest, nothing adopted");
+        assert!(tsx.adopt(&dir, "demo").is_err(), "tsx cannot import the CommonJS react package as ESM");
+        assert!(app().adopt(&dir, "demo").is_ok(), "plain JavaScript can");
+        assert_eq!(app().adopt(&scratch("none"), "demo").unwrap().len(), 0, "no manifest, nothing adopted");
         std::fs::remove_dir_all(&dir).unwrap();
     }
 
@@ -423,6 +447,42 @@ mod tests {
         let [bui, rest] = react.upgrade(Path::new("."));
         assert_eq!(bui.display(), "bun add @blender-ui/native@latest @blender-ui/react@latest", "not react itself");
         assert_eq!(rest.display(), "bun update");
+    }
+
+    fn vue(pm: PackageManager) -> JsApp {
+        JsApp { framework: Framework::Vue, language: Language::JavaScript, pm }
+    }
+
+    #[test]
+    fn a_vue_app_runs_through_its_loader_on_node_or_bun() {
+        assert_eq!(vue(PackageManager::Npm).runner(false), "node --import @blender-ui/vue/register src/main.js");
+        assert_eq!(vue(PackageManager::Pnpm).runner(true), "node --import @blender-ui/vue/register --watch src/main.js");
+        assert_eq!(vue(PackageManager::Bun).runner(false), "bun --preload @blender-ui/vue/register src/main.js");
+        assert_eq!(vue(PackageManager::Bun).runner(true), "bun --preload @blender-ui/vue/register --watch src/main.js");
+        assert!(!vue(PackageManager::Npm).uses_tsx(), "no tsx: the loader compiles the components");
+        assert_eq!(vue(PackageManager::Bun).label(), "Vue + JavaScript on bun");
+    }
+
+    #[test]
+    fn a_vue_app_depends_on_the_vue_packages_and_has_its_components() {
+        let (prod, _) = vue(PackageManager::Npm).packages();
+        assert_eq!(prod, ["@blender-ui/native", "@blender-ui/vue", "vue"]);
+        let files = vue(PackageManager::Npm).files(&Vars::new("my-app"));
+        let body = |path: &str| files.iter().find(|f| f.path == path).unwrap_or_else(|| panic!("{path}")).body.clone();
+        assert!(body("src/main.js").contains("from '@blender-ui/vue'") && body("src/main.js").contains("'My App'"));
+        assert!(body("src/Counter.vue").contains("<script setup>") && body("src/Counter.vue").contains("{{ count }}"), "Vue's own braces are kept");
+        assert!(body("src/Counter.vue").contains("My App"));
+        assert!(body("biome.json").contains("!**/*.vue"));
+        let package: serde_json::Value = serde_json::from_str(&body("package.json")).unwrap();
+        assert_eq!(package["type"], "module");
+        assert_eq!(package["scripts"]["dev"], "node --import @blender-ui/vue/register --watch src/main.js");
+        assert!(!files.iter().any(|f| f.path == "tsconfig.json"));
+    }
+
+    #[test]
+    fn the_node_loaders_are_not_checked_where_bun_runs_vue() {
+        assert!(vue(PackageManager::Bun).loader_node_check().is_none());
+        assert!(app().loader_node_check().is_none(), "plain DOM has no loader");
     }
 
     #[test]

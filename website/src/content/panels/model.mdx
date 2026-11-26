@@ -1,0 +1,203 @@
+---
+title: The layout model
+sidebarLabel: Layout model
+description: The geometry under a bui-panels workspace - layout rects and minimum sizes, divider pushing, spatial navigation, drop targets, springs and tweens - in the public model and motion modules.
+group: Reference
+order: 70
+sources: ["addons/bui-panels/src/model/tree.rs", "addons/bui-panels/src/model/resize.rs", "addons/bui-panels/src/model/spatial.rs", "addons/bui-panels/src/motion.rs", "addons/bui-panels/src/nav.rs", "addons/bui-panels/src/lib.rs"]
+---
+
+The workspace is built on a small layout model that knows nothing about drawing: where each node of a layout goes, how far a divider can move, which panel is to the left of another, where a dragged panel would land. These modules are public, so you can use the same geometry in your own code: to draw a minimap of the layout, say, or to test a layout without a window.
+
+Most apps never need this page. Everything works in fractions of the layout (0 to 1) unless a function takes pixel metrics.
+
+## model::tree: rects and tree edits
+
+### Lay out a tree
+
+```rust
+pub fn layout_rects(root: Option<&Node>, metrics: Option<&dyn Metrics>) -> Entries
+```
+
+Gives every node of the tree its rect inside `Rect::UNIT`. Without `metrics`, sizes follow the weights alone. With `metrics`, each node gets at least its minimum size: a split too small for its children's minimums scales them down together (their entries' `scale` drops below 1) instead of crushing one.
+
+| `Metrics` method | What it returns |
+| --- | --- |
+| `width(&self) -> f64` | The layout's width in pixels. |
+| `height(&self) -> f64` | Its height in pixels. |
+| `min(&self, node: &Node, axis: Axis) -> f64` | The smallest size, in pixels, `node` may have along `axis`. |
+
+`PixelMetrics` is the workspace's own `Metrics`:
+
+| Field | Type | What it is |
+| --- | --- | --- |
+| `width`, `height` | `f64` | The layout's size in pixels. |
+| `gap` | `f64` | The gap between panels, added to every minimum. The workspace uses 6. |
+| `tabbar_height` | `f64` | A tab bar's height. A node's minimum height is this plus 28. The workspace uses 34. |
+| `panel_min_width` | `f64` | A node's minimum width. The workspace uses 80. |
+
+An empty stage's minimum is 120 pixels both ways, plus the gap.
+
+### Entries
+
+What `layout_rects` returns: one `Entry` per node, in tree order.
+
+| `Entry` field | Type | What it is |
+| --- | --- | --- |
+| `id` | `Id` | The node's id. |
+| `kind` | `Kind` | What the node is. |
+| `rect` | `Rect` | Its rect, in fractions of the layout. |
+| `parent` | `Option<Id>` | Its parent's id. |
+| `scale` | `f64` | How much it is scaled down to fit (1 when it fits). |
+| `range` | `bool` | Whether it is a range entry made by `focus_layout` rather than a real node. |
+
+| `Kind` variant | Fields |
+| --- | --- |
+| `Panel` | |
+| `Stage { child }` | `child: Option<Id>` |
+| `Split { axis, weights, children }` | `axis: Axis`, `weights: Vec<f64>` (the laid-out fractions), `children: Vec<Id>` |
+
+| `Entries` method | What it does |
+| --- | --- |
+| `get(&self, id: &str) -> Option<&Entry>` | One entry. |
+| `contains(&self, id: &str) -> bool` | Whether `id` has an entry. |
+| `rect(&self, id: &str) -> Option<Rect>` | An entry's rect. |
+| `len(&self) -> usize`, `is_empty(&self) -> bool` | How many entries. |
+| `insert(&mut self, entry: Entry)` | Adds or replaces an entry; a new one goes at the end of the order. |
+| `iter(&self) -> impl Iterator<Item = &Entry>` | The entries in order. |
+| `ids(&self) -> &[Id]` | The ids in order. |
+| `leaf_ids(&self, id: &str) -> Vec<Id>` | The panels (and empty stage) under `id`. |
+| `contains_node(&self, ancestor: &str, id: &str) -> bool` | Whether `id` is `ancestor` or under it. |
+
+### Walk and edit a tree
+
+| Function | What it does |
+| --- | --- |
+| `find_node(node: Option<&Node>, id: &str) -> Option<&Node>` | Finds a node by id. |
+| `panels_of(node: Option<&Node>) -> Vec<&PanelNode>` | Every panel under `node`, in order. |
+| `find_stage(node: Option<&Node>) -> Option<&StageNode>` | The stage. |
+| `leaf_ids(node: Option<&Node>) -> Vec<Id>` | The ids of the panels, and of an empty stage, in order. |
+| `contains_node(node: &Node, id: &str) -> bool` | Whether `id` is `node` or under it. |
+| `normalize(node: Node) -> Option<Node>` | Drops empty panels, replaces one-child splits with their child, merges a split into its parent when both run along the same axis, and scales weights to sum to 1. A weight that isn't a positive number counts as 0.001. `None` when nothing is left. |
+| `remove_node(root: Option<Node>, id: &str) -> Option<Node>` | Removes a node and gives its weight to a neighbour. A stage is never removed. |
+| `insert_beside(root: Option<Node>, target: &str, incoming: Node, edge: Edge, split_id: Id, share: f64) -> Node` | Wraps `target` in a new split `split_id` with `incoming` on `edge`, taking `share` (kept between 0.1 and 0.9). With no root, `incoming` is the root. |
+| `replace_node(root: Option<Node>, id: &str, replacement: Node) -> Option<Node>` | Swaps a node for another. |
+| `resize_boundary(split: &SplitNode, index: usize, position: f64, min: impl Fn(usize) -> f64) -> SplitNode` | Moves the boundary after child `index` to `position` (a fraction of the split), keeping both neighbours at least `min(i)` (but no more than half the pair). Only that pair changes. |
+| `distribute(total: f64, weights: &[f64], mins: &[f64]) -> Vec<f64>` | Splits `total` by `weights`, giving any child that would fall below its minimum exactly its minimum and sharing the rest. |
+| `sum(values: &[f64]) -> f64` | The sum. |
+
+## model::resize: dividers that push
+
+Dragging a divider in a workspace moves the dividers beyond it once the panels between them reach their minimum size. `drag_boundary` works that out.
+
+```rust
+pub fn drag_boundary(root: &Node, metrics: PixelMetrics, split_id: &str, index: usize) -> Option<BoundaryDrag>
+```
+
+Starts a drag of the boundary after child `index` of the split `split_id`. `None` when there is no such boundary.
+
+| `BoundaryDrag` member | What it is |
+| --- | --- |
+| `axis: Axis` | The direction the boundary moves. |
+| `start: f64` | Where it starts, as a fraction of the layout. |
+| `min: f64`, `max: f64` | How far it can go each way before everything in the way is at its minimum. |
+| `to(&self, target: f64) -> Node` | The tree with the boundary at `target` (clamped to `min..=max`) and every divider it pushes moved along. |
+
+The workspace's `keep_pushed` option decides whether a drag re-starts from the pushed layout on each move (pushes stick) or always solves from where the drag began (pushed dividers return).
+
+## model::spatial: navigation and drops
+
+### Focus and framing
+
+| Function | What it does |
+| --- | --- |
+| `focus_layout(root: Option<&Node>, metrics: Option<&dyn Metrics>) -> Entries` | `layout_rects`, plus a range entry for every run of two or more neighbouring children of a split with three or more children (not the whole split). Ranges let you frame "these two of the four panels". |
+| `range_id(split_id: &str, children: &[Id]) -> Id` | A range entry's id: `range:` followed by the JSON array of the split id and the children's ids. |
+| `nav_parent(entries: &Entries, id: &str) -> Option<Id>` | The nearest ancestor whose rect differs from `id`'s: what stepping out frames. |
+| `nav_node(entries: &Entries, id: &Id) -> Id` | Follows a stage down to its child, so a filled stage frames what it holds. |
+| `best_fit(camera: Rect, entries: &Entries) -> Option<Id>` | The entry whose size and position best match the camera rect. |
+| `neighbor(entries: &Entries, from: Rect, dx: f64, dy: f64) -> Option<Id>` | The best entry fully beyond `from` in the direction (`dx`, `dy`, each -1, 0 or 1) and overlapping it across that direction. |
+| `hierarchy_step(entries: &Entries, focused: &Id, direction: Step, point: (f64, f64)) -> Id` | One step out (to `nav_parent`) or in (to the child of a split under `point`). |
+| `frame_leaves(root: Option<&Node>, ids: &[Id]) -> Option<Id>` | The smallest node or range that holds every one of `ids`. |
+| `saved_frame_destination(root: Option<&Node>, leaves: &[Id]) -> Option<Id>` | What a saved framing frames now: `frame_leaves` of the leaves still in the tree; `None` if none are. |
+| `rectangle_camera(a: (f64, f64), b: (f64, f64), viewport: Rect, camera: Rect) -> Rect` | The camera rect that a rectangle dragged from `a` to `b` on screen covers. |
+| `record_visit(visits: Vec<Visit>, index: usize, visit: Visit) -> (Vec<Visit>, usize)` | Adds a framing to a history at `index`, dropping anything after it, unless it repeats the current one. Returns the history and the new index. |
+| `maximize_transition(entries: &Entries, root_id: &Id, focused: &Id, id: &Id, session: Option<&MaximizeSession>) -> (Id, Option<MaximizeSession>)` | What maximizing `id` frames next. Maximizing the framed node returns along the session's path (or to its parent); maximizing another starts a session that remembers the way back. |
+
+| Type | What it is |
+| --- | --- |
+| `Step` | `In` or `Out`. |
+| `Visit { id: Id, leaves: Vec<Id> }` | One framing in the history: the framed id and the panels it held. |
+| `MaximizeSession { id: Id, return_path: Vec<Id> }` | A maximized node and the ids to return through. |
+
+### Drop targets
+
+| Function | What it does |
+| --- | --- |
+| `drop_edge(point: (f64, f64), rect: Rect) -> Option<Edge>` | The edge of `rect` nearest `point`, when the point is within 28% of the rect from it. |
+| `drop_rects(rect: Rect, edge: Edge) -> DropRects` | How `rect` divides when something docks on `edge`. |
+| `tile_drop_target(entries: &Entries, id: &Id, edge: Edge) -> DockTargetSpec` | The target for a drop on `edge` of `id`. When `id`'s parent splits along the same axis, the drop goes into that split's seam instead of nesting a new split. |
+| `seam_target(entries: &Entries, split_id: &Id, boundary: usize) -> Option<DockTargetSpec>` | The target for a drop on the boundary before child `boundary` of a split. |
+| `frame_drop_target(entries: &Entries, group_id: &Id, point: (f64, f64), width: f64, height: f64, radius: f64) -> Option<DockTargetSpec>` | The target for a drop within `radius` pixels of the edge of a framed group of `width` × `height` pixels. |
+| `apply_dock_target(root: Option<Node>, target: &DockTargetSpec, incoming: Node, split_id: Id) -> Node` | Docks `incoming` at a target: at its seam if it has one, else beside its node with half the space. |
+| `insert_at_seam(root: Node, seam: &SplitSeam, incoming: &Node, split_id: &Id) -> Node` | Inserts `incoming` between the seam's `before` panels and the rest, even after the tree changed shape, as long as some of the seam's panels survive. |
+
+| Type | Fields |
+| --- | --- |
+| `DockTargetSpec` | `id: Id`, `edge: Edge`, `seam: Option<SplitSeam>`, `boundary: Option<usize>` |
+| `SplitSeam` | `axis: Axis`, `leaves: Vec<Id>` (the panels the seam runs between), `before: Vec<Id>` (those before it) |
+| `DropRects` | `slot: Rect` (where the incoming panel goes), `remaining: Rect` (what is left for the target), `collapsed: Rect` (the slot at zero size, on the edge) |
+
+## motion: springs and tweens
+
+The workspace's animation helpers, in `bui_panels::motion`.
+
+| Constant | Value | Used for |
+| --- | --- | --- |
+| `SPRING_STIFFNESS` | `210.0` | The camera spring's stiffness. |
+| `SPRING_DAMPING` | `29.0` | Its damping. |
+| `SPRING_MAX_STEP` | `0.032` | The longest time step, in seconds, one spring step takes. |
+| `SPRING_EPSILON` | `0.0001` | The error below which a spring stops. |
+| `LAYOUT_MS` | `460.0` | How long a layout change animates. |
+| `PICKUP_MS` | `280.0` | How long a picked-up panel takes to lift. |
+| `APPEAR_MS` | `220.0` | Exported for apps; the workspace doesn't use it. |
+| `DOCK_HIDE_MS` | `300.0` | How long hiding a panel animates. |
+| `DOCK_RESTORE_MS` | `380.0` | How long restoring one animates. |
+
+### RectSpring
+
+A rect that springs toward a target. The workspace's camera is one.
+
+| Member | What it is |
+| --- | --- |
+| `value`, `target`, `velocity` | Public `Rect` fields. |
+| `new(initial: Rect) -> RectSpring` | At rest at `initial`. |
+| `moving(&self) -> bool` | Whether it hasn't settled. |
+| `step(&mut self, dt: f64) -> bool` | Advances `dt` seconds (at most `SPRING_MAX_STEP`; 0.016 when `dt` isn't positive). `false` once it settles at the target. |
+| `finish(&mut self)` | Jumps to the target and stops. |
+| `jump(&mut self, rect: Rect)` | Sets the target and jumps to it. |
+
+### LayoutTween
+
+Tweens rects from where they were to where they are now.
+
+| Method | What it does |
+| --- | --- |
+| `begin(&mut self, from: HashMap<Id, Rect>, now: f64)` | Starts a tween from these rects at time `now` (milliseconds). |
+| `step(&mut self, now: f64, duration: f64) -> bool` | Advances; `true` while still running. |
+| `stop(&mut self)` | Ends it. |
+| `active(&self) -> bool` | Whether it is running. |
+| `apply(&self, id: &str, target: Rect) -> Rect` | Where `id` is now on its way to `target`: `target` itself when it isn't tweening. |
+
+### Easing
+
+| Function | What it is |
+| --- | --- |
+| `ease_out_quint(t: f64) -> f64` | `1 - (1 - t)⁵`, with `t` clamped to 0..1. |
+| `cubic_bezier(x1: f64, y1: f64, x2: f64, y2: f64, x: f64) -> f64` | CSS's `cubic-bezier()` at `x`. |
+| `dock_ease(t: f64) -> f64` | `cubic_bezier(0.2, 0.75, 0.2, 1.0, t)`. |
+| `rubber_band(x: f64, lo: f64, hi: f64, limit: f64) -> f64` | `x` inside `lo..hi`; outside, a resistance that approaches `limit` past the bound. |
+
+## nav::DragMode
+
+The camera gesture a held chord selects in free navigation: `Pan`, `Scale` or `Rect` (draw a rectangle to frame). See [gesture keys](../navigation/#gesture-keys).

@@ -1,16 +1,18 @@
 ---
 title: Motion and GSAP animation
 sidebarLabel: Motion and GSAP
-description: <motion.div> with initial, animate, exit, whileHover, whileTap, drag and layout, springs solved in closed form, GSAP's timelines, and presence for exit animations, all on one C engine.
+description: <motion.div> with initial, animate, exit, whileHover, whileTap, drag and layout, springs solved in closed form, GSAP's tweens and timelines, motion values and presence for exit animations, all on one C engine. The full blenderui::motion reference.
 section: Rust
 order: 62
 languages: ["rust"]
-sources: ["docs/animation-api.md", "bindings/rust/blenderui/src/motion/mod.rs", "bindings/rust/blenderui/src/motion/spec.rs", "bindings/rust/blenderui/src/motion/presence.rs", "bindings/rust/blenderui/src/motion/tween.rs", "bindings/rust/blenderui/src/motion/motion_value.rs", "bindings/rust/blenderui/examples/site_motion.rs", "bindings/rust/blenderui/tests/suite/motion.rs", "bindings/rust/blenderui/tests/suite/motion_builders.rs", "bindings/rust/blenderui/tests/suite/motion_presence.rs", "bindings/rust/blenderui/tests/suite/motion_drag.rs", "bindings/rust/blenderui/tests/suite/motion_layout.rs", "bindings/rust/blenderui/tests/suite/motion_scroll.rs", "kit/include/BUI_anim.h"]
+sources: ["docs/animation-api.md", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui/src/motion/mod.rs", "bindings/rust/blenderui/src/motion/spec.rs", "bindings/rust/blenderui/src/motion/vars.rs", "bindings/rust/blenderui/src/motion/value.rs", "bindings/rust/blenderui/src/motion/ease.rs", "bindings/rust/blenderui/src/motion/element.rs", "bindings/rust/blenderui/src/motion/styling.rs", "bindings/rust/blenderui/src/motion/drag.rs", "bindings/rust/blenderui/src/motion/flip.rs", "bindings/rust/blenderui/src/motion/presence.rs", "bindings/rust/blenderui/src/motion/scroll.rs", "bindings/rust/blenderui/src/motion/pending.rs", "bindings/rust/blenderui/src/motion/tween.rs", "bindings/rust/blenderui/src/motion/motion_value.rs", "bindings/rust/blenderui/src/motion/object.rs", "bindings/rust/blenderui-macros/src/vars.rs", "bindings/rust/blenderui-macros/src/rsx.rs", "bindings/rust/blenderui/examples/site_motion.rs", "bindings/rust/blenderui/tests/suite/motion.rs", "bindings/rust/blenderui/tests/suite/motion_builders.rs", "bindings/rust/blenderui/tests/suite/motion_presence.rs", "bindings/rust/blenderui/tests/suite/motion_drag.rs", "bindings/rust/blenderui/tests/suite/motion_layout.rs", "bindings/rust/blenderui/tests/suite/motion_scroll.rs", "bindings/rust/blenderui/tests/suite/motion_derived.rs", "bindings/rust/blenderui/tests/suite/motion_selector.rs", "bindings/rust/blenderui/tests/suite/motion_inview_scroll.rs", "kit/include/BUI_anim.h", "kit/intern/anim/motion.c", "kit/intern/anim/spring.c", "kit/intern/anim/ease.c"]
 ---
 
 A card that fades in and rises, a button that springs when you press it, a panel that animates out before it leaves: **write the animation next to the element.** `<motion.div>` takes `initial`, `animate`, `exit`, `whileHover` and `whileTap` props, and the engine under it does the rest.
 
 The names come from Motion (Framer Motion) and GSAP, so what their docs show works here in Rust's syntax. Everything runs on one animation engine in the C kit (`kit/intern/anim`), the same one Python, JavaScript and Lua use.
+
+Everything on this page lives in `blenderui::motion`, plus the `vars!` macro at the crate root. CSS `@keyframes` and `transition` are on [Effects and animations](../effects-and-animations/).
 
 <Callout type="tip">Animation is the `anim` feature, on by default. Without it every value jumps to its target, and `blenderui::motion::available()` returns `false`.</Callout>
 
@@ -60,21 +62,174 @@ fn card(title: &str) -> impl IntoElement {
 </Tab>
 </Tabs>
 
-`{{ ... }}` is an object of values (double braces, as in JSX). Outside `rsx!` the same object is written `vars! { ... }`.
+`<motion.div>` is a plain `<div>`: `rsx!` drops the `motion.` prefix, and every element takes these props. The prefix is there so the markup reads like Motion code. In `rsx!`, a camelCase prop becomes the snake_case builder method (`whileHover` is `.while_hover`).
 
-- **Values:** numbers, `"100px"`, `"50%"`, `"#f80"`, arrays for keyframes (`{{ x: [0, 100, 0] }}`), and any Rust expression in braces.
-- **Transform shorthands:** `x`, `y`, `scale`, `scaleX`, `scaleY`, `rotate` and `opacity`, plus any CSS property that interpolates (colors, lengths, shadows, filters).
-- **Mistakes are compile errors:** an object of literals is checked when your program compiles, so a misspelled property or ease doesn't wait for a user to find it.
+## Objects of values: `vars!` and `{{ }}`
 
-## What it costs
+`{{ ... }}` is an object of values (double braces, as in JSX). Outside `rsx!` the same object is written `vars! { ... }`. Both build a `Vars`: the properties to animate, and the timing options (a `Transition`).
 
-An object made of literals is a `static`: its property ids and eases are looked up once per call site. A frame that only animates skips rendering the view, the style cascade and layout, and repaints only the elements that changed; a window with nothing moving costs no CPU.
+```rust
+vars! { x: 100, opacity: 0.5, duration: 1, ease: "power2.out" }
+```
 
-A frame is not allocation-free yet. What still allocates: a call's values are built once when it starts (not per frame), a callback (`on_update`, `on_complete`) costs one boxed event each time it fires, and objects with computed values are built where they are written. The Rust side is being tightened; the full list is under [What a frame costs](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#what-a-frame-costs).
+Each key is either a **timing option** (`duration`, `ease`, `type`, `stiffness`, `onComplete` and the rest of the [options table](#timing-options)) or a **property** to animate. Key names ignore case, `_` and `-`: `repeatDelay`, `repeat_delay` and `repeat-delay` are the same option.
 
-## Springs and eases
+An object made only of literals is a `static`: its property names are looked up once per call site, and an ease given by name is parsed once. Values that are Rust expressions are built where the object is written.
 
-`transition` picks how a value gets there:
+### Values
+
+| Written | What it means |
+| --- | --- |
+| `100`, `0.5`, `-20` | A number. Pixels for lengths, degrees for angles, as is for everything else. |
+| `"100px"`, `"50%"`, `"2rem"`, `"1.5em"`, `"10vw"`, `"45deg"` | A CSS value with a unit. Read once, when the motion starts. |
+| `"+=100"`, `"-=50"` | Relative to the value it has when the motion starts. |
+| `"#f80"`, `"red"`, `"rgb(0 0 0 / 50%)"` | A color. Colors move in four channels. |
+| `[0, 100, 50]` | Keyframes: the value passes through each in turn. |
+| `null` | The value it has when the motion starts (a "wildcard" keyframe: `[null, 100]`). |
+| `{expr}` or a bare variable | Any Rust expression that converts into a `Value`: `f32`, `f64`, `i32`, `&str`, `String`, `Rgba`, a `MotionValue`, an array or `Vec` of these (keyframes), or `Option` (`None` is `null`). |
+
+The `Value` enum behind them is public, for code that builds values by hand:
+
+| `Value` variant | What it holds |
+| --- | --- |
+| `Num(f32)` | A number. |
+| `Text(Cow<'static, CStr>)` | A CSS value as text. |
+| `Color(Rgba)` | A color. |
+| `Keys(Cow<'static, [Value]>)` | Keyframes. |
+| `Current` | The value when the motion starts. |
+| `Motion(MotionValue)` | A [motion value](#motion-values), read every frame. |
+
+### Properties
+
+| Property | Unit | What it does on an element |
+| --- | --- | --- |
+| `x`, `y` | px (or any length) | Moves the element without changing layout, on top of its own `translate`. |
+| `scale`, `scaleX`, `scaleY` | factor (1 is its size) | Scales it about its center. |
+| `rotate` | degrees | Turns it, on top of its own `rotate`. |
+| `skewX`, `skewY` | degrees | Skews it. |
+| `opacity` | 0 to 1 | Fades it. |
+| `color`, `backgroundColor` | color | Its text and background colors. |
+| `width`, `height` | px, `%` or another length | Its size. This changes layout, so each frame lays the page out again. |
+| Any CSS property that interpolates | as in CSS | `borderRadius` or `border-radius`, `padding`, `boxShadow`, `filter` and the rest. |
+
+Paint-only properties (transforms, opacity, colors, shadows, filters) move with a redraw. Properties that change layout (`width`, a margin) make each frame a full render.
+
+`z`, `rotateX` and `rotateY` are known names, but an element draws nothing for them: 3D transforms aren't drawn yet. `value` is the property of a [motion value](#motion-values); on an element it does nothing.
+
+### Timing options
+
+`None` (left out) takes the default, or the enclosing transition's value. Times are in seconds.
+
+| Option | Type | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `"tween"`, `"keyframes"`, `"spring"`, `"inertia"`, `"decay"` | depends, see [Tweens, springs and inertia](#tweens-springs-and-inertia) | How the value moves. `"keyframes"` is a tween, `"decay"` is inertia. |
+| `duration` | seconds | 0.5 (GSAP calls), 0.3 (element motions), 0.8 (keyframes) | How long a tween takes. For a spring, see [springs](#springs). Negative is 0. |
+| `delay` | seconds | 0 | Wait before starting. Negative is 0. |
+| `ease` | name, `[x1, y1, x2, y2]`, or an array of names | `power1.out` (GSAP calls), see [defaults](#which-kind-and-defaults) | The curve. An array of names is one ease per keyframe segment. |
+| `times` | array of 0 to 1 | evenly spaced | Where each keyframe sits. Used only when it has one entry per keyframe. |
+| `repeat` | whole number | 0 | Extra iterations. `-1` repeats forever. At most 1,000,000. |
+| `repeatDelay` | seconds | 0 | Wait between iterations. |
+| `yoyo` | `bool` | `false` | Every other iteration runs backwards. |
+| `repeatType` | `"loop"`, `"reverse"`, `"mirror"` | `"loop"` | `"reverse"` and `"mirror"` set `yoyo: true`; `"loop"` sets it `false`. |
+| `timeScale` | number | 1 | This motion's speed: 2 is twice as fast. |
+| `paused` | `bool` | `false` | Start paused. |
+| `reversed` | `bool` | `false` | Start playing backwards. |
+| `immediateRender`, `immediate` | `bool` | `true` for element motions and `animate` without a delay, and for `gsap::from` / `from_to`; `false` otherwise | Read the start values and draw the first frame now, instead of at the first frame after the delay. |
+| `overwrite` | `true`, `false`, `"auto"` | `"auto"` | A new motion on a property takes over from the old one, keeping its velocity. `false` lets both run. |
+| `stagger` | seconds | 0 | For several targets: the gap between one target's start and the next. |
+| `stiffness`, `damping`, `mass`, `bounce`, `visualDuration`, `velocity`, `restDelta`, `restSpeed` | numbers | see [springs](#springs) | Spring options. |
+| `power`, `timeConstant`, `min`, `max`, `bounceStiffness`, `bounceDamping` | numbers | see [inertia](#inertia) | Inertia options. `velocity` and `restDelta` apply too. |
+| `transition` | object | none | A nested transition, with its own options, a `default`, and per-property ones (below). |
+
+### Per-property transitions
+
+`transition: { ... }` nests a transition. Inside it, `default: { ... }` sets the options for every property, and a property's name sets that property's own:
+
+```rust
+animate={{
+    x: 100, opacity: 1,
+    transition: { default: { duration: 0.3 }, x: { type: "spring", stiffness: 300 } },
+}}
+```
+
+A property's options are looked up in this order, and the first one set wins: the target's own per-property transition, the target's transition, the element's `transition` prop for that property, the element's `transition` prop.
+
+### Callbacks
+
+| Key | Builder method | Runs |
+| --- | --- | --- |
+| `onStart` (also `onAnimationStart`) | `on_start(f)` | When the motion starts. |
+| `onUpdate` | `on_update(f)` | Every frame the motion renders. |
+| `onComplete` (also `onAnimationComplete`) | `on_complete(f)` | When it ends. |
+| `onRepeat` | set `events.on_repeat` | At the start of each repeat. |
+| `onReverseComplete` | set `events.on_reverse_complete` | When it plays backwards to its start. |
+| `onInterrupt` | set `events.on_interrupt` | When it is killed or taken over before it ends. |
+
+Each is a `FnMut()` that runs on the UI thread during a frame. Callbacks run for the calls on this page that return a `Tween` (`gsap::to`, `animate`, `MotionValue::animate` and the rest). See [Limits](#limits) for where they don't.
+
+```rust
+gsap::to("#toast", vars! { opacity: 0, duration: 0.3, onComplete: || println!("gone") });
+```
+
+The `Events` struct behind them has a public `Option<Box<dyn FnMut()>>` field for each: `on_start`, `on_update`, `on_complete`, `on_repeat`, `on_reverse_complete` and `on_interrupt`.
+
+### What the compiler checks
+
+`vars!` and `{{ }}` are read when your program compiles. These are compile errors:
+
+- a key without a value, or a key that isn't a name,
+- a `type` that isn't `"spring"`, `"tween"`, `"keyframes"`, `"inertia"` or `"decay"`,
+- a `repeatType` other than `"loop"`, `"reverse"` or `"mirror"`,
+- a `transition`, `default` or per-property transition that isn't an object.
+
+A misspelled property or ease name is **not** caught: an unknown property animates nothing, and an unknown ease name runs linear.
+
+### The `Vars` builder
+
+Without macros, build a `Vars` with methods:
+
+```rust
+use blenderui::motion::{keys, Ease, Key, Vars};
+
+static RADIUS: Key = Key::new(c"borderRadius");
+
+let v = Vars::new()
+    .x(200).opacity(0.5)
+    .set(&RADIUS, "12px")
+    .duration(0.6)
+    .ease(Ease::parse(c"power2.out").unwrap_or(Ease::LINEAR))
+    .on_complete(|| println!("done"));
+
+let s = Vars::new().scale(1.2).spring().stiffness(300.0).damping(20.0);
+```
+
+| Method | What it does |
+| --- | --- |
+| `Vars::new()` | An empty object. `Vars::default()` is the same. |
+| `set(key, value)` | Animate `key` (a `&'static Key`) to `value`. |
+| `x`, `y`, `scale`, `scale_x`, `scale_y`, `rotate`, `skew_x`, `skew_y`, `opacity`, `width`, `height`, `color`, `background_color` | `set` for that property. |
+| `duration(f64)`, `delay(f64)`, `ease(Ease)`, `repeat(i32)`, `repeat_delay(f64)`, `yoyo(bool)`, `time_scale(f64)`, `stagger(f64)` | Timing options. |
+| `stiffness(f32)`, `damping(f32)`, `mass(f32)`, `bounce(f32)`, `visual_duration(f32)`, `velocity(f32)` | Spring options. |
+| `spring()`, `inertia()` | `type: "spring"`, `type: "inertia"`. |
+| `with(f)` | Change any field of the `Transition` in a closure that takes `&mut Transition`. |
+| `on_start(f)`, `on_update(f)`, `on_complete(f)` | Callbacks. |
+
+`Vars` has four public fields: `props` (the properties and their values), `transition` (a `Transition`), `per` (per-property transitions) and `events` (the callbacks). `Transition` has one public `Option` field per option above (`duration`, `delay`, `ease`, `eases`, `times`, `repeat`, `repeat_delay`, `yoyo`, `time_scale`, `paused`, `reversed`, `immediate`, `overwrite`, `stagger`, `stiffness`, `damping`, `mass`, `bounce`, `visual_duration`, `velocity`, `rest_delta`, `rest_speed`, `power`, `time_constant`, `min`, `max`, `bounce_stiffness`, `bounce_damping`), plus `kind: Kind`. `transition.or(&base)` gives these options with `base`'s filled in where these have none.
+
+### Property keys
+
+A `Key` is a property by name, made once and kept (`static`). Its engine id is looked up the first time it's used.
+
+| Item | What it is |
+| --- | --- |
+| `Key::new(c"name")` | A key for a property: camelCase (`borderRadius`) or kebab-case (`border-radius`). A `const fn`. |
+| `key.id()` | The engine's id for it. |
+| `key.name()` | Its name as written. |
+| `keys::X`, `Y`, `Z`, `SCALE`, `SCALE_X`, `SCALE_Y`, `ROTATE`, `ROTATE_X`, `ROTATE_Y`, `SKEW_X`, `SKEW_Y`, `OPACITY`, `WIDTH`, `HEIGHT`, `COLOR`, `BACKGROUND_COLOR`, `VALUE` | The common keys, already resolved. |
+
+## Tweens, springs and inertia
+
+`type` picks how a value gets there:
 
 ```rust
 transition={{ duration: 0.4, ease: "power2.out" }}                    // a curve
@@ -85,22 +240,295 @@ transition={{ type: "inertia", velocity: 400 }}                       // decay f
 
 **Springs are real springs.** The engine solves the damped spring equation in closed form, with the exact formula for the underdamped, critically damped and overdamped cases. A frame reads the value at its time, so the frame rate doesn't change the result, and the engine knows when the spring settles. Interrupt one and the new motion starts from the old one's position **and velocity**.
 
-Every ease of GSAP, Motion, CSS and Blender works by name: `none`, `power1` to `power4` with `.in`, `.out` and `.inOut`, `sine`, `expo`, `circ`, `back(1.7)`, `elastic(1, 0.3)`, `bounce`, `steps(4)`, `easeInOut`, `anticipate`, `cubic-bezier(...)`, a `[x1, y1, x2, y2]` array, and Blender's interpolation names.
+### Which kind, and defaults
 
-## Props
+Without a `type`, the kind and its defaults depend on which call started the motion:
 
-| Prop | What it does |
-|---|---|
-| `initial` | Where it starts. `initial={false}` starts at `animate` without animating. |
-| `animate` | Where it goes, and again whenever it changes. |
-| `exit` | Where it goes before it leaves (with `presence`). |
-| `transition` | How: duration, ease, spring, delay, repeat. |
-| `variants` | Named states: `variants={[("small", vars! { width: 20 }), ("big", vars! { width: 80 })]}`, then `animate="big"`. |
-| `whileHover`, `whileTap`, `whileFocus` | A state held while it happens, then eased back. |
-| `whileInView` | A state held while the element is in the viewport. |
-| `drag`, `dragConstraints`, `dragElastic`, `dragMomentum` | Drag it; let go and it keeps moving by inertia. |
-| `layout` | When its box changes, it animates from the old box to the new one. |
-| `style={{ x: mv }}` | Bind a motion value to a property. |
+| Started by | No `type` gives | Defaults |
+| --- | --- | --- |
+| Element props (`animate`, `while*`, `exit`, `layout`, drag) and `motion::animate` | A spring for `x`, `y`, `z`, `rotate`, `rotateX`, `rotateY`, `scale`, `scaleX` and `scaleY`, when there is one target value and no `duration` or `ease`. A tween for everything else. | Tweens: 0.3 s with `cubic-bezier(0.25, 0.1, 0.35, 1)`. Keyframes, or a tween given a `type` or `duration`: 0.8 s or the given duration, `easeInOut`. Springs: stiffness 500, damping 25 for moves and turns; stiffness 550, damping 30 for scales (critically damped when scaling to 0). |
+| `gsap::to`, `from`, `from_to`, `set`, `timeline` | A tween. | 0.5 s with `power1.out`. |
+
+The `Kind` enum names these: `Auto` (the default above), `Tween`, `Spring` and `Inertia`. The `Flavor` enum names whose defaults fill the gaps: `Gsap` or `Motion`.
+
+### Springs
+
+A spring takes one of three forms. The first one that applies wins:
+
+1. **`visualDuration` (and `bounce`)**: how long it visually takes to arrive, and how bouncy it is (0 none, 1 very). `bounce` defaults to 0.25.
+2. **`duration` (and `bounce`)**: a spring that settles in `duration` seconds. Used when `stiffness` isn't given. `mass` and `velocity` apply.
+3. **`stiffness`, `damping`, `mass`**: the physical constants. Without `type: "spring"`'s other options, the engine's spring is stiffness 100, damping 10, mass 1, except where the [defaults above](#which-kind-and-defaults) say otherwise.
+
+| Option | Default | What it is |
+| --- | --- | --- |
+| `stiffness` | 100 | How hard the spring pulls. Higher is snappier. |
+| `damping` | 10 | How much it resists. Lower bounces more. |
+| `mass` | 1 | How heavy the value is. Higher is slower and wobblier. |
+| `velocity` | 0 | Units per second at the start. A motion that takes over from another starts with its velocity. |
+| `restDelta` | 0.5, or 0.005 for a move of less than 5 units (a `scale`, an `opacity`) | Settled when this close to the target, |
+| `restSpeed` | 2, or 0.01 for a move of less than 5 units | and slower than this (units per second). |
+
+`stiffness`, `damping`, `mass`, `velocity`, `restDelta` and `restSpeed` override any of the three forms.
+
+### Inertia
+
+Inertia (`type: "inertia"` or `"decay"`) starts at a velocity and slows down, like a thrown card. It ignores the target value: where it stops depends on the velocity.
+
+| Option | Default | What it is |
+| --- | --- | --- |
+| `velocity` | 0 | Units per second at the start. |
+| `power` | 0.8 | How far it travels for its velocity. |
+| `timeConstant` | 0.325 | How fast it slows, in seconds. |
+| `min`, `max` | none | Bounds. Reaching one, it springs back to it. |
+| `bounceStiffness`, `bounceDamping` | 500, 10 | The spring at a bound. |
+| `restDelta` | 0.5 | Settled when the decay is within this. |
+
+### Keyframes
+
+An array is keyframes. `times` places them and an array of eases sets one ease per segment:
+
+```rust
+animate={{ x: [0, 100, 0], transition: { duration: 2, times: [0, 0.2, 1], ease: ["power2.out", "sine.inOut"] } }}
+```
+
+`null` as the first keyframe starts from where the value is: `{{ x: [null, 100, 50] }}`.
+
+## Eases
+
+Every ease of GSAP, Motion, CSS and Blender works by name. Names ignore case.
+
+| Family | Names |
+| --- | --- |
+| Linear | `none`, `linear`, `power0` |
+| Penner curves | `power1` to `power4` (also `quad`, `cubic`, `quart`, `quint`, `strong`), `sine`, `expo`, `circ`, `back`, `elastic`, `bounce`. Add `.in`, `.out` or `.inOut`; a bare name is `.out`. Run-together names work too: `quadIn`, `sineInOut`, `circOut`. |
+| With parameters | `back(1.7)`, `back.inOut(2)`, `elastic(1, 0.3)`, `elastic.out(1, 0.3)` |
+| Motion | `easeIn`, `easeOut`, `easeInOut`, `circIn`, `circOut`, `circInOut`, `backIn`, `backOut`, `backInOut`, `anticipate` |
+| CSS | `ease`, `ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier(x1, y1, x2, y2)`, `steps(4)`, `steps(4, jump-start)`, `step-start`, `step-end`, `linear(0, 0.25 75%, 1)` |
+| GSAP extras | `slow`, `expoScale`, `wiggle`, `customBounce`, `rough` |
+| Blender | Its F-Curve interpolation names, such as `bezier` and `constant` |
+| Cubic Bézier | `[x1, y1, x2, y2]` in `vars!` |
+
+### The `Ease` type
+
+`Ease` is a parsed ease: a few bytes, `Copy`, cheap to evaluate. `vars!` makes its own; build one by hand for the `Vars` builder or to evaluate a curve yourself.
+
+| Item | What it does |
+| --- | --- |
+| `Ease::parse(c"power2.out")` | An ease by name. `None` when the name is unknown. |
+| `ease(c"power2.out")` | The same, but linear for an unknown name. |
+| `Ease::LINEAR` | The linear ease. |
+| `Ease::bezier(x1, y1, x2, y2)` | A cubic Bézier, as CSS's `cubic-bezier()`. |
+| `Ease::points(&[[x, y], ...])` | A curve through points, x rising from 0 to 1. `None` when it can't be made. |
+| `Ease::path(c"M0,0 C...")` | An SVG path normalized to 0..1 (GSAP's `CustomEase`). `None` when it can't be read. |
+| `e.register(c"wobble")` | Give `e` a name that `parse` and `vars!` then find. Returns whether it worked. |
+| `e.eval(t)` | The eased value at `t` (0..1; outside it, the curve goes on). |
+
+```rust
+use blenderui::motion::Ease;
+
+Ease::bezier(0.2, 0.8, 0.4, 1.0).register(c"wobble");
+gsap::to("#card", vars! { x: 100, ease: "wobble" });
+```
+
+## Element props
+
+Every element takes these props. The builder methods are on `Div` (every HTML element is one).
+
+| rsx! prop | Builder method | Takes | What it does |
+| --- | --- | --- | --- |
+| `initial` | `.initial(t)` | values, a variant name, or `false` | Where it starts when it first appears. `false` starts at its `animate` values with no animation. |
+| `animate` | `.animate(t)` | values or a variant name | Where it goes. When this changes, it animates again from where it is. |
+| `exit` | `.exit(t)` | values or a variant name | Where it goes before it leaves, inside a [`presence`](#exit-animations). |
+| `whileHover` | `.while_hover(t)` | values or a variant name | Held while the pointer is over it. |
+| `whileTap` | `.while_tap(t)` | values or a variant name | Held while it is pressed. |
+| `whileFocus` | `.while_focus(t)` | values or a variant name | Held while it has focus. |
+| `whileInView` | `.while_in_view(t)` | values or a variant name | Held while it is in view (see `viewport`). |
+| `whileDrag` | `.while_drag(t)` | values or a variant name | Held while it is dragged. |
+| `viewport` | `.viewport(v)` | `{{ once, amount }}` | When it counts as in view. |
+| `transition` | `.transition(v)` | an object of options | The default transition of all its motions. |
+| `variants` | `.variants(v)` | `[("name", vars! {...}), ...]` | Named targets. |
+| `style={{ x: mv }}` | `.motion_style(v)` | an object | Values set every frame, usually [motion values](#motion-values). |
+| `drag` | `.drag(d)` | `true`, `"x"`, `"y"` | Drag it with the pointer. A bare `drag` is `true`. |
+| `dragConstraints` | `.drag_constraints(c)` | `{{ left, right, top, bottom }}` or `[l, r, t, b]` | Where a drag may go. |
+| `dragElastic` | `.drag_elastic(f32)` | 0 to 1 | How far it goes past its constraints. |
+| `dragMomentum` | `.drag_momentum(bool)` | `bool` | Whether it carries on when let go. |
+| `dragSnapToOrigin` | `.drag_snap_to_origin(bool)` | `bool` | Whether it springs back when let go. |
+| `layout` | `.layout(l)` | `true`, `false`, `"position"`, `"size"` | Animate changes of its box. A bare `layout` is `true`. |
+
+`style="..."` with a string is still the element's CSS. Only `style={{ ... }}` with an object becomes `motion_style`.
+
+**An element animates by its identity.** Its motions belong to its key: give it an `id` or a `.key(...)` when it can move around among its siblings, so it keeps its values from render to render.
+
+### Targets: values, a variant, or nothing
+
+What a target prop takes is a `Target`:
+
+| `Target` variant | Made from | Meaning |
+| --- | --- | --- |
+| `Vars(Vars)` | `vars! {...}`, `{{ }}` | Values to go to. |
+| `Variant(Cow<'static, str>)` | `"name"`, a `String` | A named target from `variants`. `true` gives the empty name, the default. |
+| `Off` | `false` | Only for `initial`: no animation on the first render. |
+
+### Which target wins
+
+The targets stack in this order, and a later one wins for each property it sets:
+
+1. `animate`
+2. `whileInView`
+3. `whileFocus`
+4. `whileHover`
+5. `whileTap`
+6. `whileDrag`
+
+When a `while*` state ends, its properties go back to the next one down, or to the element's own style. While a `presence` takes the element away, `exit` is its only target, and properties `exit` leaves out stay where they are.
+
+The `When` enum names these props: `Initial`, `Animate`, `Exit`, `WhileHover`, `WhileTap`, `WhileFocus`, `WhileInView` and `WhileDrag`.
+
+## Variants
+
+Variants are named targets. Give them once, then pick one by name in any target prop:
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+rsx! {
+    <motion.div id="bar" style="height: 10px"
+        variants={[("small", vars! { width: 20 }), ("big", vars! { width: 80 })]}
+        initial="small"
+        animate={if self.wide { "big" } else { "small" }}
+        transition={{ duration: 0.5 }} />
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+div().id("bar").h(px(10.0))
+    .variants([("small", vars! { width: 20 }), ("big", vars! { width: 80 })])
+    .initial("small")
+    .animate(if self.wide { "big" } else { "small" })
+    .transition(vars! { duration: 0.5 })
+```
+
+</Tab>
+</Tabs>
+
+`.variants()` takes a `Variants`: an array or `Vec` of `(&'static str, Vars)` pairs, or a `&'static` slice of them (no allocation). A variant's own `transition` applies to its motions. Variants don't pass down to children: each element names its own.
+
+## Gestures and view
+
+`whileHover`, `whileTap` and `whileFocus` follow the pointer and the keyboard focus. `whileInView` follows the element's visibility: it counts as in view when its box shows inside the window and inside every scroll container that clips it.
+
+`viewport` sets when that is, as an `InView`:
+
+| `InView` field | Default | What it does |
+| --- | --- | --- |
+| `amount: f32` | 0 | How much of it must show: 0 is any part, 1 is all of it. `"some"` is 0 and `"all"` is 1. |
+| `once: bool` | `false` | Once in view, it stays in view. |
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+rsx! {
+    <motion.section initial={{ opacity: 0, y: 40 }}
+        whileInView={{ opacity: 1, y: 0 }}
+        viewport={{ once: true, amount: 0.5 }} />
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+section()
+    .initial(vars! { opacity: 0, y: 40 })
+    .while_in_view(vars! { opacity: 1, y: 0 })
+    .viewport(vars! { once: true, amount: 0.5 })
+```
+
+</Tab>
+</Tabs>
+
+## Drag
+
+`drag` lets the pointer move the element: on both axes with `true`, or on one with `"x"` or `"y"`. A drag moves the element's `x` and `y`, so its layout doesn't change.
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+rsx! {
+    <motion.div drag="x"
+        dragConstraints={{ left: -100, right: 100 }}
+        dragElastic={0.2}
+        whileDrag={{ scale: 1.1 }} />
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+div()
+    .drag("x")
+    .drag_constraints(vars! { left: -100, right: 100 })
+    .drag_elastic(0.2)
+    .while_drag(vars! { scale: 1.1 })
+```
+
+</Tab>
+</Tabs>
+
+| Option | Default | What it does |
+| --- | --- | --- |
+| `dragConstraints` | none | Bounds in pixels from where the drag started: left, right, top, bottom. A side left out has no bound. |
+| `dragElastic` | 0.5 | Past a bound, the element moves this fraction of the pointer's distance. 0 stops it at the bound. Clamped to 0..1. |
+| `dragMomentum` | `true` | Let go, it keeps moving with the pointer's speed and slows down ([inertia](#inertia)), springing back at a bound. |
+| `dragSnapToOrigin` | `false` | Let go, it springs back to where it started. |
+
+With `dragMomentum: false`, an element let go past its bounds springs back inside them, and one let go inside them stays where it is. The pointer's speed is measured over its last tenth of a second: pause before letting go and the element stops.
+
+These options are stored in a `Drag` struct (`x`, `y`, `constraints: Option<[f32; 4]>`, `elastic`, `momentum`, `snap_to_origin`, all public), made from `bool` or `&str`. `DragConstraints` wraps the `[f32; 4]` and converts from an array or a `vars!` object.
+
+## Layout animations
+
+`layout` animates changes of the element's box. When a render moves or resizes it, the element jumps to its new box in layout, then is drawn from its old place and size to the new one with transforms. Layout runs once; the frames after it are redraws.
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+rsx! {
+    <motion.div layout id="panel"
+        style={if self.open { "width: 300px" } else { "width: 100px" }}
+        transition={{ type: "spring", stiffness: 500, damping: 40 }} />
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+div().id("panel")
+    .layout(true)
+    .w(px(if self.open { 300.0 } else { 100.0 }))
+    .transition(vars! { type: "spring", stiffness: 500, damping: 40 })
+```
+
+</Tab>
+</Tabs>
+
+| `layout` | `Layout` variant | What animates |
+| --- | --- | --- |
+| `true` | `Both` | Where it is and how big. |
+| `"position"` | `Position` | Only where it is. |
+| `"size"` | `Size` | Only how big. |
+| `false` | `Off` | Nothing. |
+
+The element's `transition` prop times these motions. A box counts as moved when it changes by half a pixel or more. Its position is measured against its parent, so a parent that moves or scrolls carries it along without starting a layout animation.
 
 ## Exit animations
 
@@ -143,9 +571,30 @@ body().children(presence(self.open, || {
 </Tab>
 </Tabs>
 
+```rust
+pub fn presence<E: IntoElement>(show: bool, build: impl FnOnce() -> E) -> Option<AnyElement>
+```
+
+`presence` is a hook: call it from `render` or a component, in the same order every time. It returns the element while `show` is `true`. When `show` turns `false`, it keeps calling `build` while the element exits: elements built then with an `exit` take it as their only target. When their exit motions end, the next render drops the element. If nothing it builds has an `exit`, the element goes at once. Shown again midway, it animates back from where it is.
+
+`presence` wraps one element. For a list, call it once per item, each with its own `key`.
+
+### Presence in your own element tree
+
+Code that keeps its own element tree (a binding, a custom host) can drive exits with the functions under `presence`:
+
+| Function | What it does |
+| --- | --- |
+| `presence_id() -> u64` | A new presence id. |
+| `exiting_scope(id, build) -> (R, bool)` | Runs `build` as presence `id` taking its elements away. Elements built inside with an `exit` take it as their only target. The `bool` says whether any of them has an `exit`. |
+| `exit_done(id) -> bool` | Whether presence `id`'s exits have ended. `true` once; then let the elements go. |
+
 ## Motion values
 
-A motion value is a number you read and animate without rendering the view:
+A motion value is a number (or a color) you read and animate without rendering the view. Bind one to an element with `style={{ ... }}`, and the element follows it every frame:
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
 
 ```rust
 use blenderui::motion::{use_motion_value, use_spring, use_transform};
@@ -153,48 +602,322 @@ use blenderui::motion::{use_motion_value, use_spring, use_transform};
 let x = use_motion_value(0.0);
 let smooth = use_spring(x, vars! { stiffness: 300, damping: 30 });
 let opacity = use_transform(x, &[0.0, 200.0], &[1.0, 0.0]);
-// <motion.div style={{ x: smooth, opacity: opacity }} />
+
+rsx! { <motion.div style={{ x: smooth, opacity: opacity }} /> }
 ```
 
-`use_transform`, `use_velocity` and `use_spring` of a value are derived: they follow their source whenever they are read (a frame, a render, an element's style), so nothing re-renders for them. The ranges of a `use_transform` are copied when they change, not on every render.
-
-`use_scroll` and `use_element_scroll` give the scroll position as motion values, to bind to a progress bar or a parallax layer. `use_velocity` follows how fast another value changes.
-
-## GSAP
-
-Outside components, the functions underneath are there as GSAP names them:
+</Tab>
+<Tab label="gpui builders">
 
 ```rust
-use blenderui::motion::gsap;
+use blenderui::motion::{use_motion_value, use_spring, use_transform};
+use blenderui::vars;
 
-let t = gsap::to(".box", vars! { x: 200, duration: 1, ease: "elastic.out(1, 0.3)", stagger: 0.1 });
-t.pause();
-t.seek(0.5);
+let x = use_motion_value(0.0);
+let smooth = use_spring(x, vars! { stiffness: 300, damping: 30 });
+let opacity = use_transform(x, &[0.0, 200.0], &[1.0, 0.0]);
 
-let tl = gsap::timeline(vars! { repeat: 1, yoyo: true });
-tl.to("#a", vars! { width: 100, duration: 0.5 }, "")
-  .to("#b", vars! { width: 100, duration: 0.5 }, "<0.2")   // GSAP's position strings
-  .add_label("mid", "")
-  .to("#c", vars! { opacity: 0.2 }, "mid+=0.25");
+div().motion_style(vars! { x: smooth, opacity: opacity })
 ```
 
-- **Targets:** selectors (`"#id"`, `".class"`, `"tag"`, `"[attr=v]"`), motion values, or an object whose numbers are tweened.
-- **Position strings:** seconds, `"<"`, `">"`, `"+=1"`, `"-=0.5"`, `"<0.2"`, `"label"`, `"label+=1"`, `"50%"`. An empty string puts the tween at the end.
-- **Controls:** `play`, `pause`, `resume`, `reverse`, `restart`, `seek`, `set_progress`, `set_time_scale`, `kill`.
-- **Overwrite:** a new motion on a property takes over from the old one and keeps its velocity.
+</Tab>
+</Tabs>
 
-## Reduced motion
+Then move `x` from anywhere on the UI thread, a click handler say, and the element moves without a render:
 
-`blenderui::set_reduced_motion(true)`, or the operating system's setting, makes every motion jump to its end.
+```rust
+x.animate(200.0, vars! { type: "spring", bounce: 0.3 });
+```
+
+### `MotionValue`
+
+`MotionValue` is a `Copy` handle into a per-thread store. A handle to a value that was disposed of reads 0 and ignores changes.
+
+| Method | What it does |
+| --- | --- |
+| `MotionValue::new(init)` | A new value. Free it with `dispose`. Inside components and `render`, use `use_motion_value` instead. |
+| `get() -> f32` | Its value: the first number. A derived value is computed from its source now. |
+| `get4() -> [f32; 4]` | Its value as up to four numbers (a color's channels). |
+| `set(v)` | Set it now. It stops what animates it, and windows draw it. |
+| `animate(to, vars) -> Tween` | Animate it to `to`: a spring when `vars` says so, else a tween. Callbacks in `vars` run. |
+| `stop()` | Stop what animates it, where it is. |
+| `velocity() -> f32` | How fast it changes now, in units per second. |
+| `is_animating() -> bool` | Whether a motion is moving it. |
+| `dispose()` | Free it. Its motions stop. |
+
+A `MotionValue` converts into a `Value` and into `Targets`, so it can go wherever a value or a [target](#targets-of-a-call) goes.
+
+### Hooks
+
+These are hooks: call them from `render` or a component, in the same order every time. Each returns the same value on every render, freed when the component goes.
+
+| Hook | What it returns |
+| --- | --- |
+| `use_motion_value(init)` | A value that starts at `init`. |
+| `use_spring(source, vars)` | A value that follows `source` with a spring. `source` is a number (it springs to it whenever it changes) or another `MotionValue` (it springs after it every frame it moves, with no render). `vars` holds the spring options; `type` is always `"spring"`. |
+| `use_transform(source, input, output)` | `source` mapped from the `input` range to the `output` range (`&[f32]` each, matching lengths), clamped at the ends. |
+| `use_velocity(source)` | `source`'s velocity. |
+| `use_scroll()`, `use_element_scroll(id)` | [Scroll positions](#scroll). |
+
+Values from `use_transform`, `use_velocity` and `use_spring` of a motion value are derived: they follow their source whenever they are read (a frame, a render, an element's style), so nothing re-renders for them. The ranges of a `use_transform` are copied when they change, not on every render.
+
+## Scroll
+
+`use_scroll` and `use_element_scroll` give a scroll position as motion values, to bind to a progress bar or a parallax layer. They change with the scroll, without rendering anything.
+
+| Hook | What it follows |
+| --- | --- |
+| `use_scroll() -> Scroll` | The page's scroll: the first of `<html>` and `<body>` that scrolls. A window doesn't scroll its page by itself, so give one of them `overflow: auto` and a height. |
+| `use_element_scroll(id) -> Scroll` | The scroll container with `.id(id)`. |
+
+| `Scroll` field | What it is |
+| --- | --- |
+| `scroll_x`, `scroll_y` | How far it is scrolled, in pixels. |
+| `x_progress`, `y_progress` | The same, from 0 (start) to 1 (end). |
+
+<Tabs sync="rust-syntax" label="Rust syntax">
+<Tab label="rsx!">
+
+```rust
+use blenderui::motion::use_scroll;
+
+let s = use_scroll();
+
+rsx! {
+    <body style="margin: 0; height: 100vh; overflow-y: auto">
+        <motion.div style="position: fixed; top: 0; left: 0; height: 4px; width: 100%; transform-origin: left"
+            style={{ scaleX: s.y_progress }} />
+        <div style="height: 2000px" />
+    </body>
+}
+```
+
+</Tab>
+<Tab label="gpui builders">
+
+```rust
+use blenderui::motion::use_scroll;
+use blenderui::vars;
+
+let s = use_scroll();
+
+body().style("margin: 0; height: 100vh; overflow-y: auto")
+    .child(div().style("position: fixed; top: 0; left: 0; height: 4px; width: 100%; transform-origin: left")
+        .motion_style(vars! { scaleX: s.y_progress }))
+    .child(div().style("height: 2000px"))
+```
+
+</Tab>
+</Tabs>
+
+## Animating from code
+
+Outside element props, start motions with functions. Each returns a [`Tween`](#controlling-a-motion) handle.
+
+```rust
+use blenderui::motion::{animate, gsap};
+
+gsap::to("#box", vars! { x: 200, rotate: 360, duration: 1, ease: "power2.out" });
+gsap::from(".card", vars! { y: 40, opacity: 0, stagger: 0.1 });
+gsap::from_to("#bar", vars! { width: "0%" }, vars! { width: "100%", duration: 2 });
+gsap::set("#box", vars! { x: 0 });
+animate("#ball", vars! { y: 300, type: "spring", bounce: 0.4, visualDuration: 0.5 });
+```
+
+| Function | What it does |
+| --- | --- |
+| `gsap::to(targets, vars)` | From where the targets are to `vars`. |
+| `gsap::from(targets, vars)` | From `vars` to where the targets are. It draws the `vars` values at once (`immediateRender` is on). |
+| `gsap::from_to(targets, from, to)` | From `from` to `to`. The timing is `to`'s. A property only in `to` starts where it is. |
+| `gsap::set(targets, vars)` | Set the values now (a tween of duration 0). |
+| `gsap::timeline(vars)` | A [timeline](#timelines). |
+| `animate(targets, vars)` | Like `gsap::to`, with the element-prop defaults: springs for transforms, 0.3 s eased tweens for the rest. |
+
+### Targets of a call
+
+`targets` is anything that converts into `Targets`:
+
+| Given | Animates |
+| --- | --- |
+| a `MotionValue` | That value, with the first property in `vars` (by convention, `value`): `gsap::to(mv, vars! { value: 100 })`. |
+| `[MotionValue; N]`, `&[MotionValue]` | Each value, `stagger` seconds apart. |
+| `&'static str`, `String` | The elements a selector matches. |
+
+**Selectors** read a tag, `#id`, `.class`, `[attr]`, `[attr=value]`, any of these together (`div.card`, `.a.b`), and comma-separated lists. Combinators (`.a .b`, `.a > .b`) and pseudo-classes aren't read. The elements are found at the next layout, in document order, which is also the order `stagger` follows.
+
+A selector that can't be read, or that matches nothing at the next layout, does nothing. A debug build prints why. To catch it:
+
+| Item | What it does |
+| --- | --- |
+| `Targets::selector(s) -> Result<Targets, String>` | Check a selector first. The error says what isn't supported. |
+| `unmatched_selectors() -> u64` | How many motions on this thread found no element, or had a selector that couldn't be read. |
+
+### Several targets
+
+With several targets the call returns a timeline holding one tween per target, `stagger` seconds apart. Its `delay` delays the whole group, and its callbacks are the group's: `onComplete` runs once, when the last target finishes.
+
+## Timelines
+
+A timeline places tweens in time. Make one with `gsap::timeline(vars)`, then add to it:
+
+```rust
+let tl = gsap::timeline(vars! { repeat: 1, yoyo: true });
+tl.to("#a", vars! { width: 100, duration: 0.5 }, "")
+  .to("#b", vars! { width: 100, duration: 0.5 }, "<0.2")
+  .add_label("mid", "")
+  .to("#c", vars! { opacity: 0.2 }, "mid+=0.25")
+  .call(|| println!("at the end"), ">");
+```
+
+`gsap::timeline`'s `vars` take the timeline's own options: `repeat`, `repeatDelay`, `yoyo`, `delay`, `timeScale`, `paused` and `reversed`.
+
+| `Timeline` method | What it does |
+| --- | --- |
+| `to(targets, vars, position)` | Add a `gsap::to` at `position`. |
+| `from(targets, vars, position)` | Add a `gsap::from`. |
+| `from_to(targets, from, to, position)` | Add a `gsap::from_to`. |
+| `set(targets, vars, position)` | Add a `gsap::set`. |
+| `add(&tween, position)` | Add a tween or timeline made elsewhere. |
+| `add_label(name, position)` | Name a point in time. |
+| `call(f, position)` | Run `f` when the playhead passes `position`. |
+| `label_time(name) -> Option<f64>` | When label `name` is, in seconds, if it exists. |
+
+Each returns `&Timeline`, so calls chain. `Timeline` wraps a `Tween` (its public field `.0`) and dereferences to it, so every [control](#controlling-a-motion) works on it. Tweens placed on elements by selector are placed after the layout that finds their elements, in the order you added them.
+
+### Positions
+
+| Position | Means |
+| --- | --- |
+| `""` | The end of the timeline. |
+| `"1.5"` | 1.5 seconds from the start. |
+| `"+=1"`, `"-=0.5"` | 1 second after the end, half a second before it. |
+| `"<"`, `">"` | The start, or the end, of the last thing added. |
+| `"<0.2"`, `">-0.1"`, `"<+=0.2"` | Offset from the start or end of the last thing added. |
+| `"label"`, `"label+=1"`, `"label-=1"` | At a label, or offset from it. A label that doesn't exist yet is made at the end. |
+| `"50%"` | That share of the timeline's length so far. |
+| `"+=25%"`, `"<50%"` | An offset in percent of the last thing added's length. |
+
+A label is a letter or `_`, then letters, digits, `_`, `.` or `-`.
+
+## Controlling a motion
+
+Every call returns a `Tween`. Dropping it lets the motion run on; `kill` stops it. `Clone` gives another handle to the same motion.
+
+| Method | What it does |
+| --- | --- |
+| `play()` | Play forward from where it is. |
+| `pause()`, `resume()` | Pause, and play on in the direction it was going. |
+| `reverse()` | Turn around and play. |
+| `restart()` | Play from the start. |
+| `complete()` | Jump to its end now. |
+| `kill()` | Stop it where it is, for good. |
+| `seek(seconds)` | Jump to a time. |
+| `set_progress(p)` | Jump to `p` (0..1) of one iteration. |
+| `set_total_progress(p)` | Jump to `p` (0..1) of the whole, repeats included. |
+| `set_time_scale(s)` | Its speed: 2 is twice as fast. |
+| `is_active() -> bool` | Whether it is playing now. |
+| `paused() -> bool`, `reversed() -> bool` | Its state. |
+| `time() -> f64` | Seconds into the current iteration. |
+| `total_time() -> f64` | Seconds into the whole, repeats included. |
+| `duration() -> f64` | One iteration's length. |
+| `total_duration() -> f64` | The whole length, repeats included. |
+| `progress() -> f64` | How far through the current iteration, 0..1. |
+| `time_scale() -> f64` | Its speed. |
+
+The controls return `&Tween`, so they chain: `t.seek(0.5).pause();`.
+
+## Global settings
+
+| Function | What it does |
+| --- | --- |
+| `motion::available() -> bool` | Whether this build animates (the `anim` feature). |
+| `blenderui::set_reduced_motion(on)` | Reduced motion everywhere: the motions below, animated images, Blender's panel animations, and CSS `@media (prefers-reduced-motion: reduce)`. |
+| `motion::set_reduced_motion(on)` | Reduced motion for this engine alone. |
+| `motion::set_time_scale(scale)` | Every motion's speed. 0 or less is ignored. |
+| `motion::lag_smoothing(threshold, adjusted)` | When a frame comes more than `threshold` seconds after the last, the clock moves only `adjusted` seconds, so a stall doesn't make motions jump. Defaults: 0.5 and 0.033. A `threshold` of 0 turns it off. |
+
+**Reduced motion** makes every property jump to its end (transforms, sizes, layout animations, drags) except `opacity`, `color` and `backgroundColor`, which still fade. BUI doesn't read the operating system's setting by itself: call `set_reduced_motion` with it.
+
+## What it costs
+
+An object made of literals is a `static`: its property ids and eases are looked up once per call site. A frame that only animates skips rendering the view, the style cascade and layout, and repaints only the elements that changed; a window with nothing moving costs no CPU.
+
+A frame is not allocation-free yet. What still allocates: a call's values are built once when it starts (not per frame), a callback (`on_update`, `on_complete`) costs one boxed event each time it fires, and objects with computed values are built where they are written. The Rust side is being tightened; the full list is under [What a frame costs](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#what-a-frame-costs).
 
 ## Testing animations
 
-A headless window has a clock that stands still. Move it with `cx.advance_clock(Duration)`, then `cx.draw(window)`, to check a value frame by frame, as the tests in `bindings/rust/blenderui/tests/motion*.rs` do.
+A headless window has a clock that stands still. Move it with `cx.advance_clock(Duration)`, then `cx.draw(window)`, to check a value frame by frame. Turn [lag smoothing](#global-settings) off first: a jump of the test clock longer than half a second would otherwise count as a stall.
+
+```rust
+use std::time::Duration;
+
+#[test]
+fn panel_slides_in() {
+    Application::headless().run(|cx| {
+        blenderui::motion::lag_smoothing(0.0, 0.0);
+        let w = cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Page)).unwrap().id;
+        cx.draw(w);
+        cx.advance_clock(Duration::from_millis(500));
+        cx.draw(w);
+        assert!(cx.element_bounds(w, "panel").is_some());
+    });
+}
+```
+
+The repository's tests in `bindings/rust/blenderui/tests/suite/motion*.rs` do this for every feature on this page. [Headless testing](../headless-testing/#test-animations-with-a-virtual-clock) has more.
+
+## For binding authors
+
+Code that reads animation objects at run time, rather than from `vars!`, uses these. Apps don't need them.
+
+| Item | What it does |
+| --- | --- |
+| `Any` | A runtime value: `Null`, `Bool`, `Num(f64)`, `Str`, `List`, `Map` (key-value pairs), `Func` (a callback the binding keeps), `Motion(u32)` (a motion value by the binding's handle). |
+| `DynVars::parse(&[(String, Any)])` | A vars object, checked: the same keys and options as `vars!`, with an error naming the bad key. `Send`, so it can cross threads. |
+| `dyn_vars.add_transition(entries)` | Add a transition object's options, `default` and per-property ones. |
+| `dyn_vars.resolve(f)` | Parse its eases and find its motion values (on the UI thread, once). |
+| `dyn_vars.vars()`, `into_vars()` | The `Vars`, copied or moved out. |
+| `dyn_vars.events()`, `defaults()`, `props()` | The callback bits it asked for, a timeline's `defaults`, and its properties. |
+| `events(mask, make)` | An `Events` for the callback bits in `mask`, each made by `make(bit)`. |
+| `DynTarget::parse(&Any)` | A target prop: an object, a variant name, or `false`. Then `resolve` and `target()`. |
+| `variants(&Any)` | Variants read from a runtime object. |
 
 ## Limits
 
-- **Widgets:** a Blender widget has no draw transform or opacity. `x`, `y`, `scale`, `rotate` and `opacity` apply to HTML elements; a widget animates its own values (`value`, colors, sizes).
-- **Staggered variants:** `staggerChildren` through a parent isn't supported in `rsx!`. Give each child a `delay`, or use `gsap::to` with `stagger`.
+- **Widgets:** a Blender widget has no draw transform or opacity. `x`, `y`, `scale`, `rotate` and `opacity` apply to HTML elements.
+
+## Not done yet
+
+<ComingSoon feature="The rest of Motion and GSAP in Rust">
+
+**Motion**
+
+- `layoutId`, `LayoutGroup`, `MotionConfig` and `custom`.
+- `staggerChildren` and `delayChildren` in variants. Give each child a `delay`, or use `gsap::to` with `stagger`.
+- Gesture events: `onHoverStart`, `onHoverEnd`, `onTap`, `onDrag` and the others.
+- The hooks `use_in_view`, `use_animate`, `use_animation_frame` and `use_reduced_motion`.
+- `mode` on presence.
+- `z`, `rotateX` and `rotateY`: accepted, but they draw nothing on elements. `value` does nothing on elements either.
+
+**GSAP**
+
+- `gsap::delayed_call`. Use `gsap::timeline(vars! {}).call(f, "+=1")`.
+- `quick_to`, `kill_tweens_of`, `context`, `match_media` and `utils`.
+- The plugins: `ScrollTrigger`, `Flip`, `Draggable` and `Observer`.
+- Plain Rust objects as targets. `Targets` takes motion values and selectors.
+
+**Partly done**
+
+- **Callbacks on element props:** element motions don't run `onComplete` or the other callbacks. Use a `Tween` from `gsap::to` or `animate`, or a `MotionValue`, when you need them.
+- **Timeline callbacks:** `gsap::timeline(vars!)` doesn't run callbacks given in its `vars`. Use `tl.call(f, ">")` at the end instead.
+- **Builder methods:** `onRepeat`, `onReverseComplete` and `onInterrupt` have none. Set them through `vars!` or the `Events` fields.
+- **Typos:** an unknown property animates nothing and an unknown ease is linear. Only a bad `type` or `repeatType`, or a `transition` that isn't an object, is a compile error.
+- **Timeline positions:** a position the engine rejects is dropped quietly, and the tween is never placed.
+- **Reading a `Spec`:** its getters are public, but an element's `Spec` can't be read from outside the crate.
+
+The [status table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point) covers every language.
+
+</ComingSoon>
 
 ## Next steps
 
@@ -204,5 +927,8 @@ A headless window has a clock that stands still. Move it with `cx.advance_clock(
   </Card>
   <Card title="Hooks" href="docs/rust/hooks/" icon="anchor" kicker="Rust">
     State and effects in components.
+  </Card>
+  <Card title="Headless testing" href="docs/rust/headless-testing/" icon="check" kicker="Rust">
+    Step animations frame by frame in a test.
   </Card>
 </CardGrid>

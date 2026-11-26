@@ -1,5 +1,5 @@
 ---
-// The top bar: product-level areas (Docs, Tutorials, Charts, Benchmarks, Roadmap), search, theme
+// The top bar: product-level areas (Docs, Tutorials, Addons, Benchmarks, Roadmap), search, theme
 // and the GitHub and Discord links. The pages themselves live in the docs sidebar, not here.
 import Logo from "./Logo.astro";
 import Icon from "./Icon.astro";
@@ -13,9 +13,11 @@ interface Props {
   menuTarget?: string;
   /** Label of the current top link, if any. */
   current?: string;
+  /** What the search button searches; a page with its own search (the charts) opens it from the button. */
+  searchLabel?: string;
 }
 
-const { menuTarget = "site-menu", current = "" } = Astro.props;
+const { menuTarget = "site-menu", current = "", searchLabel = "Search docs" } = Astro.props;
 ---
 
 <header
@@ -39,11 +41,33 @@ const { menuTarget = "site-menu", current = "" } = Astro.props;
 
   <nav aria-label="Main" class="hidden h-full items-stretch md:flex">
     {
-      topLinks.map((link) => (
-        <a href={href(link.href)} aria-current={current === link.label ? "page" : undefined} class="top-link">
-          {link.label}
-        </a>
-      ))
+      topLinks.map((link) =>
+        "menu" in link ? (
+          <div class="top-menu relative flex">
+            <a href={href(link.href)} aria-current={current === link.label ? "page" : undefined} class="top-link gap-1">
+              {link.label}
+              <Icon name="caret-down" size={12} class="top-caret" />
+            </a>
+            <ul class="top-menu-panel" aria-label={link.label}>
+              {link.menu.map((item) => (
+                <li>
+                  <a href={href(item.href)} class="top-menu-item">
+                    <Icon name={item.icon} weight="duotone" size={18} class="mt-0.5 shrink-0 text-link" />
+                    <span class="flex flex-col">
+                      <span class="font-medium text-foreground">{item.label}</span>
+                      <span class="text-[13px] text-muted">{item.blurb}</span>
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <a href={href(link.href)} aria-current={current === link.label ? "page" : undefined} class="top-link">
+            {link.label}
+          </a>
+        ),
+      )
     }
   </nav>
 
@@ -51,11 +75,11 @@ const { menuTarget = "site-menu", current = "" } = Astro.props;
     type="button"
     data-search-open
     class="ml-auto inline-flex h-9 min-w-10 items-center justify-center gap-2 border border-border bg-background px-3 text-sm text-muted transition-[background-color,color,border-color] duration-150 ease-out hover:border-border-strong hover:text-foreground sm:min-w-60 sm:justify-start"
-    aria-label="Search the docs"
+    aria-label={searchLabel}
     aria-keyshortcuts="Control+K Meta+K"
   >
     <Icon name="magnifying-glass" size={16} />
-    <span class="hidden sm:inline">Search docs</span>
+    <span class="hidden sm:inline">{searchLabel}</span>
     <kbd class="ml-auto hidden border border-border bg-surface px-1.5 font-sans text-[11px] leading-5 sm:inline" data-mod-key>Ctrl K</kbd>
   </button>
 
@@ -86,6 +110,18 @@ const { menuTarget = "site-menu", current = "" } = Astro.props;
             <a href={href(link.href)} class="flex min-h-12 items-center px-3 text-base hover:bg-foreground/6">
               {link.label}
             </a>
+            {"menu" in link && (
+              <ul class="flex flex-col pl-4">
+                {link.menu.map((item) => (
+                  <li>
+                    <a href={href(item.href)} class="flex min-h-11 items-center gap-2 px-3 text-[15px] text-muted hover:bg-foreground/6 hover:text-foreground">
+                      <Icon name={item.icon} weight="duotone" size={16} class="text-link" />
+                      {item.label}
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            )}
           </li>
         ))}
         <li>
@@ -139,6 +175,60 @@ const { menuTarget = "site-menu", current = "" } = Astro.props;
   .top-link[aria-current="page"]::after {
     transform: scaleX(1);
     opacity: 1;
+  }
+  .top-caret {
+    transition: transform 200ms var(--ease-out);
+  }
+  /* The menu opens on hover or when focus is inside it, and stays reachable: it sits flush under
+     the link, so moving the pointer down never crosses a gap. */
+  .top-menu-panel {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    z-index: 50;
+    display: flex;
+    min-width: 20rem;
+    flex-direction: column;
+    padding: 0.375rem;
+    border: 1px solid var(--border);
+    background: var(--background);
+    box-shadow: 0 18px 40px -18px var(--bl-shadow);
+    opacity: 0;
+    visibility: hidden;
+    transform: translateY(-4px);
+    transition:
+      opacity 150ms ease-out,
+      transform 150ms ease-out,
+      visibility 0s linear 150ms;
+  }
+  .top-menu:hover .top-menu-panel,
+  .top-menu:focus-within .top-menu-panel {
+    opacity: 1;
+    visibility: visible;
+    transform: none;
+    transition-delay: 0s;
+  }
+  .top-menu:hover .top-caret,
+  .top-menu:focus-within .top-caret {
+    transform: rotate(180deg);
+  }
+  .top-menu-item {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.625rem 0.75rem;
+    font-size: 14px;
+    line-height: 1.4;
+    transition: background-color 150ms ease-out;
+  }
+  .top-menu-item:hover,
+  .top-menu-item:focus-visible {
+    background: color-mix(in oklab, var(--foreground) 6%, transparent);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .top-menu-panel,
+    .top-caret {
+      transition: none;
+    }
   }
 </style>
 

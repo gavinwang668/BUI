@@ -2,15 +2,29 @@
 
 import { useEffect, useMemo, useRef, useState } from "react"
 import { Menu, Search, X } from "lucide-react"
-import { baseCharts, charts, derivedCharts } from "@/data/charts/registry"
 import { href } from "@/lib/href"
 
-const guide = [
-  { href: href("charts"), label: "Getting started" },
-  { href: href("charts/all"), label: "All charts" },
-  { href: href("charts/which"), label: "Which chart to use?" },
-  { href: href("charts/domains"), label: "Domain specific" },
-]
+/** One sidebar link. `hint` is what the search shows beside it (the group's label when unset). */
+export type ShellLink = { href: string; label: string; hint?: string }
+
+/**
+ * A sidebar group. `filter`: the sidebar filter narrows it, with its count beside the label; the
+ * other groups (a guide) step aside while the filter is in use.
+ */
+export type ShellGroup = { label: string; links: ShellLink[]; filter?: boolean }
+
+/** What an addon (/charts, /panels) puts in the shell: its name, home, sidebar and search words. */
+export type ShellProps = {
+  name: string
+  home: string
+  groups: ShellGroup[]
+  /** Placeholder of the sidebar filter, e.g. "Filter charts". */
+  filterHint: string
+  /** Placeholder of the search, e.g. "Search charts, families and guides". */
+  searchHint: string
+  /** Shown when the search finds nothing. */
+  emptyHint: string
+}
 
 function NavLink({ href, active, children }: { href: string; active: boolean; children: React.ReactNode }) {
   return (
@@ -36,17 +50,11 @@ function Group({ label, count, children }: { label: string; count?: number; chil
   )
 }
 
-function Palette({ onClose }: { onClose: () => void }) {
+function Palette({ name, groups, searchHint, emptyHint, onClose }: Pick<ShellProps, "name" | "groups" | "searchHint" | "emptyHint"> & { onClose: () => void }) {
   const [query, setQuery] = useState("")
   const [cursor, setCursor] = useState(0)
   const input = useRef<HTMLInputElement>(null)
-  const pages = useMemo(
-    () => [
-      ...guide.map((page) => ({ href: page.href, label: page.label, hint: "Guide" })),
-      ...charts.map((chart) => ({ href: href(`charts/${chart.slug}`), label: chart.name, hint: chart.family })),
-    ],
-    [],
-  )
+  const pages = useMemo(() => groups.flatMap((group) => group.links.map((link) => ({ ...link, hint: link.hint ?? group.label }))), [groups])
   const found = useMemo(() => {
     const needle = query.trim().toLowerCase()
     if (!needle) return pages.slice(0, 12)
@@ -64,7 +72,7 @@ function Palette({ onClose }: { onClose: () => void }) {
     <div className="fixed inset-0 z-50 flex items-start justify-center bg-black/50 px-4 pt-[12vh]" onMouseDown={onClose}>
       <div
         role="dialog"
-        aria-label="Search the charts"
+        aria-label={`Search ${name}`}
         className="w-full max-w-xl overflow-hidden border border-border bg-background shadow-[0_24px_60px_-20px_rgb(0_0_0/0.5)]"
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -87,7 +95,7 @@ function Palette({ onClose }: { onClose: () => void }) {
               } else if (event.key === "Enter" && found[cursor]) go(found[cursor].href)
               else if (event.key === "Escape") onClose()
             }}
-            placeholder="Search charts, families and guides"
+            placeholder={searchHint}
             className="h-12 flex-1 bg-transparent text-sm outline-none placeholder:text-(--muted)"
           />
         </div>
@@ -106,14 +114,15 @@ function Palette({ onClose }: { onClose: () => void }) {
               </button>
             </li>
           ))}
-          {found.length === 0 && <li className="px-3 py-6 text-center text-sm text-(--muted)">Nothing matches that. Try a family name, like Finance.</li>}
+          {found.length === 0 && <li className="px-3 py-6 text-center text-sm text-(--muted)">{emptyHint}</li>}
         </ul>
       </div>
     </div>
   )
 }
 
-export function ChartsShell({ pathname: path, actions, children }: { pathname: string; actions?: React.ReactNode; children: React.ReactNode }) {
+/** An addon's site (/charts, /panels): its bar under the site header, a sidebar you filter, a search, the page. */
+export function AddonShell({ name, home, groups, filterHint, searchHint, emptyHint, pathname: path, children }: ShellProps & { pathname: string; children: React.ReactNode }) {
   const pathname = path.replace(/\/$/, "") || "/"
   const [open, setOpen] = useState(false)
   const [searching, setSearching] = useState(false)
@@ -128,90 +137,78 @@ export function ChartsShell({ pathname: path, actions, children }: { pathname: s
         setSearching((value) => !value)
       }
     }
+    // the site header's search button searches this addon here
+    const click = (event: MouseEvent) => {
+      if ((event.target as Element | null)?.closest("[data-search-open]")) setSearching(true)
+    }
     window.addEventListener("keydown", handler)
-    return () => window.removeEventListener("keydown", handler)
+    document.addEventListener("click", click)
+    return () => {
+      window.removeEventListener("keydown", handler)
+      document.removeEventListener("click", click)
+    }
   }, [])
 
   const needle = filter.trim().toLowerCase()
   const match = (name: string) => !needle || name.toLowerCase().includes(needle)
-  const shownBase = baseCharts.filter((chart) => match(chart.name))
-  const shownDerived = derivedCharts.filter((chart) => match(chart.name))
   const nav = (
-    <nav aria-label="Charts documentation" className="flex flex-col px-3 pb-10">
+    <nav aria-label={`${name} documentation`} className="flex flex-col px-3 pb-10">
       <label className="sticky top-0 z-10 -mx-3 mb-1 block bg-background px-3 pb-2 pt-3">
         <span className="sr-only">Filter the sidebar</span>
         <input
           value={filter}
           onChange={(event) => setFilter(event.target.value)}
-          placeholder="Filter charts"
+          placeholder={filterHint}
           className="h-10 w-full border border-border bg-transparent px-3 text-sm outline-none transition-[border-color,box-shadow] duration-150 ease-out placeholder:text-(--muted) focus:border-primary focus:shadow-[0_0_0_3px_color-mix(in_oklab,var(--primary)_22%,transparent)]"
         />
       </label>
-      {!needle && (
-        <Group label="Guide">
-          {guide.map((page) => (
-            <NavLink key={page.href} href={page.href} active={pathname === page.href}>
-              {page.label}
-            </NavLink>
-          ))}
-        </Group>
-      )}
-      <Group label="Base charts" count={shownBase.length}>
-        {shownBase.map((chart) => (
-          <NavLink key={chart.slug} href={href(`charts/${chart.slug}`)} active={pathname === href(`charts/${chart.slug}`)}>
-            {chart.name}
-          </NavLink>
-        ))}
-      </Group>
-      <Group label="Derived charts" count={shownDerived.length}>
-        {shownDerived.map((chart) => (
-          <NavLink key={chart.slug} href={href(`charts/${chart.slug}`)} active={pathname === href(`charts/${chart.slug}`)}>
-            {chart.name}
-          </NavLink>
-        ))}
-      </Group>
+      {groups.map((group) => {
+        if (!group.filter && needle) return null
+        const shown = group.filter ? group.links.filter((link) => match(link.label)) : group.links
+        return (
+          <Group key={group.label} label={group.label} count={group.filter ? shown.length : undefined}>
+            {shown.map((link) => (
+              <NavLink key={link.href} href={link.href} active={pathname === link.href.replace(/\/$/, "")}>
+                {link.label}
+              </NavLink>
+            ))}
+          </Group>
+        )
+      })}
     </nav>
   )
 
   return (
-    <div className="mx-auto flex min-h-dvh w-[94%] flex-col border-x border-border font-sans md:w-[86%]">
-      <header className="sticky top-0 z-30 flex h-14 shrink-0 items-center gap-2 border-b border-border bg-background/90 pl-3 pr-4 backdrop-blur md:pr-10 supports-backdrop-filter:bg-background/75">
+    <div className="mx-auto flex min-h-[calc(100dvh-var(--header-h))] w-[94%] flex-col border-x border-border font-sans md:w-[86%]">
+      <div className="sticky top-(--header-h) z-20 flex h-12 shrink-0 items-center gap-1 border-b border-border bg-background/90 px-3 backdrop-blur supports-backdrop-filter:bg-background/75 md:px-4">
         <button
           type="button"
           onClick={() => setOpen((value) => !value)}
-          aria-label={open ? "Close the menu" : "Open the menu"}
+          aria-label={open ? `Close the ${name.toLowerCase()} list` : `Open the ${name.toLowerCase()} list`}
           aria-expanded={open}
           className="inline-flex size-10 items-center justify-center transition-[background-color,scale] duration-150 ease-out hover:bg-foreground/8 active:scale-[0.96] md:hidden"
         >
           {open ? <X size={20} strokeWidth={1.5} /> : <Menu size={20} strokeWidth={1.5} />}
         </button>
-        <a href={href("")} className="flex h-10 items-center gap-2.5 px-2 transition-[background-color] duration-150 ease-out hover:bg-foreground/6">
-          <img src={href("logo.png")} alt="BUI" width={27} height={22} className="h-[22px] w-auto" />
-        </a>
-        <span className="text-(--muted)" aria-hidden="true">
-          /
-        </span>
-        <a href={href("charts")} className="flex h-10 items-center px-1.5 text-sm font-medium uppercase tracking-[0.14em]">
-          Charts
-        </a>
-        <button
-          type="button"
-          onClick={() => setSearching(true)}
-          className="ml-auto inline-flex h-10 items-center gap-2 border border-border px-3 text-sm text-(--muted) transition-[background-color,color,scale] duration-150 ease-out hover:bg-foreground/6 hover:text-foreground active:scale-[0.96]"
-        >
-          <Search size={16} strokeWidth={1.5} />
-          <span className="hidden sm:inline">Search</span>
-          <kbd className="hidden border border-border px-1.5 text-[11px] sm:inline">Ctrl K</kbd>
-        </button>
-        {actions}
-      </header>
+        <nav aria-label="Breadcrumb" className="flex items-center gap-1 text-sm">
+          <a href={href("addons")} className="flex h-10 items-center px-1.5 text-(--muted) transition-colors duration-150 ease-out hover:text-foreground">
+            Addons
+          </a>
+          <span className="text-(--muted)" aria-hidden="true">
+            /
+          </span>
+          <a href={home} className="flex h-10 items-center px-1.5 font-medium uppercase tracking-[0.14em]">
+            {name}
+          </a>
+        </nav>
+      </div>
 
       <div className="flex-1 md:grid md:grid-cols-[272px_minmax(0,1fr)]">
-        <aside className="hidden border-r border-border md:sticky md:top-14 md:block md:h-[calc(100dvh-3.5rem)] md:overflow-y-auto">{nav}</aside>
-        {open && <aside className="fixed inset-x-0 bottom-0 top-14 z-20 overflow-y-auto bg-background md:hidden">{nav}</aside>}
+        <aside className="hidden border-r border-border md:sticky md:top-[calc(var(--header-h)+3rem)] md:block md:h-[calc(100dvh-var(--header-h)-3rem)] md:overflow-y-auto">{nav}</aside>
+        {open && <aside className="fixed inset-x-0 bottom-0 top-[calc(var(--header-h)+3rem)] z-20 overflow-y-auto bg-background md:hidden">{nav}</aside>}
         <div className="min-w-0">{children}</div>
       </div>
-      {searching && <Palette onClose={() => setSearching(false)} />}
+      {searching && <Palette name={name.toLowerCase()} groups={groups} searchHint={searchHint} emptyHint={emptyHint} onClose={() => setSearching(false)} />}
     </div>
   )
 }

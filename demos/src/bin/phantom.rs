@@ -13,12 +13,11 @@
 //! (`-- --size 1920x1080` for another window size); `-- --frames DIR` renders the scene on the GPU.
 
 use std::sync::OnceLock;
-use std::time::Duration;
 
 use blenderui::prelude::*;
-use bui_demos::canvas::{rem, rem_css, Fit};
+use bui_demos::canvas::{at, rem, rem_css, Fit};
 use bui_demos::menu::{MenuState, ENTRIES};
-use bui_demos::{arg, gpu_stills, now, run_with, save_png, Fx, Script};
+use bui_demos::{arg, focus_root, gpu_stills, now, run_with, size_arg, story::story, Fx, Script};
 
 /// U[0] = time, U[1] = seconds since the last confirm (< 0: none).
 const SCENE: &str = r"
@@ -200,11 +199,6 @@ fn ransom(text: &str, seed: u32, size: f32, voice: Voice) -> Div {
     out
 }
 
-/// Places an absolutely positioned element (design px).
-fn at(d: Div, x: f32, y: f32) -> Div {
-    d.class("abs").css("left", rem(x)).css("top", rem(y))
-}
-
 struct Phantom {
     scene: Fx,
     menu: MenuState,
@@ -228,10 +222,7 @@ impl Phantom {
 impl Render for Phantom {
     fn render(&mut self, w: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         w.request_animation_frame();
-        if w.focused_id().is_none() && self.frames > 0 {
-            w.focus_id("root");
-        }
-        self.frames += 1;
+        focus_root(w, &mut self.frames);
         let fit = Fit::new(w, DESIGN);
         let m = &self.menu;
 
@@ -306,38 +297,20 @@ impl Render for Phantom {
 /// Drives the menu headlessly: first light, the arrow keys and Enter, ↓ with the card open, a
 /// click into another command, Close.
 fn storyboard(dir: String) -> Script {
-    Box::new(move |cx, win| {
-        let shot = |cx: &mut App, name: &str| {
-            let (w, h, px) = cx.draw(win);
-            save_png(&format!("{dir}/{name}.png"), w, h, &px);
-        };
-        let centre = |cx: &mut App, id: &str| {
-            let b = cx.element_bounds(win, id).unwrap_or_else(|| panic!("no #{id}"));
-            (b.origin.x + b.size.width / 2.0, b.origin.y + b.size.height / 2.0)
-        };
-        let play = |cx: &mut App, name: &str, steps: &[u64]| {
-            let mut at = 0;
-            for &ms in steps {
-                cx.advance_clock(Duration::from_millis(ms - at));
-                at = ms;
-                shot(cx, &format!("{name}-{ms:04}ms"));
-            }
-        };
-        play(cx, "00-enter", &[0, 150, 300, 500, 900]);
+    story(dir, move |s| {
+        s.play("00-enter", &[0, 150, 300, 500, 900]);
         // no click: the pointer only comes into the window (the kit takes keys once it has)
-        cx.simulate_mouse_move(win, 5.0, 5.0);
-        cx.simulate_key(win, "", "Down");
-        play(cx, "01-down", &[0, 40, 90, 160, 400]);
-        cx.simulate_key(win, "", "Return");
-        play(cx, "02-return", &[0, 80, 160, 500]);
-        cx.simulate_key(win, "", "Down");
-        play(cx, "03-down-while-open", &[0, 400]);
-        let (x, y) = centre(cx, "m5");
-        cx.simulate_click(win, x, y);
-        play(cx, "04-click", &[0, 500]);
-        let (x, y) = centre(cx, "close");
-        cx.simulate_click(win, x, y);
-        play(cx, "05-close", &[0, 300]);
+        s.cx.simulate_mouse_move(s.win, 5.0, 5.0);
+        s.key("Down");
+        s.play("01-down", &[0, 40, 90, 160, 400]);
+        s.key("Return");
+        s.play("02-return", &[0, 80, 160, 500]);
+        s.key("Down");
+        s.play("03-down-while-open", &[0, 400]);
+        s.click("m5");
+        s.play("04-click", &[0, 500]);
+        s.click("close");
+        s.play("05-close", &[0, 300]);
     })
 }
 
@@ -354,8 +327,7 @@ fn main() {
         }
         return;
     }
-    let (w, h) = arg("--size").and_then(|s| s.split_once('x').and_then(|(a, b)| Some((a.parse().ok()?, b.parse().ok()?))))
-        .unwrap_or(DESIGN);
+    let (w, h) = size_arg(DESIGN);
     let make = || Phantom { scene: scene(), menu: MenuState::default(), frames: 0 };
     run_with(w, h, "BUI · Phantom", make, arg("--storyboard").map(storyboard));
 }

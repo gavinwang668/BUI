@@ -34,7 +34,8 @@ static const char *k_gradient =
     "  return vec4(mix(vec3(uv.x, uv.y, U[0]), t.rgb, U[1]), 1.0);\n"
     "}\n";
 
-/* the dialect's constructs: splat constructors, casts, loops, mod, fract, atan2, inversesqrt */
+/* the dialect's constructs: splat constructors, casts, loops, mod, fract, atan2, atan(y, x),
+ * inversesqrt, integer bit operations, a name HLSL reserves (`line`) */
 static const char *k_dialect =
     "vec4 effect(vec2 p) {\n"
     "  float s = 0.0;\n"
@@ -42,6 +43,9 @@ static const char *k_dialect =
     "  float a = float(int(2.7));\n"                            /* 2 */
     "  vec3 c = vec3(0.25) + vec3(a * 0.125, s * 0.25, mod(7.5, 2.0) / 3.0 - 0.25);\n"
     "  c.z += atan2(1.0, 1.0) * 0.0 + inversesqrt(4.0) * 0.0 + fract(3.25) * 0.0;\n"
+    "  float line = atan(1.0, 1.0) * 0.0;\n"                   /* GLSL's atan(y, x); a word HLSL keeps */
+    "  int bits = (13 >> 2) & 1;\n"                             /* 1 */
+    "  c.z += line + float(bits - 1);\n"
     "  return vec4(c, 1.0);\n"                                  /* (.5, .5, .5) */
     "}\n";
 

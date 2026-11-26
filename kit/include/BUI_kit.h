@@ -656,7 +656,11 @@ void BK_image_exit(void);        /* joins the workers, frees the cache */
 
 /* -- canvas (Tk Canvas, QPainter)-------------------------------------------------- */
 enum { BK_ITEM_RECT, BK_ITEM_OVAL, BK_ITEM_LINE, BK_ITEM_POLYGON, BK_ITEM_TEXT, BK_ITEM_ARC,
-       BK_ITEM_IMAGE, BK_ITEM_ROUNDRECT, BK_ITEM_EFFECT, BK_ITEM_PASS };
+       BK_ITEM_IMAGE, BK_ITEM_ROUNDRECT, BK_ITEM_EFFECT, BK_ITEM_PASS, BK_ITEM_SHADOW };
+/* BK_ITEM_SHADOW: CSS `box-shadow` (an outer one). 8 coords: the shadow's box x0 y0 x1 y1 (offset
+ * and spread already applied), then the box that casts it, x0 y0 x1 y1 (the shadow is drawn only
+ * outside it). `radius`: the shadow box's corner radius; `size`: the casting box's; `width`: the
+ * blur's Gaussian sigma (0: a hard edge); `fill`: the colour. */
 typedef struct BKCanvasItem {
   int id, type;
   const float *coords; /* x0 y0 x1 y1 ... in canvas space */

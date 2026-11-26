@@ -1,0 +1,425 @@
+---
+title: Workspaces in markup
+sidebarLabel: Markup
+description: The bui-panels ui module, prop by prop - <Workspace>, <Row>, <Column>, <Stage>, <Panel>, <Float>, <Template> and <View> in rsx!, plus use_workspace, use_view and scope.
+group: Reference
+order: 30
+sources: ["addons/bui-panels/src/ui/mod.rs", "addons/bui-panels/src/ui/root.rs", "addons/bui-panels/src/ui/layout.rs", "addons/bui-panels/src/ui/handle.rs", "addons/bui-panels/src/ui/content.rs", "addons/bui-panels/src/ui/scope.rs", "addons/bui-panels/src/lib.rs", "addons/bui-panels/examples/ide.rs", "addons/bui-panels/tests/markup.rs", "addons/bui-panels/README.md"]
+---
+
+The `ui` module lets you write a workspace the way you write the rest of an `rsx!` app: the layout as nested components, each view's content as markup, and hooks to reach the workspace from your components. Underneath it is the same [Workspace engine](../workspace/).
+
+`use bui_panels::prelude::*;` brings in everything on this page (all of `bui_panels::ui`) and the types the props and handles use: `Allow`, `Axis`, `Badge`, `Command`, `Detail`, `DockTarget`, `Edge`, `FloatingLayer`, `FrameTarget`, `Framing`, `GestureKeys`, `GestureOwner`, `IconName`, `Id`, `Keymap`, `LayoutDocument`, `MenuEntry`, `MenuItem`, `MenuRegion`, `Navigation`, `PanelMenuContext`, `Palette`, `Placement`, `Rect`, `Reuse`, `Scaling`, `TabbarMode`, `ThemeMode`, `Titlebar`, `ViewInfo`, `ViewPlacement` and `default_gesture_keys`. Note that its `Workspace` is the markup component; the entity is `bui_panels::Workspace`.
+
+## The shape of a workspace
+
+```rust title="examples/ide.rs (trimmed)"
+<Workspace handle={ws} persist="layout.json" persist_version="2" navigation={Navigation::Free}>
+    <Template
+        name="editor"
+        content={|params: EditorParams, _, _| rsx! { <Editor path={params.path} /> }}
+    />
+
+    <Row sizes={[1.0, 3.0, 1.0]}>
+        <Panel id="left">
+            <View id="files" title="Files" icon={IconName::Folder} keep_out_of_stage>
+                <Note text="files" />
+            </View>
+        </Panel>
+
+        <Stage>
+            <Panel id="docs">
+                {...docs}
+            </Panel>
+        </Stage>
+
+        <Column sizes={[2.0, 1.0]}>
+            <Panel id="right">
+                <View id="outline" title="Outline" icon={IconName::Outliner} singleton>
+                    <Note text="outline" />
+                </View>
+            </Panel>
+            <Panel id="tools">
+                <View id="canvas" title="Canvas" icon={IconName::Image} tabbar={TabbarMode::Overlay}>
+                    <Note text="canvas" />
+                </View>
+            </Panel>
+        </Column>
+    </Row>
+
+    <Float x={120.0} y={80.0} w={360.0} h={240.0} layer={FloatingLayer::Stage}>
+        <Panel id="console-panel">
+            <View id="console" title="Console" icon={IconName::Console}>
+                <Note text="console" />
+            </View>
+        </Panel>
+    </Float>
+</Workspace>
+```
+
+The rules:
+
+- A `<Workspace>` holds layout nodes (`<Row>`, `<Column>`, `<Stage>`, `<Panel>`), `<Float>`s and `<Template>`s. Several layout nodes at the top are placed in a row.
+- `<Row>`, `<Column>` and `<Stage>` hold layout nodes. A `<Stage>` holds at most one, and a layout has at most one `<Stage>`.
+- A `<Panel>` holds `<View>`s only. A `<View>` anywhere else is an error.
+- A `<Float>` holds `<Panel>`s.
+
+These components declare nodes; they draw nothing themselves. Breaking a rule panics with a message that names the component.
+
+### What the markup does over time
+
+The markup is the workspace's **starting** layout, not a live description of it. Once the user drags things around, the workspace keeps their arrangement. What the markup keeps in step on every render is the set of views and their props:
+
+- A `<View>` that appears in the markup is opened: into its declared panel at its index if that panel still exists, else where its `placement` says, else by the usual default.
+- A `<View>` that disappears from the markup is closed, even past its close guard.
+- A view's `title`, `badge`, rules, menu, content and guard follow its props.
+
+With `persist`, a saved layout is restored instead of the markup's; declared views missing from the file are opened, and saved views no longer declared are closed. The views declared in the markup are there from the start: they don't fire `on_open`.
+
+Each declared view gets the type `zopra-view:<id>`; that is the `type` you see in a saved layout. Panels and splits without an `id` get one from their position (`panel-0-1`, `split-0`); a stage without one is `stage`.
+
+## scope
+
+```rust
+pub fn scope<E: IntoElement>(window: &mut Window, cx: &mut App, f: impl FnOnce() -> E) -> AnyElement
+```
+
+`blenderui` components take only their props, but a `<Workspace>` owns an entity and has to draw it. `scope` lends the window and the app to the `<Workspace>`s rendered inside `f`. Call it from a view's `render`:
+
+```rust title="examples/ide.rs"
+struct IdeView;
+
+impl Render for IdeView {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // `app()`: a body as tall as the window, without the browser's margin
+        scope(window, cx, || app().child(rsx! { <Ide /> }))
+    }
+}
+```
+
+A `<Workspace>` rendered outside a `scope` panics with a message saying so. The workspace fills its nearest positioned ancestor, so give its parent a size and `relative` (`<div class="flex-1 relative">` in the example).
+
+## Workspace
+
+`<Workspace>` makes the engine on its first render and keeps it in step afterwards. Its props are [`WorkspaceOptions`](../workspace/#workspaceoptions) and the event callbacks. A bare prop (`tab_fill`) means `true`.
+
+| Prop | Type | What it does |
+| --- | --- | --- |
+| `handle` | `WorkspaceRef` | The ref from `use_workspace()` that drives this workspace. Without it the workspace makes its own, which its views can still reach with `use_workspace()`. |
+| `layout` | `impl Into<Option<LayoutDocument>>` | A layout to show. It wins over the persisted file and the markup's own layout, and a new value animates to it. |
+| `persist` | `impl Into<PathBuf>` | Keep the layout in this JSON file. |
+| `persist_version` | `impl Into<String>` | The `version` written to the file; a file with another version is ignored. |
+| `navigation` | `Navigation` | `Off`, `Focus` (default) or `Free`. |
+| `theme` | `ThemeMode` | The colors. Default `System`. |
+| `floating` | `FloatingLayer` | The layer new floating panels go on. Default `Overlay`. |
+| `no_floating` | `bool` | Turn floating off. |
+| `keep_pushed` | `bool` | Divider pushes stick (default `true`). |
+| `reduced_motion` | `bool` | No animations. |
+| `detail` | `Detail` | When small groups collapse into outlines. Default `Detail { size: 48.0, outline: 2 }`. |
+| `no_detail` | `bool` | Never collapse groups. |
+| `tab_fill` | `bool` | Tabs share the bar's width. |
+| `tab_inset` | `f32` | Padding above and beside the tabs, in pixels. Default `4.0`. |
+| `tab_undo_seconds` | `f64` | Show the undo toast for this long after a close. Default `0` (no toast). |
+| `keymap` | `Keymap` | Your key bindings, over the defaults. |
+| `gesture_keys` | `GestureKeys` | The keys held for camera gestures. |
+| `panel_menu` | `impl Fn(Vec<MenuEntry>, &PanelMenuContext) -> Vec<MenuEntry>` | Rewrite every panel menu. |
+| `no_panel_menu` | `bool` | No built-in entries: a panel menu holds only its view's own entries. |
+| `hide_toward` | `impl Fn(&Id) -> Option<Rect>` | Where a hidden panel flies to, by panel id (a dock icon's rect, in workspace pixels). |
+| `backdrop` | `impl IntoElement` | Shown behind the stage. |
+| `stage_empty` | `impl IntoElement` | Shown in an empty stage. |
+| `empty` | `impl IntoElement` | Shown when nothing is open. |
+| `chrome` | `impl IntoElement` | Drawn over everything; pointer events pass through its empty parts. |
+| `on_change` | `impl Fn(&LayoutDocument, &mut Window, &mut App)` | The layout changed. |
+| `on_open` | `impl Fn(&ViewInfo, &mut Window, &mut App)` | A view opened. |
+| `on_close` | `impl Fn(&ViewInfo, &mut Window, &mut App)` | A view closed. |
+| `on_focus` | `impl Fn(Option<&Id>, &mut Window, &mut App)` | The focused view changed. |
+| `on_navigate` | `impl Fn(Option<&Id>, &mut Window, &mut App)` | The framing changed. |
+
+The callbacks run while the workspace renders, with the window. They hear the same events as [`subscribe`](../workspace/#events).
+
+```rust title="examples/ide.rs (trimmed)"
+<Workspace
+    handle={ws}
+    persist="layout.json"
+    persist_version="2"
+    navigation={Navigation::Free}
+    theme={ThemeMode::Dark}
+    floating={FloatingLayer::Overlay}
+    keep_pushed={false}
+    detail={Detail { size: 48.0, outline: 2 }}
+    tab_fill
+    tab_inset={6.0}
+    tab_undo_seconds={5.0}
+    keymap={Keymap::new()}
+    gesture_keys={default_gesture_keys()}
+    panel_menu={|entries, _ctx| entries}
+    hide_toward={|_id| None}
+    stage_empty={rsx! { <Note text="Open a file" /> }}
+    empty={rsx! { <Note text="Nothing open" /> }}
+    on_change={|doc, _, _| println!("layout changed: {} views", doc.views.len())}
+    on_open={|view, _, _| println!("open {}", view.id)}
+    on_close={|view, _, _| println!("close {}", view.id)}
+    on_focus={|id, _, _| println!("focus {id:?}")}
+    on_navigate={|id, _, _| println!("navigate {id:?}")}
+>
+```
+
+## Layout components
+
+### Row and Column
+
+`<Row>` lays its children side by side (a split along `x`); `<Column>` stacks them (along `y`). Both build a `Split`.
+
+| Prop | Type | What it does |
+| --- | --- | --- |
+| `id` | `impl Into<Id>` | The split's id. |
+| `sizes` | `impl Into<Vec<f64>>` | The children's weights: `[1.0, 3.0]` gives the second child three times the first's size. Without `sizes`, or with a different count than the children, they share equally. |
+
+### Stage
+
+The main area. New views open here by default, and it can stay empty.
+
+| Prop | Type | What it does |
+| --- | --- | --- |
+| `id` | `impl Into<Id>` | The stage's id. Default `stage`. |
+
+### Panel
+
+A panel of tabs, one per `<View>` child, in order.
+
+| Prop | Type | What it does |
+| --- | --- | --- |
+| `id` | `impl Into<Id>` | The panel's id. Give one to the panels you target from code (`ws.restore("right", cx)`) or by `<View>` placement. |
+
+### Float
+
+Floating panels. Each `<Panel>` inside becomes its own floating panel at the same rect.
+
+| Prop | Type | What it does |
+| --- | --- | --- |
+| `x`, `y`, `w`, `h` | `f64` | The rect in pixels. They are turned into fractions of the window's size when the workspace is first built. |
+| `layer` | `FloatingLayer` | `Overlay` (over the whole workspace) or `Stage` (over the stage). Default `Overlay`. |
+
+### Template
+
+A view type whose content is made from each view's params. `ws.open(name, params, cx)` opens one.
+
+| Prop | Type | What it does |
+| --- | --- | --- |
+| `name` | `impl Into<String>` | The type name `open` uses. Required. |
+| `content` | `impl Fn(P, &mut Window, &mut App) -> E` | Makes the content. `P` is any `DeserializeOwned` type; a view whose params don't deserialize into it shows nothing. Required. |
+
+```rust title="examples/ide.rs"
+#[derive(Serialize, Deserialize)]
+struct EditorParams {
+    path: String,
+}
+
+// in the <Workspace>
+<Template
+    name="editor"
+    content={|params: EditorParams, _, _| rsx! { <Editor path={params.path} /> }}
+/>
+
+// in a click handler
+ws.open("editor", EditorParams { path: "src/c.ts".into() }, cx)
+    .placement(Placement::Stage)
+    .reuse(Reuse::Params)
+    .title("c.ts");
+```
+
+### View
+
+One tab. Its children are its content. Or give it `content`, a closure that makes the content each render; only there (and in a `<Template>`) does `use_view()` work, because `blenderui` builds a component's children before the component.
+
+| Prop | Type | What it does |
+| --- | --- | --- |
+| `id` | `impl Into<Id>` | The view's id. Required: `blenderui` keeps `key` for hook state, so give both when the view comes from a list. |
+| `title` | `impl Into<SharedString>` | Its tab's title. Default: the id. |
+| `icon` | `IconName` | Its tab's icon. |
+| `badge` | `impl Into<Option<Badge>>` | Its tab's badge. `None` takes the badge off; leaving the prop out leaves the badge to `use_view().set_badge(..)`. |
+| `placement` | `Placement` | Where it opens when it appears in the markup later. |
+| `keep_out_of_stage` | `bool` | Its panel can't go in the stage. |
+| `keep_out_of_sides` | `bool` | Its panel can't go outside the stage. |
+| `keep_out_of_floating` | `bool` | Its panel can't float. |
+| `singleton` | `bool` | At most one view of its type. |
+| `closable` | `bool` | `false` removes the close button and the close entries. |
+| `tabbar` | `TabbarMode` | When its panel shows a tab bar. |
+| `min_size` | `(f64, f64)` | The size below which it counts as scaled down. |
+| `scaling` | `Scaling` | What happens below that size. |
+| `gestures` | `GestureOwner` | Who gets wheel and touchpad gestures over it. |
+| `accessory` | `impl IntoElement` | An element at the end of the tab bar while it is selected. |
+| `menu` | `impl Fn(&ViewInfo) -> Vec<MenuEntry>` | Its own panel-menu entries. |
+| `content` | `impl Into<Content>` | A closure that makes its content each render: `content={move \|\| rsx! { <Editor/> }}`. |
+| `open_from` | `Rect` | A rect, in workspace pixels, it grows out of when it opens after the first render. |
+| `focus_on_open` | `bool` | Focus it when it opens after the first render. Default `true`. Views in the first render never take focus. |
+| `on_close` | `impl Fn(&mut Window, &mut App)` | Runs when this view closes. |
+| `can_close` | `impl Fn(&App) -> bool` | A close guard: the user can close the view only while it returns `true`. |
+
+The rules are the same as a `ViewType`'s; see [View types](../workspace/#view-types) for what each does.
+
+A list of documents, each closable unless it is dirty:
+
+```rust title="examples/ide.rs"
+let docs = files.get().into_iter().map(move |file| {
+    let (dirty, path) = (file.dirty, file.path.clone());
+    let closed = file.path.clone();
+    rsx! {
+        <View
+            key={file.path.clone()}
+            id={file.path}
+            title={file.name}
+            badge={dirty.then_some(Badge::Dot)}
+            keep_out_of_sides
+            can_close={move |_| !dirty}
+            on_close={move |_, _| files.update(|files| files.retain(|f| f.path != closed))}
+            content={move || rsx! { <Editor path={path.clone()} /> }}
+        />
+    }
+});
+```
+
+### Content
+
+What `content` takes: `Content` is made `From` any `Fn() -> E` where `E: IntoElement`, and is called again each render.
+
+### The declared nodes
+
+The components above turn into these public types. You don't build them yourself; they are listed so the module's exports are complete.
+
+| Type | What it is |
+| --- | --- |
+| `Split` | What `<Row>` and `<Column>` build. Methods `id`, `sizes`, `children`. |
+| `LayoutNode` | A declared node: `Split { id, axis, sizes, children }`, `Stage { id, child }`, `Panel { id, views }`, `Float { rect, layer, panels }` or `Template(TemplateNode)`. |
+| `TemplateNode` | A declared `<Template>`: its name and content. |
+| `ViewNode` | A declared `<View>` and all its props. |
+
+## use_workspace and WorkspaceRef
+
+```rust
+pub fn use_workspace() -> WorkspaceRef
+```
+
+Inside a workspace's views, `use_workspace()` returns that workspace. Anywhere else it returns a new ref for this component, to hand to the `<Workspace handle={..}>` it renders. A `WorkspaceRef` is `Copy`, so you can move it into any number of handlers.
+
+```rust title="examples/ide.rs"
+#[component]
+fn Toolbar(ws: WorkspaceRef) {
+    let actions: [(&'static str, Action); 10] = [
+        ("Pop out console", |ws, cx| ws.float("console", cx)),
+        ("Overview", |ws, cx| ws.frame(FrameTarget::All, cx)),
+        ("Reopen tab", |ws, cx| ws.reopen_closed(cx)),
+        ("Back", |ws, cx| ws.back(cx)),
+        ("Forward", |ws, cx| ws.forward(cx)),
+        ("Save framing", |ws, cx| {
+            ws.save_framing("review", cx);
+        }),
+        ("Next tab", |ws, cx| ws.run(Command::TabNext, cx)),
+        ("Hide outline", |ws, cx| ws.hide("outline", cx)),
+        ("Restore right", |ws, cx| ws.restore("right", cx)),
+        ("Open c.ts", |ws, cx| {
+            ws.open("editor", EditorParams { path: "src/c.ts".into() }, cx)
+                .placement(Placement::Stage)
+                .reuse(Reuse::Params)
+                .title("c.ts");
+        }),
+    ];
+    // ...
+}
+```
+
+Every method takes the app. Before the workspace's first render the ref is unbound: actions do nothing, methods that return `bool` or `Option` return `false` or `None`, and the other reads return the value in brackets.
+
+| Method | What it does |
+| --- | --- |
+| `open<P: Serialize>(self, ty: impl Into<String>, params: P, cx: &mut App) -> Opening` | Starts opening a view of type `ty` with `params` (serialized to JSON; `()` means no params). Set options on the `Opening`; it opens when dropped. |
+| `close(self, id: impl Into<Id>, cx) -> bool` | Closes a view unless a guard refuses. `false` when it stayed open. |
+| `close_forced(self, id: impl Into<Id>, cx) -> bool` | Closes a view past its guards. |
+| `reopen_closed(self, cx)` | Reopens the tab the user closed last. |
+| `select(self, id: impl Into<Id>, cx)` | Selects a tab without moving focus. |
+| `focus(self, id: impl Into<Id>, cx)` | Shows and focuses a view or a panel. |
+| `hide(self, id: impl Into<Id>, cx)` | Hides a panel, or one view. |
+| `hide_toward(self, id: impl Into<Id>, toward: Rect, cx)` | Hides it, shrinking toward `toward` (workspace pixels). |
+| `restore(self, panel_id: impl Into<Id>, cx)` | Restores a hidden panel. |
+| `restore_from(self, panel_id: impl Into<Id>, from: Rect, cx)` | Restores it, growing out of `from` (workspace pixels). |
+| `float(self, id: impl Into<Id>, cx)` | Floats a panel or a view. |
+| `float_at(self, id: impl Into<Id>, rect: Rect, cx)` | Floats it at `rect`, in fractions of the floating area. |
+| `dock(self, id: impl Into<Id>, target: DockTarget, cx)` | Docks it at `target`. |
+| `toggle_dock(self, id: impl Into<Id>, cx)` | Docks a floating panel, or floats a docked one. |
+| `frame(self, target: FrameTarget, cx)` | Frames everything, the stage, or the given ids. |
+| `toggle_maximize(self, id: impl Into<Id>, cx) -> bool` | Maximizes a panel, or restores it. `false` when it couldn't. |
+| `back(self, cx)` | Goes back in the framing history. |
+| `forward(self, cx)` | Goes forward. |
+| `overview(self, cx)` | Frames everything. |
+| `save_framing(self, name: impl AsRef<str>, cx) -> Option<Framing>` | Saves the current framing under `name`. `None` for a blank name. |
+| `go_framing(self, id: impl Into<Id>, cx)` | Frames a saved framing. |
+| `remove_framing(self, id: impl Into<Id>, cx)` | Deletes a saved framing. |
+| `framings(self, cx: &App) -> Vec<Framing>` | The saved framings (empty). |
+| `run(self, command: Command, cx)` | Runs a keyboard command. |
+| `views(self, cx: &App) -> Vec<ViewInfo>` | Every view (empty). |
+| `document(self, cx: &App) -> LayoutDocument` | The current layout (an empty document). |
+| `set_document(self, document: LayoutDocument, animate: bool, cx)` | Shows another layout. |
+| `reset(self, cx)` | Back to the markup's layout, deleting the persisted file. |
+| `set_title(self, id: impl Into<Id>, title: impl Into<String>, cx)` | Sets a view's title. |
+| `set_params<P: Serialize>(self, id: impl Into<Id>, patch: P, cx)` | Merges `patch` into a view's params. |
+| `set_badge(self, id: impl Into<Id>, badge: impl Into<Option<Badge>>, cx)` | Sets or clears a tab's badge. |
+| `focused_view(self, cx: &App) -> Option<Id>` | The focused view (`None`). |
+| `framed(self, cx: &App) -> Option<Id>` | The framed node, `None` for everything (`None`). |
+| `camera(self, cx: &App) -> Rect` | The camera rect (`Rect::UNIT`). |
+| `view_scale(self, id: impl Into<Id>, cx: &App) -> f64` | A view's scale (`1.0`). |
+| `titlebar(self, id: impl Into<Id>, cx: &App) -> Titlebar` | The room an overlaid tab bar takes (zeros). |
+
+### Opening
+
+What `WorkspaceRef::open` returns. Chain options; the view opens when the `Opening` is dropped, at the end of the statement.
+
+| Method | What it sets |
+| --- | --- |
+| `placement(self, placement: Placement) -> Self` | Where it goes. |
+| `reuse(self, reuse: Reuse) -> Self` | Whether to show an existing view instead. |
+| `from(self, rect: Rect) -> Self` | A rect (workspace pixels) it grows out of. |
+| `focus(self, focus: bool) -> Self` | Whether it takes focus (default yes). |
+| `id(self, id: impl Into<Id>) -> Self` | Its id. |
+| `title(self, title: impl Into<String>) -> Self` | Its title. |
+| `info(self) -> Option<ViewInfo>` | Opens it now and returns it; `None` when the type is unknown or the ref is unbound. |
+
+## use_view and ViewRef
+
+```rust
+pub fn use_view() -> ViewRef
+```
+
+The view whose `content` (or `<Template>` content) is rendering. It panics anywhere else.
+
+A `ViewRef` is `Copy` and needs no `cx`. Reads answer from the workspace's last render. Changes are queued and made when the workspace next renders, so they work in render code and in `use_effect`, which `blenderui` runs without an app.
+
+```rust title="examples/ide.rs"
+#[component]
+fn Editor(path: SharedString) {
+    let view = use_view();
+    let (dirty, set_dirty) = use_state(false);
+    view.guard_close(move |_| !dirty());
+    use_effect!(move || view.set_badge(dirty().then_some(Badge::Dot)), [dirty()]);
+    rsx! {
+        <div class="size-full flex flex-col gap-2 p-3">
+            <div class="font-mono">{path}</div>
+            <div id="edit" class="cursor-pointer" onClick={move || set_dirty(true)}>"Type something"</div>
+            <div id="save" class="cursor-pointer" onClick={move || set_dirty(false)}>"Save"</div>
+        </div>
+    }
+}
+```
+
+| Method | What it does |
+| --- | --- |
+| `id(self) -> Id` | The view's id. |
+| `params(self) -> Value` | Its params as of the last render (`Value::Null` when none). |
+| `titlebar(self) -> Titlebar` | The room an overlaid tab bar takes over it. |
+| `scale(self) -> f64` | Its scale (see [Scaling](../workspace/#scaling)). |
+| `close(self)` | Closes it, unless a close guard says no. |
+| `hide(self)` | Hides it. |
+| `focus(self)` | Shows and focuses it. |
+| `set_title(self, title: impl Into<String>)` | Sets its title. |
+| `set_params<P: Serialize>(self, patch: P)` | Merges `patch` into its params. |
+| `set_badge(self, badge: impl Into<Option<Badge>>)` | Sets or clears its badge. |
+| `guard_close(self, guard: impl Fn(&App) -> bool + 'static)` | Its close guard: asked before the user closes the view; `false` keeps it open. It replaces the previous guard, so call it every render. |

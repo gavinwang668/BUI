@@ -247,8 +247,9 @@ frame.
   maps each box to a fixed number of display items, and a layer's image
   replaces the items of its whole subtree. The full repaint of the 300-row page
   takes about 0.4 ms.
-- **CSS gradients are drawn again each frame.** Unlike `border-image`
-  gradients, they aren't cached as images, which is why the turning
+- **Linear CSS gradients are drawn again each frame.** Unlike `border-image`
+  gradients and radial ones (a colour a pixel, kept as an image by size), they
+  aren't cached as images, which is why the turning
   gradient backdrop costs 5.5 ms a frame where the turning cover image costs
   2.1 ms.
 - **Headless redraws repeat.** `App::draw` flushes twice, and a window still

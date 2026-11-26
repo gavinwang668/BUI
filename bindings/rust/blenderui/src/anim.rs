@@ -738,7 +738,6 @@ enum Val {
     Len(Length),
     Len2(Length, Length),
     Shadows(Vec<Shadow>),
-    TextShadow(Option<Shadow>),
     Visible(bool),
     Z(Option<i32>),
     Lh(LineHeight),
@@ -819,7 +818,7 @@ fn get(f: Field, c: &Computed) -> Option<Val> {
         Filter => Val::Filters(c.effects.as_ref().map(|e| e.filter.clone()).unwrap_or_default()),
         Backdrop => Val::Filters(c.effects.as_ref().map(|e| e.backdrop.clone()).unwrap_or_default()),
         BoxShadow => Val::Shadows(c.shadows.clone()),
-        TextShadow => Val::TextShadow(c.text_shadow),
+        TextShadow => Val::Shadows(c.text_shadow.clone()),
         Other(_) => return None,
     })
 }
@@ -898,7 +897,7 @@ fn set(f: Field, c: &mut Computed, v: Val) {
             }
         }
         (BoxShadow, Val::Shadows(x)) => c.shadows = x,
-        (TextShadow, Val::TextShadow(x)) => c.text_shadow = x,
+        (TextShadow, Val::Shadows(x)) => c.text_shadow = x,
         _ => {}
     }
 }
@@ -1116,14 +1115,6 @@ fn lerp(a: &Val, b: &Val, t: f32, u: &Units) -> Option<Val> {
                 l.get(i).copied().unwrap_or_else(|| Shadow { inset: o[i].inset, ..NO_SHADOW })
             };
             Val::Shadows((0..n).map(|i| mix_shadow(&pad(x, y, i), &pad(y, x, i), t)).collect::<Option<_>>()?)
-        }
-        (Val::TextShadow(x), Val::TextShadow(y)) => {
-            let (p, q) = (x.unwrap_or(NO_SHADOW), y.unwrap_or(NO_SHADOW));
-            if x.is_none() && y.is_none() {
-                Val::TextShadow(None)
-            } else {
-                Val::TextShadow(mix_shadow(&p, &q, t))
-            }
         }
         (Val::Visible(x), Val::Visible(y)) => Val::Visible(if t <= 0.0 {
             *x

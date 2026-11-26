@@ -1807,45 +1807,95 @@ void BUI_raster_end_frame_region(BuiRaster *r, int rx, int ry, int rw, int rh)
   }
 }
 
-SHAPE_INLINE void shadow_keep(
-    BuiRaster *r, float x, float y, float w, float h, float radius, float size, float alpha, const int keep)
+/* erf, to 5e-4 (Abramowitz & Stegun 7.1.27). */
+static inline float erf_approx(float x)
 {
-  if (w <= 0.0f || h <= 0.0f || size <= 0.0f || alpha <= 0.0f) {
+  const float s = x < 0.0f ? -1.0f : 1.0f, a = fabsf(x);
+  float t = 1.0f + (0.278393f + (0.230389f + 0.078108f * (a * a)) * a) * a;
+  t *= t;
+  return s - s / (t * t);
+}
+
+/* A rounded box (half size hw, hh, corner `corner`) blurred by a Gaussian of `sigma`, at (px, py)
+ * from its centre: exact along x (erf), four samples along y (Evan Wallace, "Fast Rounded Rectangle
+ * Shadows"). Kept in step with shadow_gauss in bui_ui.hlsl and gpu_gl.c. */
+static float shadow_gauss(float px, float py, float hw, float hh, float corner, float sigma)
+{
+  const float low = py - hh, high = py + hh;
+  const float start = clampf(-3.0f * sigma, low, high), end = clampf(3.0f * sigma, low, high);
+  const float dy = (end - start) * 0.25f, k = 0.70710678f / sigma;
+  const float norm = dy / (2.50662827f * sigma);
+  float y = start + dy * 0.5f, v = 0.0f;
+  for (int i = 0; i < 4; i++, y += dy) {
+    const float delta = fminf(hh - corner - fabsf(py - y), 0.0f);
+    const float curved = hw - corner + sqrtf(fmaxf(0.0f, corner * corner - delta * delta));
+    const float along = 0.5f * (erf_approx((px + curved) * k) - erf_approx((px - curved) * k));
+    v += along * expf(-(y * y) / (2.0f * sigma * sigma)) * norm;
+  }
+  return v;
+}
+
+/* A shadow: the rounded box `shape` (x, y, w, h; corner `rad`) faded out, in `rgba` times `gain`
+ * (saturating), drawn only outside the rounded box `box` (corner `brad`), which covers it.
+ * `gauss` 0: a menu's, fading over `size` pixels (smoothstep); 1: CSS `box-shadow`'s, the shape
+ * blurred by a Gaussian of sigma `size` (under a quarter pixel: a hard, antialiased edge). The
+ * GPU draws it in BG_SHADOW (bui_ui.hlsl). */
+SHAPE_INLINE void shadow_keep(BuiRaster *r, const float shape[4], float rad, const float box[4], float brad,
+                              float size, int gauss, const float rgba[4], float gain, const int keep)
+{
+  const float x = shape[0], y = shape[1], w = shape[2], h = shape[3];
+  if (w <= 0.0f || h <= 0.0f || rgba[3] <= 0.0f || gain <= 0.0f || (!gauss && size <= 0.0f)) {
     return;
   }
+  const float reach = (gauss ? 3.0f * size : size) + 1.0f;
   int x0, y0, x1, y1;
-  if (!clip_box(r, x - size, y - size * 0.5f, x + w + size, y + h + size * 1.5f, &x0, &y0, &x1,
-                &y1))
-  {
+  if (!clip_box(r, x - reach, y - reach, x + w + reach, y + h + reach, &x0, &y0, &x1, &y1)) {
     return;
   }
-  const float hw = w * 0.5f, hh = h * 0.5f;
-  const float rad = clampf(radius, 0.0f, fminf(hw, hh));
+  const float hw = w * 0.5f, hh = h * 0.5f, cx = x + hw, cy = y + hh;
+  rad = clampf(rad, 0.0f, fminf(hw, hh));
+  const float bhw = fmaxf(box[2], 0.0f) * 0.5f, bhh = fmaxf(box[3], 0.0f) * 0.5f;
+  const float bcx = box[0] + bhw, bcy = box[1] + bhh;
+  brad = clampf(brad, 0.0f, fminf(bhw, bhh));
   if (r->gpu) {
     BuiGpuInst *in = gpu_inst(r, BG_SHADOW, x0, y0, x1, y1);
     if (in) {
       v4(in->rect, x, y, w, h);
-      v4(in->p, BG_SHADOW, rad, size, alpha);
+      v4(in->p, BG_SHADOW, rad, size, gain);
+      c4(in->c0, rgba);
+      v4(in->c1, box[0], box[1], box[2], box[3]);
+      v4(in->uv, brad, (float)gauss, 0.0f, 0.0f);
     }
     return;
   }
-  /* Light comes from above: the shadow sits slightly lower. */
-  const float cx = x + hw, cy = y + hh + size * 0.25f;
-  const Paint black = {0x000000u, 256};
+  const Paint p = paint_from(KEEP_ALPHA(keep), rgba);
+  const int hard = gauss && size < 0.25f;
   for (int py = y0; py < y1; py++) {
     uint32_t *row = r->pix + (size_t)py * r->w;
     const float sy = (float)py + 0.5f;
     for (int px = x0; px < x1; px++) {
       const float sx = (float)px + 0.5f;
-      const float d = sd_widget_box(sx, sy, cx, cy, hw, hh, rad, BUI_CORNER_ALL);
-      /* Only outside the box itself (the popup covers the inside). */
-      const float dbox = sd_widget_box(sx, sy, x + hw, y + hh, hw, hh, rad, BUI_CORNER_ALL);
-      if (dbox <= -0.5f || d >= size) {
+      /* only outside the box (it covers the inside) */
+      const float dbox = sd_widget_box(sx, sy, bcx, bcy, bhw, bhh, brad, BUI_CORNER_ALL);
+      if (dbox <= -0.5f) {
         continue;
       }
-      float t = 1.0f - clampf(d / size, 0.0f, 1.0f);
-      t = t * t * (3.0f - 2.0f * t); /* smoothstep falloff */
-      put_cov(row + px, black, t * alpha * clampf(0.5f + dbox, 0.0f, 1.0f), keep);
+      float t;
+      if (hard) {
+        t = clampf(0.5f - sd_widget_box(sx, sy, cx, cy, hw, hh, rad, BUI_CORNER_ALL), 0.0f, 1.0f);
+      }
+      else if (gauss) {
+        t = shadow_gauss(sx - cx, sy - cy, hw, hh, rad, size);
+      }
+      else {
+        const float d = sd_widget_box(sx, sy, cx, cy, hw, hh, rad, BUI_CORNER_ALL);
+        if (d >= size) {
+          continue;
+        }
+        t = 1.0f - clampf(d / size, 0.0f, 1.0f);
+        t = t * t * (3.0f - 2.0f * t); /* smoothstep falloff */
+      }
+      put_cov(row + px, p, t * gain * clampf(0.5f + dbox, 0.0f, 1.0f), keep);
     }
   }
 }
@@ -1853,7 +1903,19 @@ SHAPE_INLINE void shadow_keep(
 void BUI_raster_shadow(
     BuiRaster *r, float x, float y, float w, float h, float radius, float size, float alpha)
 {
-  BY_ALPHA(r, shadow_keep, r, x, y, w, h, radius, size, alpha);
+  if (size <= 0.0f || alpha <= 0.0f) {
+    return;
+  }
+  /* light comes from above: the shadow sits slightly lower than the box */
+  const float shape[4] = {x, y + size * 0.25f, w, h}, box[4] = {x, y, w, h};
+  const float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+  BY_ALPHA(r, shadow_keep, r, shape, radius, box, radius, size, 0, black, alpha);
+}
+
+void BUI_raster_box_shadow(BuiRaster *r, const float shape[4], float radius, float sigma, const float rgba[4],
+                           const float box[4], float box_radius)
+{
+  BY_ALPHA(r, shadow_keep, r, shape, radius, box, box_radius, fmaxf(sigma, 0.0f), 1, rgba, 1.0f);
 }
 
 #define POLY_SUBSAMPLES 4

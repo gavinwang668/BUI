@@ -3,6 +3,7 @@
 // on is filled with Blender's selection blue. On load the list keeps its scroll position
 // from the previous page and makes sure the current page is visible (centered, no jump).
 import Icon from "./Icon.astro";
+import LangIcon from "./LangIcon.astro";
 import { docHref, getGroups } from "../../lib/docs";
 
 interface Props {
@@ -20,7 +21,7 @@ const groups = await getGroups();
       return (
         <div class:list={["sidebar-group flex flex-col", here && "is-here"]}>
           <h2 class="sidebar-label flex items-center gap-2 px-3 pt-5 pb-1.5">
-            <Icon name={group.icon} weight={here ? "fill" : "regular"} size={14} />
+            {"lang" in group ? <LangIcon name={group.lang} size={14} /> : <Icon name={group.icon} weight={here ? "fill" : "regular"} size={14} />}
             <span class="kicker">{group.label}</span>
           </h2>
           <ul class="flex flex-col gap-px">

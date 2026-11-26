@@ -19,7 +19,7 @@ export function Toc({ items }: { items: { id: string; label: string }[] }) {
   }, [items])
 
   return (
-    <nav aria-label="On this page" className="sticky top-14 hidden max-h-[calc(100dvh-3.5rem)] overflow-y-auto p-5 xl:block">
+    <nav aria-label="On this page" className="sticky top-[calc(var(--header-h)+3rem)] hidden max-h-[calc(100dvh-var(--header-h)-3rem)] overflow-y-auto p-5 xl:block">
       <p className="mb-3 text-[11px] font-semibold uppercase tracking-[0.14em] text-(--muted)">On this page</p>
       <ul className="flex flex-col border-l border-border">
         {items.map((item) => (

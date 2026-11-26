@@ -1,10 +1,10 @@
 ---
 title: Effects and animations
-description: Filters, blur behind glass, blend modes, clip paths, masks, transforms, border images, keyframe animations and transitions, with W3C formulas and zero idle cost.
+description: Filters, blur behind glass, blend modes, clip paths, masks, transforms, border images, keyframe animations, transitions and view transitions, with W3C formulas and zero idle cost. Every animation-* and transition-* property, the window calls that step them, and the blenderui::anim types.
 section: Rust
 order: 60
 languages: ["rust"]
-sources: ["docs/rust.md", "bindings/rust/blenderui/src/effects.rs", "bindings/rust/blenderui/src/anim.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/tests/suite/effects.rs", "bindings/rust/blenderui/tests/suite/animation.rs", "bindings/rust/blenderui/tests/suite/basic_css.rs", "bindings/rust/blenderui-tailwind/src/lib.rs"]
+sources: ["docs/rust.md", "bindings/rust/blenderui/src/effects.rs", "bindings/rust/blenderui/src/anim.rs", "bindings/rust/blenderui/src/window.rs", "bindings/rust/blenderui/src/lib.rs", "bindings/rust/blenderui/src/style.rs", "bindings/rust/blenderui/src/css.rs", "bindings/rust/blenderui/src/transition.rs", "bindings/rust/blenderui/tests/suite/css_spec.rs", "bindings/rust/blenderui/tests/suite/effects.rs", "bindings/rust/blenderui/tests/suite/animation.rs", "bindings/rust/blenderui/tests/suite/basic_css.rs", "bindings/rust/blenderui-tailwind/src/lib.rs"]
 ---
 
 A frosted panel, a button that grows when you hover it, a spinner that never stops: **standard CSS effects, animations and transitions work on BUI's Rust side.** The math follows the W3C specs, and a page that isn't moving costs no CPU at all.
@@ -137,6 +137,34 @@ What's supported:
   caption="<code>@keyframes</code> at 0.25 s, 0.6 s and 1.0 s, captured with the headless virtual clock (<code>examples/site_animation.rs</code>)."
 />
 
+### The animation properties
+
+Each longhand takes a comma-separated list, one entry per animation in `animation-name`. A shorter list repeats from its start.
+
+| Property | Values | Default |
+| --- | --- | --- |
+| `animation-name` | a `@keyframes` name (or a quoted string), or `none` | `none` |
+| `animation-duration` | a time: `1.2s`, `300ms`, or `0` | `0s` |
+| `animation-timing-function` | an [easing function](#easing) | `ease` |
+| `animation-delay` | a time; negative starts partway through | `0s` |
+| `animation-iteration-count` | a number of iterations (fractions work), or `infinite` | `1` |
+| `animation-direction` | `normal`, `reverse`, `alternate`, `alternate-reverse` | `normal` |
+| `animation-fill-mode` | `none`, `forwards`, `backwards`, `both` | `none` |
+| `animation-play-state` | `running`, `paused` | `running` |
+| `animation` | the shorthand: any of the above, in any order, comma-separated per animation | |
+
+- **Fill modes:** `backwards` applies the first keyframe during the delay, `forwards` keeps the last one after the end, `both` does both.
+- **Paused animations hold their place.** Set `animation-play-state: paused` and the animation stops where it is; set it back to `running` and it carries on from there.
+- **Later animations win.** When two animations in one `animation-name` list set the same property, the later one wins.
+- **`!important` wins over animations.** A property set by an `!important` declaration keeps its value while an animation runs.
+- **An unknown name or `none` costs nothing.** No state is kept for it.
+
+```css
+.toast {
+  animation: slide-in 300ms ease-out both, fade-out 200ms ease-in 3s forwards;
+}
+```
+
 ## Transitions
 
 `transition` and its longhands animate a property when its value changes, for example on `:hover`:
@@ -151,9 +179,43 @@ What's supported:
 - **Interrupted transitions start from the current value.** Leave a hover halfway, and the box shrinks back from where it is.
 - **A transition sent back to where it came from takes only as long as it ran.** Half a second out means half a second back.
 
+### The transition properties
+
+| Property | Values | Default |
+| --- | --- | --- |
+| `transition-property` | `all`, `none`, or property names, comma-separated | `all` |
+| `transition-duration` | a time per entry | `0s` |
+| `transition-timing-function` | an [easing function](#easing) per entry | `ease` |
+| `transition-delay` | a time per entry; negative starts partway through | `0s` |
+| `transition-behavior` | `normal`, `allow-discrete` | `normal` |
+| `transition` | the shorthand: property, duration, easing, delay and behavior per entry | |
+
+When several entries name the same property (`all` counts), the last one wins. A property that doesn't [interpolate](#what-animates-smoothly) only transitions with `allow-discrete`: it flips at the halfway point instead of at once.
+
+### How they stack
+
+An element's style is built in this order, and a later layer wins:
+
+1. The cascade: your CSS, classes and style methods.
+2. Running transitions.
+3. Running animations.
+4. [Motion](../motion/) values: element props such as `animate` and `whileHover`, and motion values bound with `style={{ ... }}`.
+
 ## Easing
 
 `linear`, `ease`, `ease-in`, `ease-out`, `ease-in-out`, `cubic-bezier()`, `steps()` with every jump position (`jump-start`, `jump-end`, `jump-none`, `jump-both`), `step-start`, `step-end`, and `linear()` with points.
+
+| Function | Curve |
+| --- | --- |
+| `linear` | Constant speed. |
+| `ease` | `cubic-bezier(0.25, 0.1, 0.25, 1)`, the default. |
+| `ease-in`, `ease-out`, `ease-in-out` | `cubic-bezier(0.42, 0, 1, 1)`, `(0, 0, 0.58, 1)`, `(0.42, 0, 0.58, 1)`. |
+| `cubic-bezier(x1, y1, x2, y2)` | A Bézier curve. Both `x` values must be between 0 and 1; `y` values may overshoot. |
+| `steps(n)`, `steps(n, jump-start)` | `n` jumps. The position is `jump-start` (or `start`), `jump-end` (or `end`, the default), `jump-none` (needs `n` of 2 or more) or `jump-both`. |
+| `step-start`, `step-end` | `steps(1, jump-start)`, `steps(1, jump-end)`. |
+| `linear(0, 0.25 75%, 1)` | Straight lines through the points. Each output may take one or two input percentages; points without one are spread evenly. |
+
+An easing function that can't be read makes the whole declaration invalid, as in a browser.
 
 ## What animates smoothly
 
@@ -170,19 +232,131 @@ Every other property flips at the halfway point.
 
 ## Zero cost when still
 
-A window renders frames **only while something moves**. Finished or paused animations cost no CPU, and transitions alone don't wake anything until a value actually changes. You can check from code: `window.is_animating()` is `true` while CSS animations or transitions run.
+A window renders frames **only while something moves**. Finished or paused animations cost no CPU, and transitions alone don't wake anything until a value actually changes. You can check from code: `window.is_animating()` is `true` while animations, transitions or motions run.
 
 **A moving frame is only a redraw.** When an animation or transition changes only how things look (opacity, colors, shadows, filters, `transform`, `rotate`, `scale`, `translate`), each frame looks up the value and repaints the boxes that changed: no render, no cascade, no layout. That is as cheap as a [Motion](../motion/) value. 300 rows with running transitions cost about 0.6 ms of BUI's work a frame. Values that change layout (a width, a margin) still render full frames.
 
-Headless windows run on a **virtual clock** that moves only when you call `cx.advance_clock(duration)`, so tests can step animations exactly. [Headless testing](../headless-testing/#test-animations-with-a-virtual-clock) shows how.
+## Animation from Rust code
 
-For animations driven by your own code instead of CSS, call `window.request_animation_frame()` from `render`: the window renders again on the next display refresh. See [Events](../events/#the-window-api).
+CSS runs by itself. These calls let your code watch it, step it, and drive frames of its own.
+
+| Call | On | What it does |
+| --- | --- | --- |
+| `is_animating() -> bool` | `Window` | Whether CSS animations, transitions or [motions](../motion/) were running at the last render. The window keeps requesting frames while they are. |
+| `needs_render() -> bool` | `Window` | Whether the window will render again: something changed or is animating. |
+| `request_animation_frame()` | `Window` | Render again on the next display refresh. Call it from `render` to animate from code. |
+| `set_vsync(on: bool)` | `Window` | Pace frames to the display (`true`, the default). `false` renders as fast as the CPU allows, for benchmarks. |
+| `start_view_transition(cx: &App)` | `Window` | Start a [view transition](#view-transitions). |
+| `advance_clock(d: Duration)` | `App` | Move every window's animation clock forward by `d`. |
+
+For animations driven by your own code instead of CSS, call `window.request_animation_frame()` from `render`: the window renders again on the next display refresh. See [Events](../events/#animating-from-code).
+
+### The virtual clock
+
+Headless windows run on a **virtual clock** that moves only when you call `cx.advance_clock(duration)`, so tests can step animations exactly. Native windows add the duration to real time.
+
+```rust
+use std::time::Duration;
+
+#[test]
+fn pulse_dims_halfway() {
+    Application::headless().run(|cx| {
+        let w = cx.open_window(WindowOptions::default(), |_, cx| cx.new(|_| Saving)).unwrap().id;
+        cx.draw(w);
+        cx.advance_clock(Duration::from_millis(600)); // half of 1.2 s
+        cx.draw(w);
+        // read pixels or element_bounds here
+    });
+}
+```
+
+[Headless testing](../headless-testing/#test-animations-with-a-virtual-clock) shows more.
+
+## View transitions
+
+A view transition animates from one state of the page to the next. Call `window.start_view_transition(cx)` in the event handler, before you change the state. BUI pictures the page as it is; the next render shows the new state, and:
+
+- boxes with a `view-transition-name` move and resize from their old place to their new one, while their old picture fades out,
+- the rest of the page cross-fades.
+
+```rust
+h.update(cx, |view, window, cx| {
+    window.start_view_transition(cx);
+    view.expanded = true;
+    cx.notify();
+});
+```
+
+```css
+#hero { view-transition-name: hero }
+::view-transition-group(*) { animation-duration: 0.4s; animation-timing-function: ease-out }
+```
+
+`::view-transition-group()`, `::view-transition-old()` and `::view-transition-new()` take a name, `*`, or a `.class` from `view-transition-class`. They set `animation-duration`, `animation-delay`, `animation-timing-function`, or `animation: none`. Without them each part takes 0.25 s with `ease`. A window that hasn't rendered yet has nothing to animate from, so the call does nothing.
+
+## Reduced motion
+
+`blenderui::set_reduced_motion(true)` turns on reduced motion for the whole app, and `blenderui::reduced_motion()` reads it back. With it on:
+
+- `@media (prefers-reduced-motion: reduce)` matches, so your CSS can turn animations off:
+
+  ```css
+  @media (prefers-reduced-motion: reduce) {
+    .saving { animation: none }
+  }
+  ```
+
+- animated images (GIF, WebP) hold their frame, and Blender's panel animations jump,
+- [Motion](../motion/#global-settings) jumps every property except opacity and colors to its end.
+
+It is off by default. BUI doesn't read the operating system's setting by itself: pass it in.
+
+## The `anim` module
+
+`blenderui::anim` holds the types the cascade stores for these properties. Most apps never touch them. `Timing` is useful on its own, to evaluate a CSS easing curve in your own code:
+
+```rust
+use blenderui::anim::Timing;
+use blenderui::css::tokenize;
+
+let t = Timing::parse(&tokenize("cubic-bezier(0.2, 0.8, 0.4, 1)")[0]).unwrap();
+let y = t.apply(0.5, false); // the eased progress halfway
+```
+
+| Item | What it is |
+| --- | --- |
+| `Timing` | An easing function: `Linear`, `Bezier(x1, y1, x2, y2)`, `Steps(n, StepPos)`, or `Points(Box<[(f32, f32)]>)` for `linear()` (input, output pairs, inputs rising). |
+| `Timing::parse(&Tok) -> Option<Timing>` | One easing function from a CSS token (`blenderui::css::tokenize` makes them). `None` when it isn't one. |
+| `timing.apply(x, before) -> f32` | The eased progress at input `x`. `before` says the animation is still in its delay, which matters for `steps()` exactly at a jump. Outside 0..1, Bézier curves carry on along their end tangents. |
+| `EASE` | `Timing::Bezier(0.25, 0.1, 0.25, 1.0)`, CSS's `ease`. |
+| `StepPos` | A `steps()` jump position: `Start`, `End`, `None`, `Both`. |
+| `Direction` | `animation-direction`: `Normal` (the default), `Reverse`, `Alternate`, `AlternateReverse`. |
+| `Fill` | `animation-fill-mode`: `None` (the default), `Forwards`, `Backwards`, `Both`. |
+| `AnimSpec` | One element's `animation-*` and `transition-*` longhands, as lists (entry `i` of a shorter list is `list[i % len]`). |
+
+| `AnimSpec` field | Type | Longhand |
+| --- | --- | --- |
+| `names` | `Vec<Box<str>>` | `animation-name` |
+| `durations` | `Vec<f32>` (seconds) | `animation-duration` |
+| `timings` | `Vec<Timing>` | `animation-timing-function` |
+| `delays` | `Vec<f32>` (seconds) | `animation-delay` |
+| `iterations` | `Vec<f32>` (`f32::INFINITY` for `infinite`) | `animation-iteration-count` |
+| `directions` | `Vec<Direction>` | `animation-direction` |
+| `fills` | `Vec<Fill>` | `animation-fill-mode` |
+| `paused` | `Vec<bool>` (`true` is paused) | `animation-play-state` |
+| `t_props` | `Vec<Box<str>>` | `transition-property` |
+| `t_durations` | `Vec<f32>` (seconds) | `transition-duration` |
+| `t_timings` | `Vec<Timing>` | `transition-timing-function` |
+| `t_delays` | `Vec<f32>` (seconds) | `transition-delay` |
+| `t_discrete` | `Vec<bool>` (`true` is `allow-discrete`) | `transition-behavior` |
+
+A computed style keeps its `AnimSpec` in `Computed::anim` (`None` when the element has neither). It isn't inherited.
 
 ## Not done yet
 
 <ComingSoon feature="The rest of CSS effects and animation">
 
-- **Animation events:** no `animationend` or `transitionend` yet.
+- **Animation events:** no `animationstart`, `animationend` or `transitionend` yet. For a callback when a motion ends, use [Motion](../motion/#callbacks) from code.
 - **Pseudo-elements:** no animations on `::before` / `::after`.
 - **Late transitions:** an element starts a transition only if it already had a `transition` in the previous frame. A `transition` that appears only under `:hover` doesn't run on the first hover; put it on the base rule instead.
 - **Mixed units:** lengths that resolve differently (`50%` to `100px`, or `auto`) flip at 50% instead of going through `calc()`.
@@ -193,6 +367,9 @@ For animations driven by your own code instead of CSS, call `window.request_anim
 ## Next steps
 
 <CardGrid>
+  <Card title="Motion and GSAP" href="docs/rust/motion/" icon="sparkle" kicker="Rust">
+    Springs, gestures, drag, layout and exit animations from Rust.
+  </Card>
   <Card title="Headless testing" href="docs/rust/headless-testing/" icon="check" kicker="Rust">
     Step animations frame by frame in a test.
   </Card>

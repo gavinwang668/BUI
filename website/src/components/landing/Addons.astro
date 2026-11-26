@@ -1,0 +1,104 @@
+---
+// Two addons side by side, as zopra's landing page shows its Components and Panels: BUI Charts (a chart
+// picture from the charts registry) and BUI Panels (the golden-ratio tiling loop).
+import Icon from "../site/Icon.astro";
+import PanelsLoop from "./PanelsLoop.astro";
+import { baseCharts, imageOf } from "../../data/charts/registry";
+import { href } from "../../lib/docs";
+
+// The main charts of the All charts page (its "Base" filter), shown one after another.
+const mains = baseCharts;
+---
+
+<div class="grid min-h-[34rem] md:grid-cols-2">
+  <article class="flex flex-col border-b border-border md:border-r md:border-b-0">
+    <header class="flex flex-col gap-2 border-b border-border p-5 sm:p-6">
+      <h3 class="text-2xl font-medium uppercase tracking-[-0.01em] sm:text-3xl">BUI Charts</h3>
+      <p class="text-pretty text-[15px] leading-6 text-muted">World's <span class="bg-primary text-white">biggest charts</span> library, each with its math, examples and API.</p>
+    </header>
+    <div class="charts-stage group relative min-h-88 flex-1 overflow-hidden bg-surface" data-charts-cycle>
+      {
+        mains.map((chart, i) => (
+          <img
+            src={imageOf(chart.slug)}
+            alt={`${chart.name}, from BUI Charts`}
+            width={960}
+            height={540}
+            loading={i === 0 ? "eager" : "lazy"}
+            data-chart-slide
+            data-name={chart.name}
+            data-href={href(`charts/${chart.slug}`)}
+            class:list={["absolute inset-0 size-full object-cover transition-opacity duration-500 ease-out", i !== 0 && "opacity-0"]}
+            aria-hidden={i === 0 ? undefined : "true"}
+          />
+        ))
+      }
+      <button type="button" data-chart-next class="absolute inset-0 z-0 cursor-pointer" aria-label="Show the next chart"></button>
+      <div class="pointer-events-none absolute inset-x-3 bottom-3 z-10 flex flex-wrap items-center justify-between gap-2">
+        <a href={mains[0] ? href(`charts/${mains[0].slug}`) : href("charts/")} data-chart-name class="pointer-events-auto bg-background px-2.5 py-1 text-sm font-medium uppercase tracking-[0.06em] hover:text-link" aria-live="polite">
+          {mains[0]?.name}
+        </a>
+        <a href={href("charts/all")} class="pointer-events-auto inline-flex items-center gap-1.5 bg-background px-2.5 py-1 text-sm font-medium text-link hover:underline hover:underline-offset-4">
+          Explore the charts <Icon name="arrow-right" size={14} />
+        </a>
+      </div>
+    </div>
+  </article>
+
+  <article class="flex flex-col">
+    <header class="flex flex-col gap-2 border-b border-border p-5 sm:p-6">
+      <h3 class="text-2xl font-medium uppercase tracking-[-0.01em] sm:text-3xl">BUI Panels</h3>
+      <p class="text-pretty text-[15px] leading-6 text-muted">
+        Infinite tiling: dockable panels with splits, tabs and a saved layout.
+        <a href={href("panels/")} class="font-medium text-link underline-offset-4 hover:underline">Read the guide</a>
+      </p>
+    </header>
+    <div class="relative min-h-[22rem] flex-1 bg-surface">
+      <PanelsLoop />
+    </div>
+  </article>
+</div>
+
+<script>
+  // The main charts take turns every 2 seconds; a click shows the next one at once. It waits while the
+  // page is hidden or the chart is off screen, and with prefers-reduced-motion only a click changes it.
+  document.querySelectorAll<HTMLElement>("[data-charts-cycle]").forEach((root) => {
+    const slides = [...root.querySelectorAll<HTMLImageElement>("[data-chart-slide]")];
+    const label = root.querySelector<HTMLAnchorElement>("[data-chart-name]");
+    if (slides.length < 2) return;
+    let current = 0;
+    let timer = 0;
+    let visible = false;
+
+    const show = (next: number) => {
+      slides[current].classList.add("opacity-0");
+      slides[current].setAttribute("aria-hidden", "true");
+      current = (next + slides.length) % slides.length;
+      slides[current].classList.remove("opacity-0");
+      slides[current].removeAttribute("aria-hidden");
+      if (label) {
+        label.textContent = slides[current].dataset.name ?? "";
+        label.href = slides[current].dataset.href ?? label.href;
+      }
+    };
+    const stop = () => {
+      clearInterval(timer);
+      timer = 0;
+    };
+    const start = () => {
+      stop();
+      if (!visible || document.hidden || matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+      timer = window.setInterval(() => show(current + 1), 2000);
+    };
+
+    root.querySelector("[data-chart-next]")?.addEventListener("click", () => {
+      show(current + 1);
+      start(); // a click restarts the 2 seconds, so the chart you just picked is not replaced at once
+    });
+    new IntersectionObserver(([e]) => {
+      visible = e.isIntersecting;
+      start();
+    }).observe(root);
+    document.addEventListener("visibilitychange", start);
+  });
+</script>

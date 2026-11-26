@@ -1,10 +1,10 @@
 ---
 title: The bui command
 sidebarLabel: The bui command
-description: One command that makes a BUI app in Rust, JavaScript, TypeScript, Python, Lua or C, checks your setup, fixes what is wrong and keeps everything up to date. Installs with one line on Windows, Linux and macOS.
+description: One command that makes a BUI app in Rust, JavaScript, TypeScript, Python, Lua, C, D, C#, Go or Ruby, checks your setup, fixes what is wrong and keeps everything up to date. Installs with one line on Windows, Linux and macOS.
 section: Start here
 order: 15
-sources: ["tools/bui/src/main.rs", "tools/bui/src/cli.rs", "tools/bui/src/create.rs", "tools/bui/src/doctor.rs", "tools/bui/src/update.rs", "tools/bui/src/tools.rs", "tools/bui/src/flavours/mod.rs", "tools/bui/src/project.rs", "website/public/install.sh", "website/public/install.ps1", ".github/workflows/cli.yml"]
+sources: ["tools/bui/src/main.rs", "tools/bui/src/cli.rs", "tools/bui/src/create.rs", "tools/bui/src/doctor.rs", "tools/bui/src/update.rs", "tools/bui/src/tools.rs", "tools/bui/src/flavours/mod.rs", "tools/bui/src/flavours/js.rs", "tools/bui/src/flavours/d.rs", "tools/bui/src/flavours/csharp.rs", "tools/bui/src/flavours/go.rs", "tools/bui/src/flavours/ruby.rs", "tools/bui/src/registry.rs", "tools/bui/src/project.rs", "website/public/install.sh", "website/public/install.ps1", ".github/workflows/cli.yml"]
 ---
 
 `bui` is a small program that gets you from nothing to a running BUI window. It asks what you want to write, checks that the tools for it are installed (and offers to install them), makes the project with the language's own modern setup and lints, installs the newest BUI with the language's own package manager, and later tells you what is out of date and how to fix it.
@@ -52,11 +52,11 @@ bui init              # in the folder you are in
 
 `bui` asks, one question at a time (every question is also a flag, see below):
 
-1. **The language.** Rust, JavaScript or TypeScript, Python, Lua or C.
-2. **That language's choices.** JavaScript asks for the framework (React, Svelte or plain DOM), TypeScript or JavaScript, and the runtime and package manager (Bun, or Node.js with npm or pnpm). Python asks for the API: Blender's components, Qt syntax or tkinter syntax.
-3. **The tools.** If something the language needs is missing (Rust, Bun, uv, a C and C++ compiler, CMake, LuaRocks...), `bui` shows the command that installs the newest one on your system and asks before it runs it.
-4. **The packages.** Before it writes anything, `bui` lists the exact commands that install BUI and the tooling at their newest versions (`bun add ...`, `cargo add blenderui`, ...) and asks whether to run them now. Say no and `bui doctor` does it later.
-5. **The project.** It writes the files (files you already have are kept: in a folder with a `package.json`, `bui init` adds only the scripts `bui` runs that are missing, says which, and stops, leaving your project files unchanged, if the file cannot be read, is not valid JSON, or is a React and TypeScript project whose `package.json` has `"type": "module"`; tools offered for install are checked before the file is read), offers to start a git repository, runs the install, and ends with every command you will need.
+1. **The language.** Rust, JavaScript or TypeScript, Python, Lua, C, D, C#, Go or Ruby.
+2. **That language's choices.** JavaScript asks for the framework (React, Svelte, Vue or plain DOM), TypeScript or JavaScript, and the runtime and package manager (Bun, or Node.js with npm or pnpm). Python asks for the API: Blender's components, Qt syntax or tkinter syntax. The other languages ask nothing more.
+3. **The tools.** If something the language needs is missing (Rust, Bun, uv, a C and C++ compiler, CMake, LuaRocks, LDC and DUB, the .NET SDK, Go, Ruby and Bundler...), `bui` shows the command that installs the newest one on your system and asks before it runs it.
+4. **The packages.** Before it writes anything, `bui` lists the exact commands that install BUI and the tooling at their newest versions (`bun add ...`, `cargo add blenderui`, `dub add blenderui`, `dotnet add package BlenderUI`, `bundle add blenderui`, ...) and asks whether to run them now. Say no and `bui doctor` does it later.
+5. **The project.** It writes the files (files you already have are kept: in a folder with a `package.json`, `bui init` adds only the scripts `bui` runs that are missing, says which, and stops, leaving your project files unchanged, if the file cannot be read, is not valid JSON, or is a React and TypeScript project whose `package.json` has `"type": "module"`; a `go.mod` gets the BUI `require` and `replace` lines it lacks; a `Gemfile` and a `dub.json` are kept and `bundle add` and `dub add` put the package in; a folder with a `.csproj` of another name, or a `dub.sdl`, stops `bui init` with what to do; tools offered for install are checked before the file is read), offers to start a git repository, runs the install, and ends with every command you will need.
 
 What you get, by language:
 
@@ -67,6 +67,10 @@ What you get, by language:
 | Python | `uv add blenderui` (uv keeps Python, the environment and the lock file) | Ruff |
 | Lua | `luarocks install blenderui` into `lua_modules/` (nothing global) | Luacheck, StyLua and LuaLS settings |
 | C | CMake `FetchContent` at the newest release | `.clang-format`, `.clang-tidy` |
+| D | `dub add blenderui` (the `blenderui` DUB package, compiled with LDC) | None added |
+| C# | `dotnet add package BlenderUI` (the NuGet package carries the kit), a `net8.0` project | Nullable reference types on |
+| Go | The `bindings/go` module from one shallow checkout of the newest BUI release in `~/.bui/BUI`, shared by every Go app, plus `go generate` to build the C kit | `go vet` and `gofmt` |
+| Ruby | `bundle add blenderui` into `vendor/bundle` (nothing global) | None added |
 
 Each project also gets a `bui.toml` that records what you chose, so `bui` knows how to run, build and check it from any folder inside it.
 
@@ -74,8 +78,8 @@ Each project also gets a `bui.toml` that records what you chose, so `bui` knows 
 
 | Command | What it does |
 | --- | --- |
-| `bui dev [-- ARGS]` | Runs the app, restarting on every save where the language can (`cargo run`, `bun --watch`, `uv run`, ...) |
-| `bui build [-- ARGS]` | A release build (`cargo build --release`; a JavaScript app becomes one small executable; a C app is built optimized in `build-release`, apart from `bui dev`'s Debug build in `build`) |
+| `bui dev [-- ARGS]` | Runs the app, restarting on every save where the language can (`cargo run`, `bun --watch`, `uv run`, `dub run`, `dotnet run`, `go run .`, `bundle exec ruby app.rb`, ...) |
+| `bui build [-- ARGS]` | A release build (`cargo build --release`, `dub build -b release`, `dotnet build -c Release`, `go build`; a JavaScript app becomes one small executable; a C app is built optimized in `build-release`, apart from `bui dev`'s Debug build in `build`). Lua and Ruby apps are not built: the command says to use `bui dev` |
 | `bui doctor` | Looks at what this project needs, says what is wrong in one line each and offers the fixes |
 | `bui update` | Updates `bui` itself, then the BUI packages of the project you are in |
 | `bui docs` | Opens the documentation in your browser |
@@ -102,7 +106,7 @@ A project made with `--no-install` is finished the same way: `bui doctor` offers
 
 ### bui update
 
-`bui update` looks for a newer `bui` (a download with a progress bar, checked against its published checksum), then offers to bring the project's `blenderui` packages to the newest version, moving the version requirement when the newest is outside it (`cargo add blenderui@0.6.0`, `bun add @blender-ui/native@latest`, BUI's `GIT_TAG` in a C project): a plain `cargo update` or `npm update` stays inside `^0.5`, which never reaches 0.6. `bui update --check` only reports, and `bui update --cli-only` updates `bui` itself and leaves the project alone (what `bui doctor --fix` runs for an old `bui`). If a step that has to work fails, the command exits with an error instead of saying it is done.
+`bui update` looks for a newer `bui` (a download with a progress bar, checked against its published checksum), then offers to bring the project's `blenderui` packages to the newest version, moving the version requirement when the newest is outside it (`cargo add blenderui@0.6.0`, `bun add @blender-ui/native@latest`, BUI's `GIT_TAG` in a C project, the `~>` requirement in a D project's `dub.json`, the checkout in `~/.bui/BUI` for a Go project): a plain `cargo update` or `npm update` stays inside `^0.5`, which never reaches 0.6. `bui update --check` only reports, and `bui update --cli-only` updates `bui` itself and leaves the project alone (what `bui doctor --fix` runs for an old `bui`). If a step that has to work fails, the command exits with an error instead of saying it is done.
 
 ## Scripts, CI and flags
 
@@ -114,8 +118,8 @@ bui new my-app --language js --framework react --typescript --pm bun --yes
 
 | Flag | Meaning |
 | --- | --- |
-| `-l, --language rust\|js\|python\|lua\|c` | The language |
-| `--framework react\|svelte\|vanilla`, `--typescript` or `--javascript`, `--pm bun\|npm\|pnpm` | JavaScript |
+| `-l, --language rust\|js\|python\|lua\|c\|d\|csharp\|go\|ruby` | The language |
+| `--framework react\|svelte\|vue\|vanilla`, `--typescript` or `--javascript`, `--pm bun\|npm\|pnpm` | JavaScript |
 | `--api components\|qt\|tk` | Python |
 | `--yes`, `-y` | Answer every question with its default, and ask nothing |
 | `--no-install`, `--no-git` | Skip installing dependencies, or `git init` |
@@ -130,10 +134,17 @@ Without a terminal and without `--yes`, a question that cannot be answered stops
 `@blender-ui/svelte`'s loader fails under Bun today, so a Svelte project runs on Node.js (with npm or pnpm). React and plain DOM projects run on Bun or Node.js.
 </Callout>
 
+<Callout type="note" title="Vue needs Node.js 22.15 or newer, or Bun">
+`@blender-ui/vue`'s loader uses Node.js module hooks (22.15 or newer) or Bun's preload, so a Vue project runs on Bun, or on Node.js with npm or pnpm. Vue projects are written in plain JavaScript, as Svelte ones are. `bui doctor` checks the Node.js version for Svelte and Vue.
+</Callout>
+
 <Callout type="note" title="Building a JavaScript or TypeScript app needs Bun">
 For JavaScript and TypeScript projects, `bui build` runs `@blender-ui/native`'s `bui`, which bundles your app with Bun, so Bun is checked (and offered for install) before a build even in an npm or pnpm project.
 </Callout>
 
 - **Python needs 3.11 or newer.** BUI's wheels cover CPython 3.11 to 3.14 on Windows, Linux x86_64 and macOS.
-- **Lua and Rust compile BUI's C kit** while they install, so they need a C and C++ compiler (BUI's kit is C++) and CMake. `bui doctor` checks for them. On Windows, LuaRocks needs a compiler that matches your Lua build.
+- **Lua, Rust, D, Go and Ruby compile BUI's C kit** while they install or on the first build, so they need a C and C++ compiler (BUI's kit is C++) and CMake. `bui doctor` checks for them. On Windows, LuaRocks needs a compiler that matches your Lua build, and Go needs MinGW-w64's gcc, because cgo cannot use Visual Studio's compiler. Ruby on Windows uses the compilers of RubyInstaller's development kit. Go and Ruby on Linux also need the X11 development headers.
+- **C# needs no compiler.** The `BlenderUI` package carries the kit for Windows x64, Linux x64 and macOS. It needs the .NET 8 SDK; the app rolls forward to a newer runtime.
+- **Go keeps one checkout of BUI.** The Go module cannot be fetched on its own, because it needs the C sources next to it. `bui` clones the newest release once into `~/.bui/BUI` (shallow, with `git`) and every Go project's `go.mod` points a `replace` line at it, with an absolute path on your machine. `bui update` moves the checkout to the newest release and builds the kit again. Setting `BUI_HOME` moves the folder.
+- **D needs LDC.** The project is built with `DC=ldc2` set for DUB, the compiler the package is tested with.
 - **macOS** builds of `bui` come from the release workflow and have not been tried by hand yet. **iOS** is not supported.

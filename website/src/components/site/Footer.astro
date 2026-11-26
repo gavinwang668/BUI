@@ -1,5 +1,7 @@
 ---
 import Logo from "./Logo.astro";
+import LangIcon from "./LangIcon.astro";
+import type { LangIconName } from "../../lib/lang-icons";
 import { site } from "../../config/site";
 import { href } from "../../lib/docs";
 
@@ -10,7 +12,24 @@ const groups = [
       ["Introduction", href("docs/start/introduction/")],
       ["Installation", href("docs/start/installation/")],
       ["Your first app", href("docs/tutorials/first-app-python/")],
-      ["Roadmap", href("docs/project/roadmap/")],
+      ["Addons", href("addons/")],
+      ["Charts", href("charts/")],
+      ["Roadmap", href("roadmap/")],
+    ],
+  },
+  {
+    title: "Languages",
+    links: [
+      ["Python (tkinter, Qt)", href("docs/python/tkinter/"), "python"],
+      ["Rust", href("docs/rust/overview/"), "rust"],
+      ["JavaScript and React", href("docs/javascript/react/"), "javascript"],
+      ["C", href("docs/c/c-api/"), "c"],
+      ["C++ (Dear ImGui)", href("docs/imgui/cpp/"), "cpp"],
+      ["C#", href("docs/csharp/overview/"), "csharp"],
+      ["Lua", href("docs/lua/overview/"), "lua"],
+      ["Go", href("docs/go/overview/"), "go"],
+      ["Ruby", href("docs/ruby/overview/"), "ruby"],
+      ["D", href("docs/d/overview/"), "d"],
     ],
   },
   {
@@ -18,60 +37,162 @@ const groups = [
     links: [
       ["blenderui on PyPI", site.pypi],
       ["blenderui on crates.io", site.crates],
-      ["@blender-ui/react", site.npm],
-      ["@blender-ui/native", "https://www.npmjs.com/package/@blender-ui/native"],
-      ["@blender-ui/svelte", "https://www.npmjs.com/package/@blender-ui/svelte"],
-      ["@blender-ui/vue", "https://www.npmjs.com/package/@blender-ui/vue"],
+      ["blenderui on LuaRocks", "https://luarocks.org/modules/ppmpreetham/blenderui"],
+      ["@blender-ui on npm", "https://www.npmjs.com/settings/blender-ui/packages"],
+    ],
+  },
+  {
+    title: "Concepts",
+    links: [
+      ["Rendering", href("docs/concepts/rendering/")],
+      ["Blender's widgets", href("docs/concepts/blender-widgets/")],
+      ["Screens and areas", href("docs/concepts/screens/")],
+      ["Text and fonts", href("docs/concepts/text-and-fonts/")],
+      ["Touch and gestures", href("docs/concepts/touch/")],
+    ],
+  },
+  {
+    title: "Reference",
+    links: [
+      ["Benchmarks", href("benchmarks/")],
+      ["Platforms", href("docs/reference/platforms/")],
+      ["Coverage", href("docs/reference/coverage/")],
+      ["Limitations", href("docs/project/limitations/")],
+      ["FAQ", href("docs/project/faq/")],
     ],
   },
   {
     title: "Project",
     links: [
       ["Source on GitHub", site.repo],
-      ["Changelog", `${site.blobBase}CHANGELOG.md`],
+      ["Changelog", href("docs/project/changelog/")],
       ["Contributing", `${site.blobBase}CONTRIBUTING.md`],
       ["Report an issue", `${site.repo}/issues`],
+    ],
+  },
+  {
+    title: "Community",
+    links: [
       ["Discord", site.discord],
+      ["GitHub", site.repo],
+      ["License", `${site.blobBase}LICENSE`],
     ],
   },
 ] as const;
+
+// Where each group sits on a wide screen (`lg`): the logo takes Languages' old place, Languages is the tall column.
+// On a phone the DOM order rules, which puts Community next to the logo.
+const place: Record<string, string> = {
+  Learn: "lg:order-2",
+  Languages: "lg:order-9 lg:col-start-5 lg:row-start-1 lg:row-span-2",
+  Packages: "lg:order-4",
+  Concepts: "lg:order-5",
+  Reference: "lg:order-6",
+  Project: "lg:order-7",
+  Community: "lg:order-8",
+};
+
+const cell = "min-w-0 border-r border-b border-border p-5 md:p-6";
+
+/** Blender's menu cue: the first letter is the accelerator (underlined on the highlighted row). */
+function cue(label: string): [string, string, string] {
+  const i = label.search(/[A-Za-z0-9]/);
+  return [label.slice(0, i), label[i], label.slice(i + 1)];
+}
 ---
 
-<footer class="border-t border-border">
-  <div class="hatch h-10 border-b border-border" aria-hidden="true"></div>
-  <div class="grid grid-cols-2 md:grid-cols-[1.4fr_1fr_1fr_1fr]">
-    <section class="col-span-2 flex flex-col gap-4 border-b border-border p-6 md:col-span-1 md:border-r md:border-b-0 md:p-8">
-      <Logo size={30} />
-      <p class="max-w-xs text-balance text-sm leading-6 text-muted">
-        Blender's interface, as a library. Built on Blender's source, so it shares Blender's license:
-        {site.license}.
-      </p>
+<footer class="relative w-full bg-background">
+  <div class="hatch h-10 border-y border-border" aria-hidden="true"></div>
+
+  <div class="grid grid-cols-2 lg:grid-cols-[repeat(4,minmax(0,1fr))_17rem]">
+    <section class:list={[cell, "col-span-2 lg:order-1 lg:col-span-1"]}>
+      <h2 class="text-balance text-2xl font-medium uppercase leading-[0.95] tracking-tight md:text-3xl">
+        Write it your way. It works like Blender.
+      </h2>
     </section>
     {
-      groups.map((group, i) => (
-        <section
-          class:list={[
-            "border-border p-6 md:p-8",
-            i < groups.length - 1 && "border-r",
-            i === groups.length - 1 && "col-span-2 border-t md:col-span-1 md:border-t-0",
-          ]}
-        >
-          <h2 class="kicker mb-4 text-muted">{group.title}</h2>
-          <ul class="flex flex-col gap-2.5 text-sm">
-            {group.links.map(([label, url]) => (
-              <li>
-                <a href={url} class="underline-offset-4 hover:text-link hover:underline">
-                  {label}
-                </a>
-              </li>
-            ))}
+      groups.map((group) => (
+        <section class:list={[cell, place[group.title]]}>
+          <h2 class="mb-5 text-sm font-medium uppercase tracking-wide md:mb-7">{group.title}</h2>
+          <ul class="flex flex-col gap-3 text-[15px]">
+            {group.links.map((link) => {
+              const [label, url, icon] = link as readonly [string, string, LangIconName?];
+              const [pre, key, rest] = cue(label);
+              return (
+                <li>
+                  <a href={url} class="menu-link">
+                    {icon && <LangIcon name={icon} size={16} />}
+                    <span class="menu-text">
+                      {pre}
+                      <b>{key}</b>
+                      {rest}
+                    </span>
+                  </a>
+                </li>
+              );
+            })}
           </ul>
         </section>
       ))
     }
+    <section class:list={[cell, "flex items-center justify-center lg:order-3"]} aria-hidden="true">
+      <Logo size={140} class="h-auto w-full max-w-[11rem] object-contain" />
+    </section>
   </div>
-  <div class="flex flex-col gap-1 border-t border-border px-6 py-4 text-xs text-muted sm:flex-row sm:justify-between md:px-8">
-    <p>BUI is an independent project. Blender is a trademark of the Blender Foundation.</p>
+
+  <div class="flex items-center justify-center border-y border-border p-6 md:p-8" aria-hidden="true">
+    <svg viewBox="0 0 700 220" class="h-auto w-full text-foreground">
+      <defs>
+        <pattern id="footer-wordmark-hatch" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+          <line x1="0" y1="0" x2="0" y2="4" stroke="currentColor" stroke-width="1.5"></line>
+        </pattern>
+      </defs>
+      <text
+        x="50%"
+        y="175"
+        text-anchor="middle"
+        fill="url(#footer-wordmark-hatch)"
+        stroke="currentColor"
+        stroke-width="2"
+        font-size="200"
+        font-weight="bold"
+        font-family="Inter, system-ui, sans-serif">BUI</text
+      >
+    </svg>
+  </div>
+
+  <div class="flex flex-col gap-1 p-4 text-xs text-muted sm:flex-row sm:justify-between">
+    <p>BUI is an independent project, {site.license}. Blender is a trademark of the Blender Foundation.</p>
     <p>No default cubes were harmed in the making of this site.</p>
   </div>
 </footer>
+
+<style>
+  /* The links keep the site's style (underline and link colour on hover). On hover the first letter also shows
+     Blender's menu cue, as in the landing page's menu search: bold, in the match colour. */
+  .menu-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.55rem;
+    overflow-wrap: anywhere;
+  }
+  .menu-text {
+    text-underline-offset: 4px;
+  }
+  .menu-link b {
+    font-weight: inherit;
+  }
+  .menu-link:hover,
+  .menu-link:focus-visible {
+    color: var(--link);
+  }
+  .menu-link:hover .menu-text,
+  .menu-link:focus-visible .menu-text {
+    text-decoration: underline;
+  }
+  .menu-link:hover b,
+  .menu-link:focus-visible b {
+    font-weight: 600;
+    color: var(--bl-menu-match);
+  }
+</style>

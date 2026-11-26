@@ -1,5 +1,6 @@
 //! Pixel effects (filter, backdrop-filter, mix-blend-mode, clip-path, mask,
 //! rotate / skew / scale transforms), rounded dashed borders, border-image,
+//! box and text shadows, radial gradients, per-corner radii, rounded `overflow`,
 //! table column sizing, scroll snapping, overflow-wrap in inline text and
 //! the capitalized Blender components, end to end on headless pages.
 
@@ -257,3 +258,175 @@ fn blender_components_are_elements() {
 
 #[allow(dead_code)]
 const _BASE: &str = BASE;
+
+#[test]
+fn rounded_gradient_keeps_its_corners_in_a_layer() {
+    // a turned or filtered box is drawn through a layer: its gradient is cut to the rounded box by
+    // clips there too (an empty clip used to mean none: the whole gradient, square)
+    Application::headless().run(|cx| {
+        let (_, at) = page(cx, 300.0, 140.0, "
+            html, body { margin: 0; background: #000 }
+            .b { position: absolute; top: 20px; width: 80px; height: 80px; border-radius: 40px;
+                 background: linear-gradient(#f00, #00f) }
+            #t { left: 20px; transform: rotate(45deg) } #f { left: 160px; filter: opacity(0.99) }
+        ", || body().child(div().id("t").class("b")).child(div().id("f").class("b")));
+        // inside the turned square, outside the circle it is
+        assert_eq!(at(60.0, 11.0), 0x000000, "turned: the corner is cut");
+        assert_ne!(at(60.0, 60.0), 0x000000, "turned: the middle shows");
+        assert_eq!(at(164.0, 24.0), 0x000000, "in a layer: the corner is cut");
+        assert_ne!(at(200.0, 60.0), 0x000000, "in a layer: the middle shows");
+    });
+}
+
+#[test]
+fn box_shadow_rings_and_blurs() {
+    Application::headless().run(|cx| {
+        let (_, at) = page(cx, 400.0, 200.0, "
+            html, body { margin: 0; background: #fff }
+            #ring { position: absolute; left: 30px; top: 30px; width: 60px; height: 60px; border-radius: 50%;
+                    box-shadow: 0 0 0 6px #f00 }
+            #soft { position: absolute; left: 200px; top: 50px; width: 100px; height: 60px; background: #fff;
+                    box-shadow: 0 0 20px #000 }
+        ", || body().child(div().id("ring")).child(div().id("soft")));
+        // the shadow is only outside the box (CSS Backgrounds 3 §7.1.1): an empty box shows its ring
+        assert_eq!(at(60.0, 60.0), 0xffffff, "inside the empty box");
+        assert!(near(at(60.0, 27.0), 0xff0000, 8), "the spread ring: {:06x}", at(60.0, 27.0));
+        // a Gaussian falloff out from the edge: darkest by it, lighter step by step, no bands
+        let row: Vec<i32> = (0..30).map(|d| rgb_of(at(301.0 + d as f32, 80.0)).0).collect();
+        assert!(row[0] < 160 && row[29] > 245, "falls off: {row:?}");
+        for w in row.windows(2) {
+            assert!(w[1] >= w[0] && w[1] - w[0] <= 14, "smooth: {row:?}");
+        }
+        assert_eq!(at(250.0, 80.0), 0xffffff, "the box covers its own shadow");
+    });
+}
+
+#[test]
+fn radial_gradient_position_size_and_fade() {
+    Application::headless().run(|cx| {
+        let (_, at) = page(cx, 400.0, 300.0, "
+            html, body { margin: 0; background: #fff }
+            #g { position: absolute; left: 0; top: 0; width: 400px; height: 300px;
+                 background: radial-gradient(60px circle at 100px 90px, #ff0000, transparent) }
+        ", || body().child(div().id("g")));
+        assert!(near(at(100.0, 90.0), 0xff0000, 12), "centred where it says: {:06x}", at(100.0, 90.0));
+        assert_eq!(at(200.0, 150.0), 0xffffff, "past its radius: nothing");
+        // halfway out: red over white, never darkened by the transparent end's black
+        let (r, g, b) = rgb_of(at(130.0, 90.0));
+        assert!(r >= 250 && (g - b).abs() <= 3 && g > 80 && g < 200, "a premultiplied fade: {r} {g} {b}");
+    });
+}
+
+#[test]
+fn each_corner_has_its_own_radius() {
+    Application::headless().run(|cx| {
+        let (_, at) = page(cx, 200.0, 240.0, "
+            html, body { margin: 0; background: #000 }
+            #d { position: absolute; left: 20px; top: 20px; width: 120px; height: 200px; background: #0f0;
+                 border-radius: 56px 56px 6px 6px }
+            #e { position: absolute; left: 150px; top: 20px; width: 40px; height: 40px;
+                 border: 4px solid #f00; border-radius: 20px 0 0 0 }
+        ", || body().child(div().id("d")).child(div().id("e")));
+        assert_eq!(at(25.0, 25.0), 0x000000, "a 56px top corner is cut");
+        assert_eq!(at(24.0, 216.0), 0x00ff00, "a 6px bottom corner nearly square");
+        assert_eq!(at(187.0, 22.0), 0xff0000, "a square corner's border");
+        assert_eq!(at(152.0, 22.0), 0x000000, "a round corner's border is cut");
+    });
+}
+
+#[test]
+fn overflow_hidden_rounds_what_it_holds() {
+    Application::headless().run(|cx| {
+        let (_, at) = page(cx, 300.0, 140.0, "
+            html, body { margin: 0; background: #000 }
+            .box { position: absolute; top: 20px; width: 100px; height: 100px; border-radius: 30px; overflow: hidden }
+            .in { width: 100px; height: 100px; background: #00f }
+            #a { left: 20px } #c { left: 160px }
+            .cv { position: absolute; left: 0; top: 0; width: 100px; height: 100px }
+        ", || {
+            body().child(div().id("a").class("box").child(div().class("in")))
+                .child(div().id("c").class("box").child(canvas(|b, p| p.fill(b, rgb(0xff0000))).class("cv")))
+        });
+        assert_eq!(at(23.0, 23.0), 0x000000, "a child's square corner is cut");
+        assert_eq!(at(70.0, 70.0), 0x0000ff, "its middle shows");
+        assert_eq!(at(163.0, 117.0), 0x000000, "a canvas's corner is cut");
+        assert_eq!(at(210.0, 70.0), 0xff0000, "its middle shows");
+    });
+}
+
+#[test]
+fn text_shadow_follows_the_text() {
+    // each shadow is the text moved: its letters spaced as the text's, its blur a blur
+    Application::headless().run(|cx| {
+        let (_, at) = page(cx, 400.0, 160.0, "
+            html, body { margin: 0; background: #fff }
+            #t { position: absolute; left: 10px; top: 10px; font-size: 30px; letter-spacing: 14px; color: #000;
+                 text-shadow: 0 60px 0 #f00, 0 100px 4px #00f }
+        ", || body().child(div().id("t").child("SPACED")));
+        let span_of = |y0: f32, y1: f32, hit: &dyn Fn(u32) -> bool| {
+            let xs: Vec<f32> = (0..400).map(|x| x as f32)
+                .filter(|&x| (0..((y1 - y0) as i32)).any(|dy| hit(at(x, y0 + dy as f32)))).collect();
+            (xs.first().copied().unwrap_or(0.0), xs.last().copied().unwrap_or(0.0))
+        };
+        let text = span_of(10.0, 50.0, &|p| rgb_of(p).0 < 80);
+        let shadow = span_of(70.0, 110.0, &|p| { let (r, g, b) = rgb_of(p); r > 200 && g < 80 && b < 80 });
+        assert!((text.0 - shadow.0).abs() <= 1.0 && (text.1 - shadow.1).abs() <= 1.0,
+                "the shadow is as wide as the spaced text: {text:?} {shadow:?}");
+        // a blurred shadow has no hard pixels and reaches past its letters
+        let blue = (110..160).flat_map(|y| (0..400).map(move |x| (x as f32, y as f32)))
+            .map(|(x, y)| rgb_of(at(x, y))).filter(|(r, g, b)| b > r && b > g).count();
+        assert!(blue > 400, "the blurred shadow shows: {blue}");
+    });
+}
+
+#[test]
+fn an_anonymous_box_does_not_clip_again() {
+    // a canvas after a block in an `overflow: hidden` box sits in an anonymous line box that carries
+    // the box's style: the clip is the box's padding box, not cut again at the anonymous box
+    Application::headless().run(|cx| {
+        let (_, at) = page(cx, 300.0, 200.0, "
+            html, body { margin: 0; background: #000 }
+            .lcd { position: absolute; left: 20px; top: 20px; width: 200px; height: 100px; overflow: hidden }
+            .head { height: 20px }
+            .viz { position: absolute; left: 10px; top: 50px; width: 180px; height: 36px }
+        ", || body().child(div().class("lcd").child(div().class("head"))
+            .child(canvas(|b, p| p.fill(b, rgb(0xff0000))).class("viz"))));
+        assert_eq!(at(120.0, 85.0), 0xff0000, "the canvas paints");
+    });
+}
+
+#[test]
+fn translate_moves_inline_content_once() {
+    // loose text after a block goes in an anonymous line box: the box's `translate` moves it once
+    Application::headless().run(|cx| {
+        let (_, moved) = page(cx, 300.0, 200.0, "
+            html, body { margin: 0; background: #fff; color: #000; font-size: 20px }
+            .t { position: absolute; left: 20px; top: 20px; translate: 0px 40px; width: 200px }
+        ", || body().child(div().class("t").child(div().child("AAAA")).child("BBBB")));
+        let (_, placed) = page(cx, 300.0, 200.0, "
+            html, body { margin: 0; background: #fff; color: #000; font-size: 20px }
+            .t { position: absolute; left: 20px; top: 60px; width: 200px }
+        ", || body().child(div().class("t").child(div().child("AAAA")).child("BBBB")));
+        for y in (0..200).step_by(2) {
+            for x in (0..300).step_by(2) {
+                assert_eq!(moved(x as f32, y as f32), placed(x as f32, y as f32), "pixel {x},{y}");
+            }
+        }
+    });
+}
+
+#[test]
+fn a_highlighted_span_keeps_every_word() {
+    // the words of a text draw as one run from its first word; a later word's highlight (its inline
+    // box's fragment) is painted with that word, so it must not cover the run's text
+    Application::headless().run(|cx| {
+        let (_, at) = page(cx, 400.0, 60.0, "
+            html, body { margin: 0; background: #fff; color: #000; font-size: 20px }
+            .hl { background: #b8cdf2 }
+        ", || body().child(div().css("padding", "10px").child(span().class("hl").child("aaaa bbbb cccc")).child(" after")));
+        // dark glyph pixels in the right half of the highlight (the second and third words)
+        let ink = (40..140).flat_map(|x| (10..34).map(move |y| (x as f32, y as f32)))
+            .filter(|&(x, y)| rgb_of(at(x, y)).0 < 90).count();
+        assert!(ink > 40, "the later words show over their highlight: {ink} dark pixels");
+    });
+}

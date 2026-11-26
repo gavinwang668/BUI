@@ -1,16 +1,18 @@
 ---
 title: Animation with gsap and motion
 sidebarLabel: Animation
-description: bui.gsap and bui.motion animate widgets and plain objects with real springs, GSAP's timelines and every ease by name, run by the C engine. Qt's QPropertyAnimation uses the same engine.
+description: bui.gsap and bui.motion animate widgets and plain objects with real springs, GSAP's timelines and every ease by name, run by the C engine. Qt's QPropertyAnimation uses the same engine. Every function, option, control and ease, with defaults and units.
 section: Python
 order: 35
 languages: ["python"]
-sources: ["docs/animation-api.md", "bindings/python/bui/gsap.py", "bindings/python/bui/motion.py", "bindings/python/bui/qtanim.py", "bindings/python/bui/components/core.py", "bindings/python/src/buipy_anim.c", "bindings/python/tests/test_anim.py", "kit/include/BUI_anim.h"]
+sources: ["docs/animation-api.md", "bindings/python/bui/gsap.py", "bindings/python/bui/motion.py", "bindings/python/bui/qtanim.py", "bindings/python/bui/qtsyntax.py", "bindings/python/bui/components/core.py", "bindings/python/bui/__init__.py", "bindings/python/src/buipy_anim.c", "bindings/python/tests/test_anim.py", "kit/include/BUI_anim.h", "kit/intern/anim/motion.c", "kit/intern/anim/spring.c", "kit/intern/kit_core.c", "examples/animation_demo.py"]
 ---
 
 A slider that eases to 80, a progress bar that fills with a spring, a row of widgets that appear one after another: **call `gsap.to(widget, value=80)` and the widget moves.** The animation runs in BUI's C engine, so a frame costs no Python. Python runs only for callbacks you give it, and for plain objects you animate.
 
-`bui.gsap` follows GSAP's API with Python's keyword arguments and snake_case names, and `bui.motion` follows Motion's.
+`bui.gsap` follows GSAP's API with Python's keyword arguments and snake_case names, and `bui.motion` follows Motion's. Both make the same kind of object, run on the same clock and take the same eases, so you can mix them freely. Qt syntax's `QPropertyAnimation` runs on that engine too.
+
+Times are in **seconds** everywhere on this page, except in the Qt classes, which use Qt's **milliseconds**.
 
 ## Animate a widget
 
@@ -33,6 +35,25 @@ A component also takes Motion's `initial`, `animate` and `transition` when you m
 NumberSlider("Volume", initial={"value": 0}, animate={"value": 0.8})
 ```
 
+`blenderui` and `bui` are the same package, so `from bui import gsap` works too.
+
+## Animate any Python object
+
+Any object with attributes is a target. The engine reads each attribute when the motion starts and writes it every frame:
+
+```python
+from types import SimpleNamespace
+
+state = SimpleNamespace(x=0.0, tint=(0.0, 0.0, 0.0, 1.0))
+gsap.to(state, x=100, tint="#f80", duration=1,
+        on_update=lambda: print(state.x, state.tint))
+```
+
+- The attribute must exist when you make the motion. A missing one raises `AttributeError` at the call.
+- A one-number value is written back as a `float`, even if the attribute held an `int`. Two numbers are written as a tuple of two floats, and three or four as an `(r, g, b, a)` tuple of floats.
+- `x`, `scale`, `rotate` and `opacity` are plain attributes here. Only widgets refuse them.
+- `scale_x` and `scaleX` are one property to the engine. While a motion writes one spelling on an object, a new motion with the other spelling on that object raises `ValueError`. Use one spelling.
+
 ## GSAP
 
 ```python
@@ -53,10 +74,308 @@ t = gsap.to(state, x=100, on_update=lambda: print(state.x))
 t.pause(); t.progress(0.5); t.time_scale(2); t.reverse(); t.kill()
 ```
 
-- **Targets:** a widget, a list of them, or any Python object (its attributes).
-- **Values:** numbers, strings (`"50%"`, `"+=10"`, `"#f80"`, `"rgb(...)"`), tuples for colors, and lists for keyframes, where `None` means "where it is now".
-- **Options:** `duration`, `delay`, `ease`, `repeat`, `repeat_delay`, `yoyo`, `time_scale`, `paused`, `reversed`, `immediate_render`, `overwrite`, `stagger` (seconds, or a dict with `each`, `amount`, `from`, `grid`, `axis` and `ease`), and the callbacks `on_start`, `on_update`, `on_complete`, `on_repeat`, `on_reverse_complete` and `on_interrupt`.
-- **Also:** `gsap.delayed_call`, `gsap.quick_to`, `gsap.kill_tweens_of`, `gsap.register_ease`, `gsap.parse_ease`, `gsap.global_time_scale` and `gsap.lag_smoothing`.
+In every `gsap` call, the keyword arguments hold both the options and the properties. A key that is an [option](#tween-options) is read as one. Every other key is a property to animate.
+
+### gsap.to
+
+```python
+gsap.to(targets, **vars) -> Tween
+```
+
+Animates `targets` from where they are now to the values in `vars`. It starts on the next frame.
+
+```python
+gsap.to(volume, value=80, duration=0.4, ease="power2.out")
+```
+
+### gsap.from_
+
+```python
+gsap.from_(targets, **vars) -> Tween
+```
+
+Animates `targets` from the values in `vars` to where they are now. The start values are written at once, before the first frame (`immediate_render` is `True` by default here), so nothing flashes at its end value first.
+
+```python
+gsap.from_(card, value=0, duration=0.6)   # the card's value counts up to what it was
+```
+
+### gsap.from_to
+
+```python
+gsap.from_to(targets, from_vars: dict, to_vars: dict = None, **vars) -> Tween
+```
+
+Animates from `from_vars` to `to_vars`. The options come from `to_vars` and from the keyword arguments. `from_vars` holds properties only. A property that is only in `from_vars` goes from there to where it is now, as in `from_`. `immediate_render` is `True` by default.
+
+```python
+gsap.from_to(swatch, {"color": "#000"}, {"color": "#f80"}, duration=1)
+```
+
+### gsap.set
+
+```python
+gsap.set(targets, **vars) -> Tween
+```
+
+Sets the values now: a tween of length 0. `duration` and `type` are ignored.
+
+### gsap.timeline
+
+```python
+gsap.timeline(*, defaults: dict = None, **vars) -> Timeline
+```
+
+Makes an empty [timeline](#timelines). `vars` takes the timeline's own options: `delay`, `repeat`, `repeat_delay`, `yoyo`, `paused`, `reversed`, `time_scale` and the callbacks. A key that isn't an option raises `TypeError`, because a timeline has no properties.
+
+`defaults` is a dict of options that every tween made by the timeline's `to`, `from_` and `from_to` starts with. A tween's own options win.
+
+```python
+tl = gsap.timeline(repeat=-1, yoyo=True, defaults={"duration": 0.5, "ease": "sine.inOut"})
+tl.to(a, value=1).to(b, value=1)
+```
+
+As a context manager, a timeline collects every `gsap.to`, `from_`, `from_to`, `set`, `timeline` and `delayed_call` made inside the block and puts each one on its end, in order:
+
+```python
+with gsap.timeline() as tl:
+    gsap.to(a, value=1, duration=0.5)
+    gsap.to(b, value=1, duration=0.5)     # starts when a's ends
+```
+
+Calls made inside the block don't take the timeline's `defaults`. Only the timeline's own methods do.
+
+### gsap.delayed_call
+
+```python
+gsap.delayed_call(delay: float, fn, *args) -> Timeline
+```
+
+Calls `fn(*args)` after `delay` seconds. It returns a timeline, so you can `pause()` or `kill()` it.
+
+```python
+reminder = gsap.delayed_call(2, print, "two seconds later")
+reminder.kill()       # changed your mind
+```
+
+### gsap.quick_to
+
+```python
+gsap.quick_to(target, prop: str, **vars) -> Callable[[value], Tween]
+```
+
+Returns a function that animates `prop` of `target` to the value you call it with, with `vars` as the options. Each call makes a new tween that takes over from the running one (see [`overwrite`](#tween-options)). A spring hands its velocity on, so a stream of calls stays smooth.
+
+```python
+follow = gsap.quick_to(knob, "value", duration=0.3, ease="power3.out")
+follow(40)
+follow(75)            # takes over from the tween to 40
+```
+
+### gsap.kill_tweens_of
+
+```python
+gsap.kill_tweens_of(targets, props=None) -> None
+```
+
+Stops every motion of `targets` (a widget, an object or a list of them) where it is. With `props` (a name, or a list of names) it stops only the motions of those properties.
+
+```python
+gsap.kill_tweens_of(volume)
+gsap.kill_tweens_of([a, b], "value")
+```
+
+### gsap.register_ease and gsap.parse_ease
+
+```python
+gsap.register_ease(name: str, ease) -> Ease
+gsap.parse_ease(ease) -> Ease
+```
+
+`register_ease` names an ease so every later call can use it by name. `ease` is one of:
+
+- an `Ease`, or anything an ease option takes (a name, `[x1, y1, x2, y2]`)
+- an SVG path from (0, 0) to (1, 1), such as `"M0,0 C0.2,0.8 0.4,1 1,1"` (GSAP's CustomEase)
+- a curve's points `[(x, y), ...]`, x going from 0 to 1 (a curve like Blender's curve widget draws)
+
+`parse_ease` returns the `Ease` for a name, and raises `ValueError` for a name it doesn't know. Call the result to evaluate it.
+
+```python
+gsap.register_ease("snap", "M0,0 C0.1,0.9 0.2,1 1,1")
+gsap.to(volume, value=50, ease="snap")
+gsap.parse_ease("power1.out")(0.5)    # 0.75
+```
+
+### gsap.global_time_scale
+
+```python
+gsap.global_time_scale(scale: float) -> None
+```
+
+Sets the speed of every motion at once: `0.5` is half speed. It must be greater than 0, or it raises `ValueError`.
+
+### gsap.lag_smoothing
+
+```python
+gsap.lag_smoothing(threshold: float, adjusted: float = 0.033) -> None
+```
+
+When a frame comes more than `threshold` seconds after the last one, the engine counts it as `adjusted` seconds instead. A stall, such as a slow file load, then doesn't jump every animation to its end. The engine starts with `threshold` 0.5 and `adjusted` 0.033. `threshold=0` turns it off.
+
+### Names in bui.gsap
+
+| Name | What it is |
+| --- | --- |
+| `gsap.Tween` | The handle class every call returns (see [Controls](#controls-tweens-and-timelines)). |
+| `gsap.Timeline` | A `Tween` with the timeline methods `to`, `from_`, `from_to` and `set`. |
+| `gsap.Ease` | The [ease class](#the-ease-class). |
+
+## Tween options
+
+These keyword arguments work in every `gsap` call and in Motion's `transition`. Every option is read once, when the call is made, and checked there.
+
+| Option | Type and unit | Default | What it does |
+| --- | --- | --- | --- |
+| `duration` | seconds | GSAP: `0.5`. Motion: see [Motion's defaults](#motions-defaults) | How long one pass takes. Negative is 0. |
+| `delay` | seconds | `0` | Wait before starting. Negative starts partway in. |
+| `ease` | ease | GSAP: `"power1.out"` | The [ease](#eases). In Motion, a list of eases gives one per keyframe segment. |
+| `times` | list of 0 to 1 | evenly spaced | Motion's keyframe times: one per keyframe. |
+| `repeat` | int | `0` | Extra passes. `-1` is forever. More than 1,000,000 is clamped. |
+| `repeat_delay` | seconds | `0` | Wait between passes. |
+| `yoyo` | bool | `False` | Every other pass runs backwards. |
+| `time_scale` | number greater than 0 | `1` | Speed: `2` is twice as fast. |
+| `paused` | bool | `False` | Made paused. Call `play()` or `resume()` to start it. |
+| `reversed` | bool | `False` | Plays from the end to the start. |
+| `immediate_render` | bool | `True` for `from_` and `from_to`, else `False` | Write the start values now, before the first frame. |
+| `overwrite` | `True`, `False`, `"auto"`, `"all"` | `"auto"` | `True` or `"auto"`: when this motion starts, it takes its properties over from any other motion of the same target, and the other one stops writing them. `False`: both keep writing. `"all"` is accepted and works like `"auto"`. |
+| `stagger` | seconds, or a dict | none | Start each target a bit later than the last. See [Stagger](#stagger). |
+| `type` | `"tween"`, `"keyframes"`, `"spring"`, `"inertia"`, `"decay"` | `"tween"` (Motion: see its defaults) | What drives the value. `"keyframes"` is `"tween"`, and `"decay"` is `"inertia"`. |
+
+Spring options (with `type="spring"`):
+
+| Option | Unit | Default | What it does |
+| --- | --- | --- | --- |
+| `stiffness` | | GSAP: `100`. Motion: see its defaults | How hard the spring pulls. |
+| `damping` | | GSAP: `10` | How fast it stops bouncing. |
+| `mass` | | `1` | How heavy the value is. |
+| `bounce` | 0 to 1 | `0.25` | How bouncy, with `visual_duration` or `duration`. `0` doesn't overshoot. |
+| `visual_duration` | seconds | none | How long it looks like it takes to arrive. With `bounce`, this sets the spring for you. |
+| `velocity` | units per second | `0`, or the velocity it took over | The starting speed. |
+| `rest_delta` | units | picked from the distance | The spring is done when it is this close to the end... |
+| `rest_speed` | units per second | picked from the distance | ...and slower than this. |
+
+Inertia options (with `type="inertia"`):
+
+| Option | Unit | Default | What it does |
+| --- | --- | --- | --- |
+| `velocity` | units per second | `0`, or the velocity it took over | The starting speed. |
+| `power` | | `0.8` | It comes to rest at the start value plus `power * velocity`. |
+| `time_constant` | seconds | `0.325` | How quickly it slows down. |
+| `min`, `max` | units | no bounds | Bounds. At a bound, a spring takes it back. |
+| `bounce_stiffness` | | `500` | That spring's stiffness. |
+| `bounce_damping` | | `10` | That spring's damping. |
+| `rest_delta` | units | `0.5` | Done when it is this close to where it stops. |
+
+Inertia ignores the value you give: it starts where the property is and decays from there.
+
+### Callbacks
+
+Every callback is called with no arguments. Give a function, or a `lambda` that closes over what it needs.
+
+| Option | Called when |
+| --- | --- |
+| `on_start` | the motion starts (after its delay) |
+| `on_update` | every frame it writes values |
+| `on_complete` | it reaches its end, playing forwards |
+| `on_repeat` | a repeat starts |
+| `on_reverse_complete` | it reaches its start, playing backwards |
+| `on_interrupt` | another motion took over its properties (see `overwrite`) |
+
+A value that isn't callable raises `TypeError` at the call. An exception raised inside a callback comes out of the frame that ran it. In a test, that is your `motion_tick` call. In `gsap.from_`, `from_to` and `set`, which write at once, it comes out of the call itself.
+
+A motion holds its callbacks for exactly as long as it exists and lets go of them when it ends.
+
+## Values
+
+| You write | What it is |
+| --- | --- |
+| `80`, `0.5` | A number. |
+| `"50%"` | A percentage. |
+| `"+=10"`, `"-=10"` | Relative to the value when the motion starts. |
+| `"#f80"`, `"#ff8800"`, `"rgb(255, 136, 0)"` | A color. |
+| `(r, g, b)` or `(r, g, b, a)` | A color, each channel 0 to 1. Alpha is 1 when left out. |
+| `(a,)` or `(a, b)` | One or two numbers, for a plain object's tuple attribute. |
+| `[0, 100, 40]` | Keyframes: the value passes through each one in turn. |
+| `None` inside keyframes, or as a `from_to` start | Where the property is when the motion starts. |
+
+Every keyframe of a property must have the same number of numbers. Mixing a number and a color raises `ValueError`.
+
+```python
+gsap.to(meter, value=[0, 100, 40], duration=1)            # three keyframes
+gsap.to(meter, value=[None, 100, 0], duration=1)          # from where it is, up, back down
+gsap.to(meter, value="+=10")                              # 10 more than now
+```
+
+## Stagger
+
+With several targets, `stagger` starts each one later than the last. A number is the seconds between starts. A dict gives more control:
+
+| Key | Default | What it does |
+| --- | --- | --- |
+| `each` | `0` | Seconds between two targets. |
+| `amount` | none | Seconds to spread over all the targets. It wins over `each`. |
+| `from` (or `from_`) | `"start"` | Where the wave starts: an index, `"start"`, `"center"`, `"end"`, `"edges"` or `"random"`. `"first"` and `"last"` mean `"start"` and `"end"`. |
+| `grid` | none | `[rows, columns]` for targets laid out in a grid, so the wave spreads in two directions. `-1` works it out. |
+| `axis` | both | With `grid`: `"x"` or `"y"` staggers along one direction only. |
+| `ease` | linear | An [ease](#eases) that shapes how the starts are spread. |
+
+```python
+gsap.to(rows, value=1, stagger=0.05)
+gsap.to(cells, value=1, stagger={"amount": 0.6, "from": "center", "grid": [4, 4]})
+```
+
+Several targets make a timeline: one tween per target, placed at its stagger offset. `delay`, `paused` and the callbacks belong to that timeline, so `on_complete` runs once, after the last target. `repeat` and `yoyo` belong to each target's tween. One target with `stagger` is a single tween and the stagger does nothing.
+
+## Timelines
+
+A timeline places tweens, other timelines, labels and calls in time. It has every [control](#controls-tweens-and-timelines) a tween has, and these methods. Every one but `label_time` returns the timeline, so you can chain them.
+
+| Method | What it does |
+| --- | --- |
+| `tl.to(targets, position="", **vars)` | Adds a `gsap.to` tween. |
+| `tl.from_(targets, position="", **vars)` | Adds a `gsap.from_` tween. |
+| `tl.from_to(targets, from_vars, to_vars=None, position="", **vars)` | Adds a `gsap.from_to` tween. |
+| `tl.set(targets, position="", **vars)` | Adds a `gsap.set`. |
+| `tl.add(child, position="")` | Adds a tween or timeline you already made. It leaves wherever it was. |
+| `tl.add_label(name, position="")` | Names a time, so later positions can refer to it. |
+| `tl.call(fn, *args, position="")` | Calls `fn(*args)` when the playhead passes `position`. |
+| `tl.label_time(name)` | A label's time in seconds, or `None`. |
+
+### Positions
+
+`position` says where an item goes. Empty, the default, is the end of the timeline.
+
+| Position | Where |
+| --- | --- |
+| `1.5` | 1.5 seconds from the start of the timeline. |
+| `"+=0.5"`, `"-=0.5"` | 0.5 seconds after, or before, the end of the timeline. |
+| `"<"`, `">"` | The start, or the end, of the item added last. |
+| `"<0.2"`, `">-0.1"` | Offset from the start, or end, of the item added last. |
+| `"mid"` | The label `mid`. |
+| `"mid+=1"`, `"mid-=1"` | Offset from the label `mid`. |
+| `"50%"`, `"+=25%"` | A share of the timeline's duration. |
+
+A label that doesn't exist yet is made at the end of the timeline. Anything else, such as `"<=1"` or `"a b"`, raises `ValueError`. Nothing is placed.
+
+```python
+tl = gsap.timeline(defaults={"duration": 1, "ease": "none"})
+tl.to(a, x=100)
+tl.to(b, x=100, position="<0.5")       # starts 0.5 s after a starts
+tl.add_label("mid", ">")               # at b's end: 1.5 s
+tl.to(c, x=100, position="mid+=0.25")
+tl.call(print, "mid", position="mid")
+tl.label_time("mid")                   # 1.5
+```
 
 ## Motion
 
@@ -75,6 +394,139 @@ motion.animate([
 ])
 ```
 
+### motion.animate
+
+```python
+motion.animate(targets, values: dict = None, transition: dict = None, **options) -> AnimationControls
+```
+
+Animates `targets` (a widget, an object, or a list of them) to `values`. The options come from `transition` and the keyword arguments together. Unlike `gsap`, the values and the options are apart, so any key in the options that isn't an [option](#tween-options) raises `TypeError`. A typo such as `durration=1` fails at the call.
+
+`delay` can take `motion.stagger(...)` to stagger several targets.
+
+### Sequences
+
+```python
+motion.animate(segments: list, transition: dict = None, **options) -> AnimationControls
+```
+
+Called with a list and no `values`, `animate` plays a sequence. Each segment is `(target, values)` or `(target, values, options)`. Each one starts when the one before it ends, unless its options have `at`:
+
+| `at` | Where the segment starts |
+| --- | --- |
+| `"<"` | With the segment before it. |
+| `"+0.2"`, `"-0.2"` | 0.2 seconds after, or before, the end of the segment before it. |
+| `1.5` | 1.5 seconds from the start of the sequence. |
+| `"name"` | At a label, as in [timeline positions](#positions). |
+
+The `transition` and keyword options of the call apply to the whole sequence, which is a timeline: `delay`, `repeat`, `repeat_delay`, `yoyo`, `paused`, `time_scale` and the callbacks.
+
+### motion.stagger
+
+```python
+motion.stagger(each: float = 0.1, *, from_="first", ease=None, start: float = 0.0) -> dict
+```
+
+For `delay=`: each target starts `each` seconds after the one before it. `from_` is `"first"`, `"last"`, `"center"`, `"edges"`, `"random"` or an index. `ease` shapes the spread. `start` other than 0 raises `NotImplementedError`: put a `delay` on a sequence or timeline instead.
+
+### motion.mount
+
+```python
+motion.mount(target, initial: dict = None, animate: dict = None, transition: dict = None) -> AnimationControls
+```
+
+Motion's `initial`, `animate` and `transition` props, for a component you already made. Components call it for you when you pass these keywords. It works on the first frame, not at once, so a component's constructor can set its own values first:
+
+- A property in `animate` goes there, from its `initial` value if it has one, else from where it is.
+- A property only in `initial` is held at that value.
+
+```python
+eased = NumberSlider("Ease", 0, min=0, max=100)
+motion.mount(eased, initial={"value": 0}, animate={"value": 50}, transition={"duration": 0.6})
+```
+
+### Motion's defaults
+
+When you don't say what kind of motion you want, Motion picks:
+
+| Case | Motion | Duration | Ease |
+| --- | --- | --- | --- |
+| One target value for `x`, `y`, `z`, `rotate`, `rotate_x`, `rotate_y`, `scale`, `scale_x` or `scale_y`, with no `duration` or `ease` | spring | until it settles | |
+| Any other property | tween | 0.3 s | Motion's default bezier |
+| Keyframes (a list) | tween | 0.8 s | Motion's default bezier |
+| A `type` or a `duration` given, but no `ease` | as given | as given | `"easeInOut"` |
+
+Motion's default spring has stiffness 500 and damping 25, and 550 and 30 for `scale`. Those transform names are plain attributes on Python objects: widgets have no transforms.
+
+With `type="spring"`, a spring is set in one of three ways:
+
+- `bounce` and `visual_duration`;
+- `duration` (and `bounce`), when you give no `stiffness`;
+- `stiffness`, `damping` and `mass`.
+
+### motion.spring and motion.inertia
+
+`motion.spring` is `"spring"` and `motion.inertia` is `"inertia"`, so you can write `type=motion.spring`.
+
+### AnimationControls
+
+`motion.animate` and `motion.mount` return an `AnimationControls`. It has every [control](#controls-tweens-and-timelines) of a tween, and Motion's names on top:
+
+| Member | What it is |
+| --- | --- |
+| `c.time` | Seconds played, repeats included. Set it to jump there. |
+| `c.speed` | The speed, as `time_scale`. Set it to change it (greater than 0). |
+| `c.duration` | Seconds in all, repeats included. Read-only. |
+| `c.state` | `"paused"`, `"running"` or `"finished"`. |
+| `c.play()` | Plays forward. |
+| `c.pause()` | Pauses where it is. |
+| `c.complete()` | Jumps to the end now. |
+| `c.stop()` | Stops where it is, for good. |
+| `c.cancel()` | The same as `stop()`. |
+
+`time` and `duration` are properties here, not methods as on a `Tween`.
+
+```python
+c = motion.animate(meter, {"value": [0, 50, 0]})
+c.time = 0.4
+c.speed = 0.5
+c.stop()
+```
+
+## Controls: tweens and timelines
+
+Every call above returns a handle: a `gsap.Tween`, a `gsap.Timeline` or `motion.AnimationControls`. The motion keeps running whether you keep the handle or not. Calls that change something return the handle, so you can chain them: `t.resume().time_scale(2)`.
+
+| Method | What it does |
+| --- | --- |
+| `play()` | Plays forward from where it is. |
+| `pause()` | Pauses where it is. |
+| `resume()` | Goes on the way it was going. |
+| `reverse()` | Turns around, and plays. |
+| `restart()` | Plays again from the start. |
+| `complete()` | Jumps to its end now. |
+| `kill()` | Stops it where it is, for good, and takes it out of its timeline. |
+| `seek(seconds)` | Jumps to that time. |
+| `progress()` / `progress(p)` | Reads, or jumps to, 0 to 1 of one pass. |
+| `total_progress()` / `total_progress(p)` | The same, repeats included. |
+| `time()` / `time(t)` | Reads, or jumps to, seconds into the current pass. |
+| `total_time()` / `total_time(t)` | The same, repeats included. |
+| `time_scale()` / `time_scale(s)` | Reads, or sets, its speed (greater than 0). |
+| `paused()` / `paused(flag)` | Reads, or sets, whether it is paused. |
+| `reversed()` / `reversed(flag)` | Reads, or sets, whether it plays backwards. |
+| `duration()` | Seconds in one pass. |
+| `total_duration()` | Seconds with repeats. With `repeat=-1` it is huge. |
+| `is_active()` | `True` while it is playing: not paused, not done. |
+
+A killed motion stays killed: `play`, `resume`, `reverse` and the seeks do nothing to it. A NaN or infinite time, progress or scale raises `ValueError` and changes nothing.
+
+```python
+t = gsap.to(volume, value=90, duration=1, ease="none")
+t.pause()
+t.progress(0.5)               # value is 50
+t.resume().time_scale(2)
+```
+
 ## Springs and eases
 
 `type="spring"` is a real spring. The engine solves the damped spring equation in closed form, for the underdamped, critically damped and overdamped cases, so a frame reads the value at its time and the frame rate doesn't change the result. Interrupt a spring and the next motion starts from its position and velocity. Give `stiffness`, `damping` and `mass`, or `bounce` with `visual_duration`. `type="inertia"` decays from a velocity.
@@ -83,9 +535,213 @@ Every ease of GSAP, Motion, CSS and Blender works by name (`"none"`, `"power2.ou
 
 Mistakes fail where you make them: an unknown ease, option or property raises at the call, and a typo such as `durration=1` is an error, not a property.
 
+### Eases
+
+Names don't care about case.
+
+| From | Names |
+| --- | --- |
+| GSAP | `none`, `power0` to `power4`, `quad`, `cubic`, `quart`, `quint`, `strong`, `sine`, `expo`, `circ`, `back(overshoot)`, `elastic(amplitude, period)`, `bounce`, each with `.in`, `.out` or `.inOut` (alone it means `.out`); the older `Power2.easeOut` and `.config(...)` forms; `steps(n)`, `slow(ratio, power, yoyo)`, `rough(...)`, `expoScale(start, end, ease)`, `wiggle(n, type)`, `customBounce(strength)` |
+| Motion | `linear`, `easeIn`, `easeOut`, `easeInOut`, `circIn`, `circOut`, `circInOut`, `backIn`, `backOut`, `backInOut`, `anticipate` |
+| CSS | `ease`, `ease-in`, `ease-out`, `ease-in-out`, `step-start`, `step-end`, `steps(n, jump-start)` (and `jump-end`, `jump-none`, `jump-both`, `start`, `end`), `cubic-bezier(x1, y1, x2, y2)`, `linear(0, 0.25 75%, 1)` |
+| Blender | `constant`, `linear`, `bezier` (Blender's default keyframe ease), and its easing types, `sine` to `elastic`, with `.in`, `.out` or `.inOut` |
+| Yours | any name given to `gsap.register_ease` |
+
+Anywhere an ease goes you can also pass `[x1, y1, x2, y2]` (a cubic bezier) or an `Ease`. An unknown name raises `ValueError`.
+
+### The Ease class
+
+`gsap.Ease` is an ease read once. Calling it evaluates it.
+
+| Member | What it does |
+| --- | --- |
+| `Ease(spec)` | An ease from a name, `[x1, y1, x2, y2]` or another `Ease`. |
+| `Ease.points([(x, y), ...])` | A curve through points, x going from 0 to 1. At least two points. |
+| `Ease.path(svg)` | GSAP's CustomEase: an SVG path from (0, 0) to (1, 1). |
+| `ease(t)` | The eased value at `t` (0 to 1). Outside that range the curve goes on. |
+| `ease.register(name)` | Names it, and returns it. |
+
+```python
+from blenderui.gsap import Ease
+
+bump = Ease.points([(0, 0), (0.3, 0.8), (1, 1)])
+bump(0.3)                       # 0.8
+gsap.to(volume, value=100, ease=bump)
+```
+
+## Components
+
+Every component takes three of Motion's props as keyword arguments:
+
+| Keyword | What it does |
+| --- | --- |
+| `initial` | A dict of property to value: where it starts. |
+| `animate` | A dict of property to value: where it goes. |
+| `transition` | The [options](#tween-options) for the motion. |
+
+The motion starts on the component's first frame. Its handle is `component.motion`, an `AnimationControls`, or `None` when you gave neither `initial` nor `animate`. The rules are those of [`motion.mount`](#motionmount).
+
+```python
+slider = NumberSlider("Volume", 0.3, min=0, max=1,
+                      initial={"value": 0}, animate={"value": 0.8},
+                      transition={"duration": 1, "ease": "linear"})
+slider.motion.pause()
+```
+
+Motion's other props, `while_hover`, `while_tap`, `while_focus`, `while_drag`, `while_in_view`, `exit`, `variants` and `layout`, raise `NotImplementedError` on components for now.
+
 ## Qt syntax
 
-`QPropertyAnimation`, `QVariantAnimation`, the animation groups and `QEasingCurve` from [Qt syntax](../qt-syntax/) run on the same engine: starting one makes an engine tween, and a group is a timeline.
+`QPropertyAnimation`, `QVariantAnimation`, the animation groups and `QEasingCurve` from [Qt syntax](../qt-syntax/) run on the same engine: starting one makes an engine tween, and a group is a timeline. Import them from `bui.qtsyntax`. Times here are in **milliseconds**, as in Qt.
+
+```python
+from bui.qtsyntax import QColor, QEasingCurve, QPropertyAnimation, QSequentialAnimationGroup
+
+anim = QPropertyAnimation(slider, b"value")
+anim.setEndValue(100)
+anim.setDuration(1000)
+anim.setEasingCurve(QEasingCurve.OutCubic)
+anim.finished.connect(lambda: print("done"))
+anim.start()
+```
+
+The values can be numbers, `QColor`, `QPoint`, `QSize`, `QRect`, or tuples of 1 to 4 numbers. The current value has the type of the end value: an `int` end value gives rounded `int`s, a `QColor` gives `QColor`s.
+
+### QAbstractAnimation
+
+What every animation has.
+
+| Member | What it does |
+| --- | --- |
+| `start(policy=KeepWhenStopped)` | Starts it. With a loop count of 0 it does nothing. |
+| `stop()` | Stops it where it is. A group also stops its animations. |
+| `pause()`, `resume()` | Pauses and resumes a running animation. |
+| `setPaused(paused)` | `pause()` or `resume()`. |
+| `state()` | `Stopped`, `Paused` or `Running`. |
+| `loopCount()`, `setLoopCount(n)` | How many times it plays. Default 1, `-1` is forever. |
+| `direction()`, `setDirection(d)` | `Forward` (default) or `Backward`. Read when it starts. |
+| `totalDuration()` | `duration() * loopCount()` in ms, or `-1` for forever. |
+| `currentTime()`, `setCurrentTime(ms)` | The time played, loops included, while it runs. 0 when it isn't running. |
+| `currentLoopTime()` | The time into the current loop. |
+| `group()` | The group it is in, or `None`. |
+
+| Signal | Emitted when |
+| --- | --- |
+| `finished` | It reaches its end (its start, played `Backward`). |
+| `stateChanged(new, old)` | Its state changes. |
+| `directionChanged(direction)` | `setDirection` changes the direction. |
+
+Constants: `Forward`, `Backward`; `Stopped`, `Paused`, `Running`; `KeepWhenStopped`, `DeleteWhenStopped`.
+
+### QVariantAnimation
+
+Animates a value between key values, and emits it each frame.
+
+| Member | What it does |
+| --- | --- |
+| `QVariantAnimation(parent=None)` | A group as `parent` adds the animation to it. |
+| `startValue()`, `setStartValue(v)` | The value at step 0. Required here. |
+| `endValue()`, `setEndValue(v)` | The value at step 1. Required. |
+| `keyValueAt(step)`, `setKeyValueAt(step, v)` | A value at `step`, 0 to 1. Outside that raises `ValueError`. |
+| `keyValues()`, `setKeyValues(pairs)` | All `(step, value)` pairs, sorted by step. |
+| `currentValue()` | The value written last. |
+| `duration()`, `setDuration(ms)` | Default 250 ms. Negative raises `ValueError`. |
+| `easingCurve()`, `setEasingCurve(curve)` | A `QEasingCurve`, or one of its type numbers. Default `Linear`. |
+| `updateCurrentValue(value)` | Called each frame with the value. Override it in a subclass. |
+| `valueChanged(value)` | Signal: each frame, with the value. |
+
+```python
+fade = QVariantAnimation()
+fade.setStartValue(QColor(0, 0, 0))
+fade.setKeyValueAt(0.5, QColor(255, 0, 0))
+fade.setEndValue(QColor(255, 255, 255))
+fade.setDuration(1000)
+fade.valueChanged.connect(lambda c: print(c.red(), c.green(), c.blue()))
+fade.start()
+```
+
+### QPropertyAnimation
+
+A `QVariantAnimation` that writes a property of an object.
+
+| Member | What it does |
+| --- | --- |
+| `QPropertyAnimation(target=None, prop=b"", parent=None)` | `prop` is bytes or a string. |
+| `targetObject()`, `setTargetObject(o)` | The object. |
+| `propertyName()`, `setPropertyName(name)` | The property, returned as bytes. |
+
+With no start value, it starts from the property's value now: `getattr(target, prop)`, called if it is a method, as Qt's getters are. Each frame it calls the setter, `setValue` for `b"value"`, if the object has one, and otherwise sets the attribute.
+
+### QPauseAnimation
+
+`QPauseAnimation(ms=250, parent=None)`: a gap in a sequential group. `duration()` and `setDuration(ms)` read and change it.
+
+### Animation groups
+
+`QSequentialAnimationGroup` plays its animations one after another. `QParallelAnimationGroup` plays them all at once. Both are a timeline in the engine.
+
+| Member | What it does |
+| --- | --- |
+| `addAnimation(a)` | Adds `a` at the end. It leaves any group it was in. |
+| `insertAnimation(i, a)` | Adds `a` at index `i`. |
+| `removeAnimation(a)` | Takes `a` out. |
+| `takeAnimation(i)` | Takes out the animation at `i`, and returns it. |
+| `animationAt(i)`, `animationCount()`, `indexOfAnimation(a)` | Look up the animations. |
+| `clear()` | Takes every animation out. |
+| `addPause(ms)`, `insertPause(i, ms)` | Sequential only: adds a `QPauseAnimation`, and returns it. |
+| `duration()` | Sequential: the sum of the animations' durations. Parallel: the longest. |
+
+```python
+seq = QSequentialAnimationGroup()
+seq.addAnimation(slide_in)
+seq.addPause(250)
+seq.addAnimation(fill_bar)
+seq.setLoopCount(2)
+seq.start()
+```
+
+### QEasingCurve
+
+| Member | What it does |
+| --- | --- |
+| `QEasingCurve(type=Linear)` | A curve of that type, or a copy of another curve. |
+| `type()`, `setType(t)` | The curve type. |
+| `amplitude()`, `setAmplitude(a)` | Default 1.0. Used by the elastic curves. |
+| `period()`, `setPeriod(p)` | Default 0.3. Used by the elastic curves. |
+| `overshoot()`, `setOvershoot(o)` | Default 1.70158. Used by the back curves. |
+| `customType()`, `setCustomType(fn)` | A function of progress, `fn(t) -> float`. Sets the type to `Custom`. |
+| `valueForProgress(t)` | The curve's value at `t`, clamped to 0 to 1. |
+| `ease()` | The engine's `Ease` for this curve. You can pass it to `gsap` or `motion` too. |
+
+Types: `Linear`; `In`, `Out`, `InOut` and `OutIn` of `Quad`, `Cubic`, `Quart`, `Quint`, `Sine`, `Expo`, `Circ`, `Elastic`, `Back` and `Bounce` (such as `InOutCubic` or `OutInBack`); `InCurve`, `OutCurve`, `SineCurve`, `CosineCurve` and `Custom`. The `OutIn` types, the four curve types and `Custom` are sampled once into a curve of 49 points. `BezierSpline` and `TCBSpline` raise `NotImplementedError` when used.
+
+## Reduced motion
+
+`bui.set_reduced_motion(True)` is for people who turn animation down. Motions of colors, `opacity` and `value` still play. Every other property jumps to its end. It applies to motions made after the call.
+
+```python
+import bui
+
+bui.set_reduced_motion(True)
+```
+
+## Errors
+
+Every mistake raises at the call that made it, before anything moves.
+
+| Mistake | Raises |
+| --- | --- |
+| An unknown ease name | `ValueError` |
+| An unknown option in Motion's `transition`, a timeline's options or a `stagger` dict | `TypeError` |
+| An option of the wrong type, such as `repeat="x"`, or a callback that isn't callable | `TypeError` |
+| A NaN or infinite `duration`, `delay`, `repeat_delay` or `time_scale`, or `time_scale` of 0 or less | `ValueError` |
+| A value that can't be read, such as `"12abc"`, or keyframes of mixed sizes | `ValueError` |
+| `x`, `scale`, `rotate` or `opacity` on a widget, or a property the widget doesn't have | `ValueError` |
+| An attribute a plain object doesn't have | `AttributeError` |
+| A bad timeline position | `ValueError` |
+| `times` or a list `ease` of the wrong length for the keyframes | `ValueError` |
+| No targets, or no properties | `ValueError` |
+| A build of BUI without animation | `RuntimeError` |
 
 ## Testing animations
 
@@ -109,6 +765,17 @@ step(0.5)
 assert abs(volume.value - 50) < 1e-3
 ```
 
+These functions are in `buipy`, the C extension under `bui`:
+
+| Function | What it does |
+| --- | --- |
+| `motion_set_host_clock(on)` | `True`: your `motion_tick` calls drive every motion, not the window's frames. |
+| `motion_tick(now)` | Moves every motion to `now` seconds. `now` must go up. Returns `True` while something still animates. A callback's exception comes out of here. |
+| `motion_set_lag_smoothing(threshold, adjusted=0.033)` | What `gsap.lag_smoothing` calls. Turn it off in tests, so a big step isn't cut short. |
+| `motion_set_time_scale(scale)` | What `gsap.global_time_scale` calls. |
+| `motion_kill_target(target, props=None)` | Stops one target's motions. `gsap.kill_tweens_of` calls it for each target. |
+| `motion_available()` | `False` when this build has no animation. Skip your animation tests then. |
+
 ## Examples
 
 `examples/animation_demo.py` animates widgets with `gsap` and `motion`: `python examples/animation_demo.py`.
@@ -119,6 +786,41 @@ assert abs(volume.value - 50) < 1e-3
 - **Numbers:** a NaN or infinite time raises, a negative duration or delay is 0, and `repeat=-1` is forever (more than 1,000,000 is clamped); see [Numbers and positions](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#numbers-and-positions).
 - **Cost:** a frame that only animates skips rendering, the cascade and layout and repaints only what changed, and runs no Python unless you gave a callback. It is not allocation-free: a callback costs an event per call.
 - **Callbacks** are held for exactly as long as their motion and released when it ends. A tween whose handle you drop still plays to the end.
+
+## Not done yet
+
+<ComingSoon feature="The rest of GSAP, Motion and Qt animation in Python">
+
+**GSAP**
+
+- `await` on a tween, and `then`.
+- `gsap.ticker`, `gsap.context`, `gsap.matchMedia` and `gsap.utils`.
+- The plugins: `ScrollTrigger`, `Flip`, `Draggable` and `Observer`.
+- `overwrite="all"`: accepted, but it works like `"auto"`. It takes over the same properties, not every motion on the target.
+
+**Motion**
+
+- Motion values (`motion_value`, `use_spring`, `use_transform`).
+- The functions `scroll`, `in_view`, `hover` and `press`.
+- `motion.stagger(start=...)` other than 0 raises `NotImplementedError`.
+- `AnimationControls.cancel()` stops where the motion is, like `stop()`. Motion's `cancel()` puts the value back where it started.
+
+**Components**
+
+- The props `exit`, `while_hover`, `while_tap`, `while_focus`, `while_drag`, `while_in_view`, `variants` and `layout` raise `NotImplementedError`.
+
+**Qt**
+
+- `QEasingCurve.BezierSpline` and `TCBSpline` raise `NotImplementedError`. There is no `addCubicBezierSegment` or `addTCBSegment`.
+- `currentLoop()` and the `currentLoopChanged` signal.
+- `start(DeleteWhenStopped)` ignores the policy.
+- `amplitude` shapes only the elastic curves. Qt also uses it for the bounce curves.
+- `setDirection` on a running animation takes effect at the next `start()`.
+- `QAnimationGroup.clear()` takes the animations out but doesn't delete them.
+
+The [status table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point) covers every language.
+
+</ComingSoon>
 
 ## Next steps
 

@@ -1,19 +1,19 @@
 ---
 title: Animation with gsap and motion
 sidebarLabel: Animation
-description: bui.gsap and bui.motion animate widgets with real springs, GSAP's timelines and every ease by name, run by the C engine; Lua runs only for the callbacks you give it.
+description: bui.gsap and bui.motion animate widgets with real springs, GSAP's timelines and every ease by name, run by the C engine; Lua runs only for the callbacks you give it. Every function, method, option and ease, with defaults.
 section: Lua
 order: 20
-sources: ["docs/animation-api.md", "bindings/lua/README.md", "bindings/lua/src/bui_anim.c", "bindings/lua/tests/test_anim.lua", "bindings/lua/examples/anim.lua", "kit/include/BUI_anim.h"]
+sources: ["docs/animation-api.md", "bindings/lua/README.md", "bindings/lua/src/bui_anim.c", "bindings/lua/src/bui_lua.c", "bindings/lua/src/bui_context.c", "bindings/lua/tests/test_anim.lua", "bindings/lua/examples/anim.lua", "kit/include/BUI_anim.h", "kit/intern/anim/motion.c", "kit/intern/anim/spring.c", "kit/intern/anim/value.c", "kit/intern/anim/node.c", "kit/intern/anim/ease.c"]
 ---
 
 A slider that eases to 80, a progress bar that fills with a spring, a row of widgets that appear one after another: **call `gsap.to(slider, {value = 80})` and the slider moves.** The animation runs in BUI's C engine, so a frame costs no Lua. Lua runs only for callbacks you give it.
 
-`bui.gsap` follows GSAP's API with Lua tables, and `bui.motion` follows Motion's. Both are the same engine Rust, JavaScript and Python use.
+`bui.gsap` follows GSAP's API with Lua tables, and `bui.motion` follows Motion's. Both drive the same engine, so you can mix them freely. This page starts with a short tour, then lists every function, method, option and ease the Lua module has.
 
 ## Animate a widget
 
-```lua
+```lua title="anim_first.lua"
 local bui = require("bui")
 local gsap, motion = bui.gsap, bui.motion
 
@@ -25,80 +25,580 @@ gsap.to(volume, {value = 80, duration = 0.4, ease = "power2.out"})
 motion.animate(bar, {factor = 1}, {type = "spring", stiffness = 300, damping = 20})
 ```
 
-A node animates what BUI draws for it: `value`, colors (`color`, `backgroundColor`) and the numbers it has, such as `factor`, `min`, `max`, `height`, `padding` and `scroll`. Kit widgets have no draw transform or opacity, so `x`, `y`, `scale`, `rotate` and `opacity` are errors.
+Nothing else is needed. The kit ticks every animation in its frames, so `bui.run()` or a `bui.pump()` loop plays them. Each call returns a handle you can pause, seek or reverse (see [Controls](#controls-on-every-handle)).
 
-## GSAP
+## What you can animate
+
+### Targets
+
+A target is a `bui.Node`, or a list of nodes (`{a, b, c}`). An empty list, a string or any other value is an error. A node freed with `node:free()` is an error when you start a motion on it. A node freed while it animates stops its motions.
+
+### Properties
+
+A kit widget animates what BUI draws for it:
+
+| Property | Numbers | Notes |
+| --- | --- | --- |
+| `value` | 1 | Sliders, number fields, progress bars. |
+| `color` | 4 | A swatch's color. `textColor` is another name for it. |
+| `backgroundColor` | 4 | A frame's background (`node:set("bg", ...)`). `bg` and `background` are other names for it. |
+| Any number key of `node:set` | 1 | `factor`, `min`, `max`, `step`, `width`, `height`, `padding`, `margin`, `scroll`, `weight`, `low`, `high`, `optimum` and the rest of the numeric keys. |
+
+Property names ignore case, `-` and `_`: `background_color` and `backgroundColor` are the same property.
+
+Kit widgets have no draw transform or opacity, so `x`, `y`, `z`, `scale`, `scaleX`, `scaleY`, `rotate`, `rotateX`, `rotateY`, `skewX`, `skewY` and `opacity` (and their other names, such as `rotation` and `alpha`) are errors. A name that isn't one of the keys above is an error that names it: `a slider has no property 'valeu' to animate`.
+
+### Values
+
+| You write | It means |
+| --- | --- |
+| `80` | A number. |
+| `"80"`, `"80px"` | A number in a string. Kit values are plain numbers, so a unit (`px`, `%`, `deg`, ...) is read and dropped: `"50%"` is 50. |
+| `"+=30"`, `"-=30"` | Relative to the value when the motion starts. |
+| `"#f80"`, `"#ff8800"`, `"#ff8800cc"` | A color, for `color` and `backgroundColor`. |
+| `"rgb(255 128 0)"`, `"rgb(255 128 0 / 50%)"`, `"hsl(...)"`, `"orange"` | A color in CSS's forms, or a CSS color name. |
+| `{1, 0.5, 0}`, `{1, 0.5, 0, 1}` | A color as `{r, g, b[, a]}`, each 0 to 1. Alpha is 1 when you leave it out. |
+
+A number for a color, or a color for a number, is an error.
+
+### Keyframes
+
+Give a list instead of one value, and the property goes through each value in turn:
 
 ```lua
-local t = gsap.to(slider, {value = 80, duration = 0.6, ease = "power2.out",
-                           repeat_ = 1, yoyo = true, onComplete = function() print("done") end})
-gsap.from(progress, {factor = 0, duration = 1})
-gsap.fromTo(frame, {backgroundColor = "#202020"}, {backgroundColor = "#4772b3"})
-gsap.set(swatch, {color = {1, 0.5, 0, 1}})
-gsap.to({a, b, c}, {value = 100, stagger = {each = 0.1, from = "center"}})
-t:pause(); t:resume(); t:reverse(); t:restart(); t:seek(0.3); t:progress(0.5)
-t:timeScale(2); t:kill(); t:isActive(); t:paused(true); t:reversed()
-
-local tl = gsap.timeline({defaults = {duration = 0.5, ease = "none"}, repeat_ = 1})
-tl:to(a, {value = 100}):to(b, {value = 100}, "<0.2"):addLabel("mid")
-  :to(c, {value = 50}, "mid+=0.25"):call(print, {"halfway"}, "mid")
-
-gsap.delayedCall(1, fn)
-gsap.killTweensOf(slider, "value")
-gsap.registerEase("myEase", {0.2, 0.8, 0.4, 1}); gsap.parseEase("back.out(2)")(0.5)
+motion.animate(slider, {value = {0, 100, 40}}, {duration = 1})
+gsap.to(swatch, {color = {"#ff0000", "#00ff00", "#0000ff"}, duration = 2})
 ```
 
-- **Targets:** a node, or a list of nodes.
-- **Values:** numbers, strings (`"+=30"`, `"50%"`, `"#ff8800"`, `"rgb(255 128 0)"`), colors as `{r, g, b[, a]}`, and arrays for keyframes.
-- **Options** in GSAP's camelCase or snake_case (`repeat_` or `["repeat"]` for Lua's keyword): `duration`, `delay`, `repeat`, `repeatDelay`, `yoyo`, `timeScale`, `paused`, `reversed`, `ease`, `overwrite`, `immediateRender`, `stagger`, and the callbacks `onStart`, `onUpdate`, `onComplete`, `onRepeat`, `onReverseComplete` and `onInterrupt`.
+For a color, a list whose first item is a number is one color, not keyframes: `{1, 0, 0}` is red. Write color keyframes as strings or as a list of tables: `{{1, 0, 0}, {0, 0, 1}}`.
+
+By default the keyframes are evenly spaced. `times` places them (one number from 0 to 1 per keyframe), and `ease` as a list gives each segment its own ease (one per gap between keyframes):
+
+```lua
+motion.animate(slider, {value = {0, 100, 0}},
+               {duration = 1, times = {0, 0.2, 1}, ease = {"easeOut", "easeIn"}})
+```
+
+One call holds at most 16 properties and 64 keyframes across all of them.
+
+## GSAP: tweens
+
+A **tween** moves one or more properties from one value to another over time. All four functions take targets and a vars table, start at once, and return a [tween handle](#controls-on-every-handle).
+
+### gsap.to
+
+```lua
+gsap.to(targets, vars) --> tween
+```
+
+Animates from where each property is now to the values in `vars`. `vars` holds the properties and the [options](#options) together.
+
+```lua
+gsap.to(volume, {value = 80, duration = 0.6, ease = "power2.out", repeat_ = 1, yoyo = true})
+```
+
+### gsap.from
+
+```lua
+gsap.from(targets, vars) --> tween
+```
+
+Animates from the values in `vars` to where each property is now. The start values show at once (`immediateRender` is `true` unless you set it).
+
+```lua
+gsap.from(bar, {factor = 0, duration = 1})   -- fills up to its current factor
+```
+
+### gsap.fromTo
+
+```lua
+gsap.fromTo(targets, fromVars, toVars) --> tween
+```
+
+Animates from `fromVars` to `toVars`. `fromVars` holds only properties: options there are read as property names and fail. Put every option in `toVars`. A property only in `fromVars` goes from there to where it is now. Keyframes don't go in `fromTo` (use `gsap.to` with a list). `immediateRender` is `true` unless you set it.
+
+```lua
+gsap.fromTo(frame, {backgroundColor = "#202020"}, {backgroundColor = "#4772b3", duration = 0.3})
+```
+
+### gsap.set
+
+```lua
+gsap.set(targets, vars) --> tween
+```
+
+Sets the values now: a tween with a duration of 0. A `delay` in `vars` still waits.
+
+```lua
+gsap.set(swatch, {color = {1, 0.5, 0, 1}})
+```
+
+### Many targets
+
+Give a list of nodes and every node gets the same properties. With a `stagger`, each one starts a little after the one before:
+
+```lua
+gsap.to({a, b, c}, {value = 100, duration = 1, stagger = 0.1})
+gsap.to({a, b, c}, {value = 100, stagger = {each = 0.1, from = "center"}})
+```
+
+The handle you get back controls the whole group. `delay`, `paused`, `reversed`, `timeScale` and the callbacks belong to the group. Every other option (`duration`, `ease`, `repeat`, `yoyo`, ...) applies to each node's own tween. The group's `duration()` includes the stagger: three nodes, `duration = 1`, `stagger = 0.5` last 2 seconds. Every node must have the properties the first node has.
+
+## Options
+
+Options go in the same table as the properties for `gsap.to`, `gsap.from` and `gsap.set`, in the `toVars` of `gsap.fromTo`, and in the third table of `motion.animate`. Names are GSAP's camelCase or snake_case: case and `_` are ignored, so `repeatDelay`, `repeat_delay` and `RepeatDelay` are one option.
+
+`repeat` is a Lua keyword, so write `repeat_ = 1` or `["repeat"] = 1`.
+
+An option with the wrong kind of value is an error naming it (`'duration' takes a number, not a string`). In `motion.animate`, a key that isn't an option is an error too (`unknown option 'stiffnes'`). In `gsap.to`, a key that isn't an option is read as a property, so a typo fails as a missing property.
+
+### Timing
+
+| Option | Takes | Default | What it does |
+| --- | --- | --- | --- |
+| `duration` | seconds | 0.5 (Motion: [its own](#motion-defaults)) | How long one play takes. Negative is 0. Springs and inertia work out their own. |
+| `delay` | seconds, or a stagger table | 0 | Wait before starting. A negative delay starts that far into the motion. A table (such as `motion.stagger(0.1)`) is a [stagger](#stagger). |
+| `repeat` | a whole number | 0 | How many more times to play. `-1` or `math.huge` is forever. More than 1,000,000 is 1,000,000. |
+| `repeatDelay` | seconds | 0 | Wait between repeats. Negative is 0. |
+| `yoyo` | boolean | `false` | Every other repeat plays backwards. |
+| `repeatType` | `"loop"`, `"reverse"`, `"mirror"` | `"loop"` | Motion's name for `yoyo`: `"reverse"` and `"mirror"` both turn `yoyo` on. |
+| `timeScale` | number | 1 | Speed: 2 is twice as fast. 0 or less is 1. |
+| `paused` | boolean | `false` | Make it paused. Call `:play()` or `:resume()` to start it. |
+| `reversed` | boolean | `false` | Make it play backwards. |
+| `ease` | ease, or a list of eases | `"power1.out"` (Motion: [its own](#motion-defaults)) | The curve of each play. A list gives each keyframe segment its own ease. See [Eases](#eases). |
+| `times` | list of numbers, 0 to 1 | evenly spaced | Where each keyframe sits. One per keyframe. |
+| `stagger` | seconds, or a table | none | Offsets for many targets. See [Stagger](#stagger). |
+
+For `duration`, `delay`, `repeatDelay` and `timeScale`, NaN or an infinite number is an error. Booleans also take a number: 0 is `false`, anything else is `true`.
+
+### Overwrite and rendering
+
+| Option | Takes | Default | What it does |
+| --- | --- | --- | --- |
+| `overwrite` | `true`, `false`, `"auto"`, `"all"`, `"none"` | `"auto"` | When this motion starts, it takes over any property another motion is driving on the same node. That other motion stops driving it, fires `onInterrupt`, and hands its velocity to a spring or inertia that takes over. `false` or `"none"` lets both run. `true` and `"all"` work like `"auto"`. |
+| `immediateRender` | boolean | `false` (`true` for `from` and `fromTo`) | Show the start values now, before the delay ends. |
+
+### Physics
+
+These options matter when `type` is `"spring"` or `"inertia"`. See [Springs and inertia](#springs-and-inertia).
+
+| Option | Takes | Default | What it does |
+| --- | --- | --- | --- |
+| `type` | `"tween"`, `"keyframes"`, `"spring"`, `"inertia"`, `"decay"` | `"tween"` | How the value moves. `"keyframes"` is `"tween"`; `"decay"` is `"inertia"`. |
+| `stiffness` | number | 100 (Motion: 500) | Spring strength. |
+| `damping` | number | 10 (Motion: 25) | Spring friction. |
+| `mass` | number | 1 | Spring mass. |
+| `velocity` | units per second | 0, or the velocity handed over | Start speed of a spring or inertia. |
+| `bounce` | 0 to 1 | 0.25 | How bouncy, with `visualDuration` or `duration`. |
+| `visualDuration` | seconds | none | The time the spring looks like it takes. |
+| `restDelta` | number | Motion's default for the distance (inertia: 0.5) | Settled when this close to the end. |
+| `restSpeed` | units per second | Motion's default for the distance (Motion flavor: 10) | Settled when slower than this. |
+| `power` | number | 0.8 | Inertia: how far the velocity carries. |
+| `timeConstant` | seconds | 0.325 | Inertia: how fast it slows. |
+| `min`, `max` | numbers | no bounds | Inertia bounds, in `motion.animate` and timeline defaults. In `gsap.to`, `min` and `max` are a slider's properties instead. |
+| `bounceStiffness` | number | 500 | Inertia: the spring at a bound. |
+| `bounceDamping` | number | 10 | Inertia: the spring at a bound. |
+
+### Callbacks
+
+| Option | Fires |
+| --- | --- |
+| `onStart` | When the motion starts playing. |
+| `onUpdate` | Every frame it changes its values. |
+| `onComplete` | When it reaches its end. |
+| `onRepeat` | Each time a repeat begins. |
+| `onReverseComplete` | When it plays backwards back to its start. |
+| `onInterrupt` | When another motion takes over one of its properties (see `overwrite`). |
+
+A callback is a Lua function and gets no arguments. Read the node inside it if you need the value:
+
+```lua
+gsap.to(volume, {value = 100, duration = 1,
+  onUpdate = function() label:set("text", string.format("%.0f", volume:get("value"))) end,
+  onComplete = function() print("done") end})
+```
+
+An error inside a callback doesn't stop the animation. BUI prints it as `bui: callback error: ...` to stderr.
+
+Callbacks go in the vars of a motion (`gsap.to`, `gsap.timeline`, the transition of `motion.animate`), not in a timeline's `defaults`. A callback lives exactly as long as its motion. You don't have to keep the handle: a tween whose handle is collected plays on, and lets go of its callbacks when it ends.
+
+### Stagger
+
+`stagger` (or a table in `delay`) spreads the start times of many targets. A number is the time between one target and the next. A table takes:
+
+| Key | Takes | Default | What it does |
+| --- | --- | --- | --- |
+| `each` | seconds | 0 | Time between one target and the next. |
+| `amount` | seconds | none | Total time to spread over all targets, instead of `each`. |
+| `from` | `"start"`, `"center"`, `"end"`, `"edges"`, `"random"`, `"first"`, `"last"`, or an index | `"start"` | Where the wave starts. `"first"` is `"start"` and `"last"` is `"end"`. An index counts from 0 (the first node is 0). `"random"` is the same order on every run. |
+| `grid` | `{rows, columns}` | a line | Treat the targets as a grid, filled row by row. `"auto"` is not supported. |
+| `axis` | `"x"` or `"y"` | both | In a grid, measure the distance along one axis. |
+| `ease` | ease | `"none"` | Shape the spread of the start times. |
+
+```lua
+gsap.to(cells, {value = 1, stagger = {amount = 0.6, grid = {4, 4}, from = "center"}})
+```
+
+## Timelines
+
+A **timeline** holds motions placed at times. Moving the timeline moves everything on it, so one handle can pause, seek or reverse a whole sequence.
+
+### gsap.timeline
+
+```lua
+gsap.timeline([vars]) --> timeline
+```
+
+`vars` may hold only `delay`, `repeat`, `repeatDelay`, `yoyo`, `timeScale`, `paused`, `reversed`, the callbacks, and `defaults`. Anything else is an error that tells you to put it in `defaults`.
+
+`defaults` is a table of options every tween added with `tl:to`, `tl:from`, `tl:fromTo` and `tl:set` starts from. A tween's own vars win. `defaults` holds options only: no properties, callbacks, `stagger`, `times` or stagger `delay`.
+
+```lua
+local tl = gsap.timeline({defaults = {duration = 0.5, ease = "none"}, repeat_ = 1, yoyo = true})
+```
+
+A timeline starts playing at once, like a tween. Tweens added later play on it from their place.
+
+### tl:to, tl:from, tl:fromTo, tl:set
+
+```lua
+tl:to(targets, vars [, position])              --> tl
+tl:from(targets, vars [, position])            --> tl
+tl:fromTo(targets, fromVars, toVars [, position]) --> tl
+tl:set(targets, vars [, position])             --> tl
+```
+
+The same as the `gsap` functions, but the tween goes on the timeline at `position` (the end when you leave it out). They return the timeline, so calls chain:
+
+```lua
+tl:to(a, {value = 100})
+  :to(b, {value = 100}, "<0.2")
+  :addLabel("mid")
+  :to(c, {value = 50}, "mid+=0.25")
+```
+
+### tl:add
+
+```lua
+tl:add(motion [, position]) --> tl
+```
+
+Places a tween or timeline handle you already have. It leaves wherever it was playing before. A timeline can't hold itself.
+
+```lua
+local intro = gsap.timeline():to(a, {value = 100})
+local main = gsap.timeline():add(intro):to(b, {value = 100})
+```
+
+### tl:addLabel and tl:labelTime
+
+```lua
+tl:addLabel(name [, position]) --> tl
+tl:labelTime(name) --> seconds, or nil
+```
+
+A label is a named time on the timeline (the end when you leave out `position`). Positions can then use it: `"mid"`, `"mid+=0.5"`. `labelTime` returns where it is, or `nil` when there is no such label.
+
+### tl:call
+
+```lua
+tl:call(fn [, position])         --> tl
+tl:call(fn, params [, position]) --> tl
+```
+
+Calls `fn` when the timeline's playhead reaches `position`. `params` is a list whose items become the arguments: `tl:call(print, {"halfway"}, "mid")` prints `halfway`. The timeline owns `fn` and lets go of it when the timeline is freed.
+
+### The position parameter
+
+| Position | Where the motion goes |
+| --- | --- |
+| nothing, or `nil` | At the end of the timeline. |
+| `1.5` or `"1.5"` | At 1.5 seconds. A negative number is 0. |
+| `"+=0.5"`, `"-=0.5"` | 0.5 seconds after or before the end. |
+| `"<"`, `">"` | At the start or end of the last motion added. |
+| `"<0.2"`, `">-0.1"`, `"<+=0.2"` | Offset from the start or end of the last motion added. |
+| `"label"`, `"label+=1"`, `"label-=1"` | At a label, or offset from it. A label that doesn't exist yet is made at the end of the timeline. |
+| `"50%"` | Half way through the timeline. |
+| `"+=25%"`, `"<50%"` | A share of the last added motion's duration. |
+
+A new label name starts with a letter or `_`, then letters, digits, `_`, `.` or `-`. Anything else (`"<=1"`, `"a b"`, `"0x10"`) is an error, `bad position '...'`, and changes nothing.
+
+## Controls on every handle
+
+Every tween and timeline handle has these methods. Setters return the handle, so they chain: `t:seek(0.5):pause()`. Getters return a value.
+
+| Method | What it does |
+| --- | --- |
+| `m:play()` | Plays forwards from where it is. Also un-reverses it. |
+| `m:pause()` | Stops where it is. |
+| `m:resume()` | Plays on from where it was paused, in the same direction. |
+| `m:reverse()` | Flips the direction and plays. |
+| `m:restart()` | Goes back to the start and plays forwards. |
+| `m:seek(seconds)` | Jumps to a time, counting repeats from the start, clamped to `0 .. totalDuration()`. It stays paused or playing as it was. |
+| `m:progress()` / `m:progress(p)` | Where it is in the current play, 0 to 1. Setting it jumps there (clamped to 0 .. 1). |
+| `m:totalProgress()` / `m:totalProgress(p)` | The same, counting every repeat. |
+| `m:time()` / `m:time(seconds)` | The time in the current play. Setting it is `seek`. |
+| `m:timeScale()` / `m:timeScale(scale)` | The speed. Setting 0 or less changes nothing. |
+| `m:speed()` / `m:speed(scale)` | Another name for `timeScale`. |
+| `m:duration()` | Seconds of one play. |
+| `m:totalDuration()` | Seconds with every repeat and repeat delay. Forever is a huge number. |
+| `m:paused()` / `m:paused(bool)` | Whether it is paused. `true` pauses, `false` resumes. |
+| `m:reversed()` / `m:reversed(bool)` | Whether it plays backwards. Setting it reverses only when the direction changes. |
+| `m:isActive()` | Whether it is playing now. |
+| `m:complete()` | Jumps to the end and pauses. A forever repeat jumps to the end of one play. |
+| `m:kill()` | Stops it where it is and takes it off its timeline. A killed motion stays killed: `play`, `resume`, `reverse` and the seeks do nothing to it. |
+| `m:stop()` | Another name for `kill`. |
+
+A time, progress or scale that is NaN or infinite is an error, and nothing changes.
+
+```lua
+local t = gsap.to(volume, {value = 90, duration = 1, ease = "none"})
+t:pause()
+t:progress(0.5)       -- value is 50
+t:timeScale(2):play() -- twice as fast from here
+print(t:duration(), t:isActive())
+```
 
 ## Motion
+
+### motion.animate
+
+```lua
+motion.animate(targets, keyframes [, transition]) --> handle
+```
+
+`keyframes` holds only properties: a value or a list of keyframes each. `transition` holds the [options](#options) and callbacks. Unknown keys in either table are errors. The handle has the same [controls](#controls-on-every-handle) as a tween.
 
 ```lua
 motion.animate(items, {value = 1}, {duration = 1, ease = "linear",
                                     delay = motion.stagger(0.25, {from = "last"})})
-motion.animate(slider, {value = {0, 100, 40}}, {duration = 1, times = {0, 0.3, 1}})   -- keyframes
+motion.animate(slider, {value = {0, 100, 40}}, {duration = 1, times = {0, 0.3, 1}})
 motion.animate(slider, {value = 75}, {type = "spring", bounce = 0.25, visualDuration = 0.5})
 ```
 
-Not built in Lua: animation sequences, motion values, `<motion.div>`-style props, `gsap.quickTo`, `context`, `matchMedia` and the plugins (`ScrollTrigger`, `Flip`, `Draggable`, `Observer`). [The full status table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point).
+### Motion defaults
 
-## Springs and eases
+`motion.animate` starts from Motion's defaults, not GSAP's:
 
-`type = "spring"` is a real spring. The engine solves the damped spring equation in closed form, for the underdamped, critically damped and overdamped cases, so a frame reads the value at its time and the frame rate doesn't change the result. Interrupt a spring and the next motion starts from its position and velocity. Give `stiffness`, `damping`, `mass` and `velocity`, or `bounce` with `visualDuration`. `type = "inertia"` decays from a velocity (`power`, `timeConstant`, `min`, `max`).
+| What you give | Duration | Ease |
+| --- | --- | --- |
+| One value, no `type` or `duration` | 0.3 s | `{0.25, 0.1, 0.35, 1}` (a cubic bezier) |
+| One value, with a `type` or `duration` | 0.3 s, or yours | `"easeInOut"` |
+| Keyframes | 0.8 s, or yours | `"easeInOut"` |
+| `type = "spring"` with no `stiffness`, `damping`, `duration` or `visualDuration` | worked out | stiffness 500, damping 25, restSpeed 10 |
 
-Every ease of GSAP, Motion, CSS and Blender works by name (`"none"`, `"power2.out"`, `"elastic.out(1, 0.3)"`, `"back.out(1.7)"`, `"steps(4)"`, `"easeInOut"`, `"cubic-bezier(...)"`), or give `{x1, y1, x2, y2}`. `gsap.registerEase(name, curve)` names your own.
+Your own `duration` and `ease` always win.
 
-Mistakes fail where you make them: an unknown ease, property or option, a value of the wrong kind, or a freed node is a Lua error that names it.
+### motion.stagger
+
+```lua
+motion.stagger(each [, options]) --> table
+```
+
+Returns a stagger table for a transition's `delay`: `{each = each}` plus your options. The options are the [stagger keys](#stagger): `from` (also `"first"` and `"last"`), `ease`, `amount`, `grid`, `axis`. `startDelay` is an error: give the transition a `delay` instead. The other keys are checked when `motion.animate` reads the table.
+
+## Springs and inertia
+
+`type = "spring"` is a real spring. The engine solves the damped spring equation in closed form, for the underdamped, critically damped and overdamped cases, so a frame reads the value at its time and the frame rate doesn't change the result. Interrupt a spring and the next motion starts from its position and velocity.
+
+You set a spring in one of three ways. The first that fits wins:
+
+1. **`visualDuration`**, with `bounce` (0.25 if you leave it out): how long it looks like it takes, and how bouncy.
+2. **`duration` without `stiffness`**, with `bounce` (0.25), `velocity` and `mass`: the spring that settles in that time.
+3. **Otherwise**, the default spring: stiffness 100, damping 10, mass 1 for `gsap`; stiffness 500, damping 25 for `motion.animate` when you give neither.
+
+After that, any `stiffness`, `damping`, `mass`, `velocity`, `restDelta` or `restSpeed` you give replaces the computed one. A spring lasts until it settles, at most 20 seconds, and that is its `duration()` on a timeline.
+
+```lua
+gsap.to(volume, {value = 75, type = "spring", stiffness = 300, damping = 20})
+motion.animate(bar, {factor = 1}, {type = "spring", duration = 0.6, bounce = 0.4})
+```
+
+`type = "inertia"` (or `"decay"`) moves a value with a `velocity` and slows it down. It ends about `power × velocity` past where it started, slowing with `timeConstant`. With `min` or `max`, it springs back at the bound with `bounceStiffness` and `bounceDamping`. Give bounds in `motion.animate`, where `min` and `max` are options:
+
+```lua
+motion.animate(slider, {value = 0}, {type = "inertia", velocity = 200, min = 0, max = 100})
+```
+
+## Eases
+
+An **ease** shapes how a value moves between its start and end. Give one by name or as `{x1, y1, x2, y2}`, a cubic bezier. Names ignore case. An unknown name is an error: `unknown ease 'power2.sideways'`.
+
+| Family | Names |
+| --- | --- |
+| GSAP | `none`, `power0` to `power4`, `quad`, `cubic`, `quart`, `quint`, `strong`, `sine`, `expo`, `circ`, `back(overshoot)`, `elastic(amplitude, period)`, `bounce`, each with `.in`, `.out` or `.inOut` (alone it is `.out`); the older `Power2.easeOut` and `.config(...)` forms; `steps(n)`, `slow(ratio, power, yoyo)`, `rough(...)`, `expoScale(start, end, ease)`, `wiggle(n, type)`, `customBounce(strength)` |
+| Motion | `linear`, `easeIn`, `easeOut`, `easeInOut`, `circIn`, `circOut`, `circInOut`, `backIn`, `backOut`, `backInOut`, `anticipate` |
+| CSS | `ease`, `ease-in`, `ease-out`, `ease-in-out`, `step-start`, `step-end`, `steps(n, jump-start)` (also `jump-end`, `jump-none`, `jump-both`, `start`, `end`), `cubic-bezier(x1, y1, x2, y2)`, `linear(0, 0.25 75%, 1)` |
+| Blender | `constant`, `linear`, `bezier` (Blender's default keyframe ease), and its easing types (`sine` to `elastic`) with `.in`, `.out` or `.inOut` |
+| Yours | Any name given to `gsap.registerEase` |
+
+### gsap.parseEase
+
+```lua
+gsap.parseEase(ease) --> function(t) --> number
+```
+
+Reads an ease once and returns a function that gives its value at `t` (0 to 1; outside that, the curve goes on). Use it to draw a curve or check one:
+
+```lua
+local e = gsap.parseEase("power1.out")
+print(e(0.5))                                 --> 0.75
+print(gsap.parseEase({0.42, 0, 0.58, 1})(0.5)) --> 0.5
+```
+
+### gsap.registerEase
+
+```lua
+gsap.registerEase(name, ease)
+```
+
+Gives an ease a name that every call can use from then on. `ease` is a name or `{x1, y1, x2, y2}`.
+
+```lua
+gsap.registerEase("snappy", {0.2, 0.8, 0.4, 1})
+gsap.to(volume, {value = 100, ease = "snappy"})
+```
+
+## The rest of gsap
+
+### gsap.delayedCall
+
+```lua
+gsap.delayedCall(delay, fn [, params]) --> handle
+```
+
+Calls `fn` after `delay` seconds, with the items of `params` as its arguments. The handle has the [controls](#controls-on-every-handle), so `:kill()` cancels the call and `:pause()` holds it.
+
+```lua
+local later = gsap.delayedCall(1, print, {"one second"})
+```
+
+### gsap.killTweensOf
+
+```lua
+gsap.killTweensOf(targets [, properties])
+```
+
+Stops every motion of the targets where it is. With `properties`, a string of names separated by commas or spaces (`"value, color"`), only those properties stop; the rest of each tween plays on. Killing doesn't fire `onInterrupt`.
+
+```lua
+gsap.killTweensOf(volume, "value")
+```
+
+### gsap.globalTimeScale
+
+```lua
+gsap.globalTimeScale(scale)
+```
+
+Sets the speed of every motion at once: 0.5 is half speed. 0, a negative number or NaN changes nothing. There is no getter.
+
+### gsap.available
+
+`gsap.available` is `true` when this build has the animation engine. In a build without it, every function of `bui.gsap`, `bui.gsap.ticker` and `bui.motion` is an error that says so, never a silent no-op:
+
+```lua
+if not bui.gsap.available then print("no animation in this build") end
+```
+
+## The clock
+
+The kit ticks every animation in its frames, and draws frames only while something moves. You don't call anything. These functions are for a host that keeps its own clock, and for tests.
+
+| Function | What it does |
+| --- | --- |
+| `gsap.ticker.useHostClock(on)` | `true`: the kit's frames stop ticking animations, and you call `tick`. `false` (the default): the kit ticks. |
+| `gsap.ticker.tick(now)` | Moves every motion to `now`, in seconds from any starting point, always increasing. Returns whether anything still animates. The same `now` twice does nothing. |
+| `gsap.ticker.lagSmoothing(threshold [, adjusted])` | A frame later than `threshold` seconds counts as `adjusted` seconds (0.033 if you leave it out), so a stall doesn't jump animations to their end. The default is 0.5 and 0.033. `0` turns it off. |
+
+### Reduced motion
+
+`bui.set_animations(false)` turns on reduced motion, as the system setting does. Every number other than `value` (`width`, `padding`, `factor`, ...) jumps to its end. `value` and colors still animate. `bui.set_animations(true)` turns it off.
 
 ## Testing animations
 
 The engine's clock is yours in a test. Turn on the host clock, then move time by hand:
 
-```lua
+```lua title="test_volume.lua"
+local bui = require("bui")
+local gsap = bui.gsap
+
 gsap.ticker.useHostClock(true)
 gsap.ticker.lagSmoothing(0)
 local now = 100.0
 local function step(s) now = now + s; gsap.ticker.tick(now) end
 
+local volume = bui.Node("slider")
+volume:set("min", 0); volume:set("max", 100); volume:set("value", 10)
 step(0)
-local t = gsap.to(volume, {value = 90, duration = 1, ease = "none"})
+gsap.to(volume, {value = 90, duration = 1, ease = "none"})
 step(0.5)
 assert(math.abs(volume:get("value") - 50) < 1e-3)
 ```
 
-`bindings/lua/tests/test_anim.lua` covers tweens, timelines, springs, callbacks and the errors at the call this way.
+Turn off lag smoothing so a big step isn't shortened. `bindings/lua/tests/test_anim.lua` covers tweens, timelines, springs, callbacks, positions and the errors at the call this way.
+
+## Errors
+
+Mistakes fail where you make them, as a Lua error that names the call and the problem. You can catch them with `pcall`. Some you will meet:
+
+| Error | Cause |
+| --- | --- |
+| `gsap.to: unknown ease 'power2.sideways'` | A name that isn't an ease. |
+| `gsap.to: a slider has no property 'valeu' to animate` | A typo, or a property the widget doesn't have. |
+| `gsap.to: kit widgets have no transforms or opacity ('x'); ...` | `x`, `y`, `scale`, `rotate`, `opacity` and their kin. |
+| `gsap.to: 'value' takes a number, not '#ff0000'` | A value of the wrong kind. |
+| `gsap.to: nothing to animate (no properties in the vars)` | Options with no property. |
+| `gsap.to: no targets` | An empty list. |
+| `gsap.to: attempt to animate a freed node` | A node after `node:free()`. |
+| `motion.animate: unknown option 'stiffnes'` | A typo in a transition. |
+| `motion.animate: 3 times for 2 keyframes` | `times` doesn't match the keyframes. |
+| `gsap.timeline: 'ease' doesn't go in a timeline's vars (put it in its defaults)` | A tween option on the timeline itself. |
+| `timeline: bad position '<=1' (...)` | A position outside the grammar above. |
+| `a time, progress or scale must be a finite number` | NaN or infinity given to a control. |
 
 ## Examples
 
-`examples/anim.lua` is a pump-driven loop with a progress bar, color cycling and a wave slider: `./bui-lua bindings/lua/examples/anim.lua`.
+`examples/anim.lua` is a pump-driven loop with a progress bar, color cycling and a wave slider. It sets each value by hand every frame, not with `bui.gsap`: `./bui-lua bindings/lua/examples/anim.lua`. For `bui.gsap` and `bui.motion` in use, read `bindings/lua/tests/test_anim.lua`.
 
 ## Limits
 
-- **Widgets** have no draw transform or opacity (see above).
-- **Callbacks** live in the registry for exactly as long as their motion; a tween whose handle is collected plays on and lets go of its callbacks when it is done.
-- **Numbers:** a NaN or infinite time is an error, a negative duration or delay is 0, and `repeat = -1` is forever (more than 1,000,000 is clamped); see [Numbers and positions](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#numbers-and-positions).
+- **Widgets** have no draw transform or opacity (see [Properties](#properties)).
+- **Size:** 16 properties and 64 keyframes per call.
+- **Numbers:** see [Numbers and positions](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#numbers-and-positions).
 - **Cost:** a frame that only animates skips rendering, the cascade and layout and repaints only what changed, and runs no Lua unless you gave a callback. It is not allocation-free: a callback costs an event per call.
+
+Need frames from a GIF or WebP instead? That's `bui.Anim`, in the [Lua overview](../overview/).
+
+## Not done yet
+
+<ComingSoon feature="The rest of GSAP and Motion in Lua">
+
+**GSAP**
+
+- `gsap.quickTo`, `gsap.context`, `gsap.matchMedia` and `gsap.utils`.
+- The plugins: `ScrollTrigger`, `Flip`, `Draggable` and `Observer`.
+- A custom ease from an SVG path or a list of points (GSAP's `CustomEase`). `gsap.registerEase` takes a name or four bezier numbers only.
+- A getter for `gsap.globalTimeScale`.
+
+**Motion**
+
+- Animation sequences: `motion.animate({ {a, {...}}, {b, {...}} })`.
+- Motion values, and the functions `scroll`, `inView`, `hover` and `press`.
+- Motion props on widgets (`initial`, `animate`, `exit`, `whileHover`, `variants`, `layout`).
+
+**Partly done**
+
+- **Units** are dropped: `"50%"` on a slider is 50, not half its range.
+- **Unknown names pass quietly:** any numeric `node:set` key is accepted, even one the widget doesn't have, such as `rows` on a slider. `gsap.killTweensOf` accepts property names that don't exist.
+- **Speeds of 0 or less** are ignored without an error, in `gsap.globalTimeScale`, `m:timeScale` and `timeScale` in vars.
+- **`onInterrupt`** doesn't fire for a call with several targets or a stagger.
+- **`tl:add`** of an ancestor timeline, or of a killed motion, does nothing and raises nothing.
+- **`gsap.delayedCall`** with a NaN delay raises an error that names `timeline:call`.
+
+The [status table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point) covers every language.
+
+</ComingSoon>
 
 ## Next steps
 
@@ -106,7 +606,7 @@ assert(math.abs(volume:get("value") - 50) < 1e-3)
   <Card title="Lua overview" href="docs/lua/overview/" icon="book" kicker="Lua">
     The bui-lua executable and every widget.
   </Card>
-  <Card title="Python animation" href="docs/python/animation/" icon="sliders" kicker="Python">
-    The same engine, with keyword arguments.
+  <Card title="Damage rendering" href="docs/concepts/damage-rendering/" icon="gauge" kicker="Concepts">
+    Why a frame that only animates redraws so little.
   </Card>
 </CardGrid>

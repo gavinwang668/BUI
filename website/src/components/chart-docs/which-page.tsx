@@ -1,4 +1,4 @@
-import { TriangleLine } from "./zigzag"
+import { PageHead } from "../addon/page-head"
 import { CardGrid, ChartCard } from "./chart-card"
 import { Hatch } from "./hatch"
 import { bySlug } from "@/data/charts/registry"
@@ -13,14 +13,11 @@ export const metadata = {
 export default function WhichPage() {
   return (
     <div className="charts-doc">
-      <header className="border-b border-border px-4 pb-8 pt-8 sm:px-8 md:pt-12">
-        <p className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-primary">Choosing</p>
-        <h1 className="text-4xl font-light uppercase tracking-tight text-balance md:text-6xl">Which chart to use?</h1>
+      <PageHead kicker="Choosing" title="Which chart to use?">
         <p className="mt-5 max-w-2xl text-lg text-pretty text-(--muted)">
           Do not start from the chart. Start from the sentence you want the reader to say out loud after looking at it. Find that sentence below, and every chart that can help is one click away.
         </p>
-        <TriangleLine className="mt-8 w-full max-w-md" height={14} peakWidth={20} strokeWidth={2} />
-      </header>
+      </PageHead>
 
       <nav aria-label="Questions" className="flex flex-wrap gap-2 border-b border-border p-4 sm:px-8">
         {intents.map((intent) => (
@@ -35,7 +32,7 @@ export default function WhichPage() {
       </nav>
 
       {intents.map((intent, index) => (
-        <section key={intent.id} id={intent.id} className="scroll-mt-20">
+        <section key={intent.id} id={intent.id} className="scroll-mt-28">
           <div className="border-b border-border px-4 py-8 sm:px-8">
             <p className="tabular mb-2 text-xs font-semibold uppercase tracking-[0.16em] text-primary">{String(index + 1).padStart(2, "0")}</p>
             <h2 className="text-2xl font-medium tracking-tight text-balance md:text-3xl">{intent.question}</h2>

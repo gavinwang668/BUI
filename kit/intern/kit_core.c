@@ -3250,7 +3250,13 @@ static int in_BK_key(BKContext *ctx, const char *text, const char *keysym, int m
   snprintf(ctx->key_held, sizeof(ctx->key_held), "%s", e.keysym);
   ctx->interaction++;
   ctx->key_taken = 0;
-  for (BKNode *n = ctx->focus ? ctx->focus : ctx->hover; n; n = n->parent) {
+  /* from the hovered widget, or over none from what is under the pointer (Blender: the region
+   * under the cursor), also when a rebuild took the hovered widget away before a move */
+  BKNode *start = ctx->hover;
+  if (!start && ctx->root && ctx->pointer_y >= ctx->header_h) {
+    start = deepest(ctx->root, ctx->pointer_x, ctx->pointer_y);
+  }
+  for (BKNode *n = ctx->focus ? ctx->focus : start; n; n = n->parent) {
     if (n->flags & NF_EVENTS) { /* Tk/Qt key bindings see the key first */
       bk_event(n, BK_EV_KEY, mods, &e);
       break;
@@ -3289,10 +3295,6 @@ static int in_BK_key(BKContext *ctx, const char *text, const char *keysym, int m
   }
   /* bubble up to a handler: from the hovered widget, or over none from what is under the pointer
    * (Blender's region and area keymaps: Ctrl+Space anywhere in an editor) */
-  BKNode *start = ctx->hover;
-  if (!start && ctx->root && ctx->pointer_y >= ctx->header_h) {
-    start = deepest(ctx->root, ctx->pointer_x, ctx->pointer_y);
-  }
   for (BKNode *n = start; n; n = n->parent) {
     if (!NODE_ENABLED(n)) {
       continue;

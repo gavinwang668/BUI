@@ -26,9 +26,9 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[3]
 DEST = ROOT / "bindings" / "rust" / "blenderui-sys" / "csrc"  # --dest moves it
-# a11y/include: the C ABI of bui-a11y, which the kit includes with `a11y` (the crate itself is a
+# platform/a11y/include: the C ABI of bui-a11y, which the kit includes with `a11y` (the crate itself is a
 # dependency of blenderui-sys, published on its own)
-DIRS = ["core", "types", "gpu", "compat", "kit", "api", "bindings/imgui", "platform/wasm", "a11y/include"]
+DIRS = ["core", "types", "gpu", "compat", "kit", "api", "bindings/imgui", "platform/wasm", "platform/a11y/include"]
 FILES = ["CMakeLists.txt", "features.json", "features.cmake", "LICENSE", "bindings/python/bui/_version.py", "ui/CMakeLists.txt"]
 # relative directories (from ROOT) never needed by the crate's CMake configuration
 SKIP_DIRS = {"core/tests", "gpu/tests", "bindings/imgui/gen"}
