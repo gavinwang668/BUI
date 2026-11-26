@@ -414,8 +414,8 @@ theme.
 ## 7. Install
 
 **The `bui` command (any language).** One line installs it, and `bui new` makes a project in
-Rust, JavaScript or TypeScript (React, Svelte or plain DOM), Python, Lua or C, with that
-language's lints, checking its tools first and installing the newest BUI with its own package
+Rust, JavaScript or TypeScript (React, Svelte, Vue or plain DOM), Python, Lua, C, D, C#, Go or
+Ruby, with that language's lints, checking its tools first and installing the newest BUI with its own package
 manager:
 
 ```sh

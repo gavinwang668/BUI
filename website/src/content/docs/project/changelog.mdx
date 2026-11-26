@@ -77,7 +77,7 @@ More ways to write your UI.
 - **Lua follows the kit.** Custom nodes get their callbacks (`on_event`, `on_frame`, `on_draw`, `on_free`), canvas items take images and effects, and areas split, join, dock and swap from Lua and D too.
 - **Rust conditionals.** An `Option` is an element: `None` draws nothing and `Some(x)` draws `x`, so `{ cond.then(|| <p>"hi"</p>) }` replaces an empty placeholder.
 - **Rust props as a struct.** `#[component] fn chat(ChatProps { title, .. }: ChatProps)` uses a `#[derive(Props)]` struct, optional props take an `Option` (`x={None}` leaves the prop out), and a missing required prop is reported on its tag (`<Card />`) instead of on the whole `rsx!`.
-- **The `bui` command.** `bui new` and `bui init` ask what to write in (Rust, JavaScript or TypeScript with React, Svelte or plain DOM, Python, Lua, C), check that the language's tools are installed, and write a project with that language's lints and formatter.
+- **The `bui` command.** `bui new` and `bui init` ask what to write in (Rust, JavaScript or TypeScript with React, Svelte, Vue or plain DOM, Python, Lua, C, D, C#, Go or Ruby), check that the language's tools are installed, install the newest BUI with the language's own package manager, and write a project with that language's lints and formatter. See [The bui command](../../start/bui-command/).
 - **Editor extensions** for `rsx!` in VS Code and Zed. See [Editor support](../../rust/editor-support/).
 
 ### Platforms and the desktop
