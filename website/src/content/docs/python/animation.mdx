@@ -786,7 +786,41 @@ These functions are in `buipy`, the C extension under `bui`:
 - **Numbers:** a NaN or infinite time raises, a negative duration or delay is 0, and `repeat=-1` is forever (more than 1,000,000 is clamped); see [Numbers and positions](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#numbers-and-positions).
 - **Cost:** a frame that only animates skips rendering, the cascade and layout and repaints only what changed, and runs no Python unless you gave a callback. It is not allocation-free: a callback costs an event per call.
 - **Callbacks** are held for exactly as long as their motion and released when it ends. A tween whose handle you drop still plays to the end.
-- **Not in Python yet:** motion values, `await` on a tween, `gsap.context`, `gsap.utils`, `ScrollTrigger`, `Flip`, `Draggable`, and Motion's `scroll`, `in_view`, `hover` and `press`.
+
+## Not done yet
+
+<ComingSoon feature="The rest of GSAP, Motion and Qt animation in Python">
+
+**GSAP**
+
+- `await` on a tween, and `then`.
+- `gsap.ticker`, `gsap.context`, `gsap.matchMedia` and `gsap.utils`.
+- The plugins: `ScrollTrigger`, `Flip`, `Draggable` and `Observer`.
+- `overwrite="all"`: accepted, but it works like `"auto"`. It takes over the same properties, not every motion on the target.
+
+**Motion**
+
+- Motion values (`motion_value`, `use_spring`, `use_transform`).
+- The functions `scroll`, `in_view`, `hover` and `press`.
+- `motion.stagger(start=...)` other than 0 raises `NotImplementedError`.
+- `AnimationControls.cancel()` stops where the motion is, like `stop()`. Motion's `cancel()` puts the value back where it started.
+
+**Components**
+
+- The props `exit`, `while_hover`, `while_tap`, `while_focus`, `while_drag`, `while_in_view`, `variants` and `layout` raise `NotImplementedError`.
+
+**Qt**
+
+- `QEasingCurve.BezierSpline` and `TCBSpline` raise `NotImplementedError`. There is no `addCubicBezierSegment` or `addTCBSegment`.
+- `currentLoop()` and the `currentLoopChanged` signal.
+- `start(DeleteWhenStopped)` ignores the policy.
+- `amplitude` shapes only the elastic curves. Qt also uses it for the bounce curves.
+- `setDirection` on a running animation takes effect at the next `start()`.
+- `QAnimationGroup.clear()` takes the animations out but doesn't delete them.
+
+The [status table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point) covers every language.
+
+</ComingSoon>
 
 ## Next steps
 

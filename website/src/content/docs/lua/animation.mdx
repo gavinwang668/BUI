@@ -564,13 +564,41 @@ Mistakes fail where you make them, as a Lua error that names the call and the pr
 ## Limits
 
 - **Widgets** have no draw transform or opacity (see [Properties](#properties)).
-- **Units** are dropped: kit values are plain numbers.
-- **Not built in Lua:** animation sequences, motion values, `gsap.quickTo`, `gsap.context`, `matchMedia`, `utils`, and the plugins (`ScrollTrigger`, `Flip`, `Draggable`, `Observer`). [The full status table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point).
 - **Size:** 16 properties and 64 keyframes per call.
 - **Numbers:** see [Numbers and positions](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#numbers-and-positions).
 - **Cost:** a frame that only animates skips rendering, the cascade and layout and repaints only what changed, and runs no Lua unless you gave a callback. It is not allocation-free: a callback costs an event per call.
 
 Need frames from a GIF or WebP instead? That's `bui.Anim`, in the [Lua overview](../overview/).
+
+## Not done yet
+
+<ComingSoon feature="The rest of GSAP and Motion in Lua">
+
+**GSAP**
+
+- `gsap.quickTo`, `gsap.context`, `gsap.matchMedia` and `gsap.utils`.
+- The plugins: `ScrollTrigger`, `Flip`, `Draggable` and `Observer`.
+- A custom ease from an SVG path or a list of points (GSAP's `CustomEase`). `gsap.registerEase` takes a name or four bezier numbers only.
+- A getter for `gsap.globalTimeScale`.
+
+**Motion**
+
+- Animation sequences: `motion.animate({ {a, {...}}, {b, {...}} })`.
+- Motion values, and the functions `scroll`, `inView`, `hover` and `press`.
+- Motion props on widgets (`initial`, `animate`, `exit`, `whileHover`, `variants`, `layout`).
+
+**Partly done**
+
+- **Units** are dropped: `"50%"` on a slider is 50, not half its range.
+- **Unknown names pass quietly:** any numeric `node:set` key is accepted, even one the widget doesn't have, such as `rows` on a slider. `gsap.killTweensOf` accepts property names that don't exist.
+- **Speeds of 0 or less** are ignored without an error, in `gsap.globalTimeScale`, `m:timeScale` and `timeScale` in vars.
+- **`onInterrupt`** doesn't fire for a call with several targets or a stagger.
+- **`tl:add`** of an ancestor timeline, or of a killed motion, does nothing and raises nothing.
+- **`gsap.delayedCall`** with a NaN delay raises an error that names `timeline:call`.
+
+The [status table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point) covers every language.
+
+</ComingSoon>
 
 ## Next steps
 

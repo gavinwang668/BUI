@@ -646,10 +646,46 @@ React and Svelte: `bindings/react/test/motion.test.js` and `bindings/svelte/test
 ## Limits
 
 - **Widgets:** a Blender widget has no draw transform or opacity; `x`, `y`, `scale`, `rotate` and `opacity` apply to HTML elements. A widget animates its own values.
-- **QuickJS:** `bui build` without `--bun` runs on QuickJS, which has no animation commands yet: `gsap`, `animate` and `el.animate` throw an error that says so. Node and Bun have them.
-- **Typos:** a key that isn't an option is taken as a property to animate, and an unknown ease is linear. Neither throws.
-- **Not built:** `gsap.quickTo`, `killTweensOf`, `context`, `matchMedia`, `utils`, `ScrollTrigger`, `Flip`, `Draggable`, `Observer`, Motion's `spring`, `scroll`, `inView`, `hover`, `press`, `mix`, `frame`, animation sequences, `stagger` options, and in React `useVelocity`, `useScroll`, `useInView`, `useAnimate`, `useAnimationFrame`, `useReducedMotion`, `useDragControls`, `LayoutGroup`, `MotionConfig` and `layoutId`. [The full table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point).
 - **Cost:** a frame that only animates skips rendering, the cascade and layout and repaints only what changed. It is not allocation-free: each call hands its values over once, and a callback such as `onUpdate` costs an event per frame it runs.
+
+## Not done yet
+
+<ComingSoon feature="The rest of GSAP and Motion in JavaScript">
+
+**GSAP**
+
+- `gsap.quickTo`, `gsap.killTweensOf`, `gsap.context`, `gsap.matchMedia` and `gsap.utils`.
+- The plugins: `ScrollTrigger`, `Flip`, `Draggable` and `Observer`.
+- Stagger options: a stagger object takes only `each`. `from`, `amount`, `grid`, `axis` and `ease` throw.
+
+**Motion**
+
+- The functions `spring`, `scroll`, `inView`, `hover`, `press`, `mix` and `frame`. `transform` exists only in `@blender-ui/react/motion`.
+- Animation sequences: `animate([[a, {...}], [b, {...}]])`.
+- Options to `stagger(each, options)`. It throws a `TypeError` if you pass any.
+
+**React, Svelte and Vue**
+
+- The hooks `useVelocity`, `useScroll`, `useInView`, `useAnimate`, `useAnimationFrame`, `useReducedMotion` and `useDragControls`.
+- `LayoutGroup`, `MotionConfig`, `layoutId`, and `mode` on `AnimatePresence`.
+- Svelte's `use:motion` and its `tweened` and `spring` stores. Vue's `<Motion>`.
+
+**Runtimes**
+
+- QuickJS: `bui build` without `--bun` runs on QuickJS, which has no animation commands yet. `gsap`, `animate` and `el.animate` throw an error that says so. Node and Bun have them.
+
+**Partly done**
+
+- **Typos:** a key that isn't an option is taken as a property to animate, and an unknown ease is linear. Neither throws.
+- **Late checks:** `el.setMotion` checks only times and repeats when you call it. A bad value such as `drag: 'diagonal'` throws later, from `win.flush()`.
+- **Promises:** a tween you `kill()`, or controls you `stop()` or `cancel()`, never complete. `await t`, `await c` and `c.finished` wait forever.
+- **Web Animations:** `fill` is ignored, and values always stay at the end as with `'forwards'`. `pending` is always `false`. A nonzero `endDelay` throws. `iterationStart`, `id` and the other options not listed above are ignored.
+- **View transitions:** the promises from `startViewTransition` resolve when the update is committed, not when the animation ends. `skipTransition()` does nothing.
+- **Types:** `MotionProps` has no `style`, though `setMotion('style', ...)` works.
+
+The [status table](https://github.com/ppmpreetham/BUI/blob/main/docs/animation-api.md#status-of-each-entry-point) covers every language.
+
+</ComingSoon>
 
 ## Next steps
 
