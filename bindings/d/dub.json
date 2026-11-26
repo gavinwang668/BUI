@@ -1,6 +1,6 @@
 {
     "name": "blenderui",
-    "version": "0.5.1",
+    "version": "0.6.0",
     "description": "Blender's interface as a retained-mode D UI toolkit: a C kit with idiomatic D wrappers",
     "homepage": "https://bui.preetham.top",
     "repository": "https://github.com/ppmpreetham/BUI",

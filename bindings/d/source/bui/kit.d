@@ -13,9 +13,9 @@ import core.stdc.stdint : uint64_t;
 
 /* ---- version ------------------------------------------------------------- */
 enum BUI_KIT_VERSION_MAJOR = 0;
-enum BUI_KIT_VERSION_MINOR = 5;
-enum BUI_KIT_VERSION_PATCH = 1;
-enum BUI_KIT_VERSION_STRING = "0.5.1";
+enum BUI_KIT_VERSION_MINOR = 6;
+enum BUI_KIT_VERSION_PATCH = 0;
+enum BUI_KIT_VERSION_STRING = "0.6.0";
 enum BUI_KIT_VERSION =
     BUI_KIT_VERSION_MAJOR * 10000 + BUI_KIT_VERSION_MINOR * 100 + BUI_KIT_VERSION_PATCH;
 

@@ -2,5 +2,5 @@
 
 module BUI
   # The gem's version: BUI's release (tools/bump_version.py moves it with the others).
-  VERSION = "0.5.1"
+  VERSION = "0.6.0"
 end

@@ -64,7 +64,7 @@ imgui-blender-widgets = ["imgui"]
 
 [dependencies]
 # the kit's accessibility adapters (AccessKit); its C ABI links with the kit
-bui-a11y = { path = "../../../platform/a11y", version = "0.5.1", optional = true }
+bui-a11y = { path = "../../../platform/a11y", version = "0.6.0", optional = true }
 
 [build-dependencies]
 cmake = "0.1"

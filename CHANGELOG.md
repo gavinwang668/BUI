@@ -6,6 +6,8 @@ All notable changes to **blenderui** (BUI). The format follows
 
 ## [Unreleased]
 
+## [0.6.0] - 2026-11-26
+
 ### Added
 - **`precision` on number fields and sliders** (`.precision(2)`): the decimals shown, as a Blender property's precision. A field whose step turns fractional shows its decimals again (it kept none).
 - **`Window::text_field_focused()`** is public: keys typed into a Blender text field still reach page listeners (as in a browser), and this tells a shortcut to stand aside.

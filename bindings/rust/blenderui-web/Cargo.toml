@@ -14,8 +14,8 @@ include = ["src/**", "js/**", "README.md", "Cargo.toml"]
 
 [dependencies]
 # the kit features a page needs: no GPU renderers (the software raster draws), no file browser, no video
-blenderui = { path = "../blenderui", version = "0.5.1", default-features = false, features = ["png", "svg", "freetype", "anim"] }
-blenderui-sys = { path = "../blenderui-sys", version = "0.5.1", default-features = false }
+blenderui = { path = "../blenderui", version = "0.6.0", default-features = false, features = ["png", "svg", "freetype", "anim"] }
+blenderui-sys = { path = "../blenderui-sys", version = "0.6.0", default-features = false }
 
 [lints.rust]
 unsafe_op_in_unsafe_fn = "warn"
