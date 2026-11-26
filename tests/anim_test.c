@@ -475,6 +475,7 @@ static void test_timelines(void)
   BK_motion_release(lt);
   step(0.5);
   CHECK(NEAR(late.x, 50.0, 1e-3));
+  BK_motion_kill(empty); /* it plays on otherwise, into `late` once this frame has returned */
   BK_motion_release(empty);
   printf("timelines: positions, labels, calls, seeking, repeat, yoyo, events, stagger\n");
 }
