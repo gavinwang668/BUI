@@ -1,0 +1,422 @@
+---
+title: The Workspace entity
+sidebarLabel: Workspace
+description: Every option, view type rule, method and event of bui-panels' Workspace entity, the engine behind both the Rust API and the markup.
+group: Reference
+order: 20
+sources: ["addons/bui-panels/src/lib.rs", "addons/bui-panels/src/workspace.rs", "addons/bui-panels/src/features.rs", "addons/bui-panels/src/view.rs", "addons/bui-panels/src/nav.rs", "addons/bui-panels/src/render.rs", "addons/bui-panels/src/drag.rs", "addons/bui-panels/src/model/types.rs", "addons/bui-panels/examples/basic.rs", "addons/bui-panels/tests/panels.rs"]
+---
+
+`Workspace` is the engine. You make it with your view types and a set of options, then drive it from code: open views, close them, float them, hide them, listen for changes. The `<Workspace>` markup component makes one of these too, so everything on this page also describes what markup does underneath.
+
+Everything here is exported from the crate root (`bui_panels::Workspace`, `bui_panels::ViewType` ...). Navigation methods are on [Navigation and keys](../navigation/); the layout types are on [the layout document](../layout/).
+
+## Make a workspace
+
+```rust
+pub fn new(
+    options: WorkspaceOptions,
+    types: HashMap<String, ViewType>,
+    window: &mut Window,
+    cx: &mut Context<Workspace>,
+) -> Workspace
+```
+
+Call it inside `cx.new(..)`. `types` maps a type name to its `ViewType`; every view in the layout names one of these types.
+
+On creation the workspace picks its first layout, in this order:
+
+1. `options.document`, if set.
+2. The file in `options.persist`, if it exists, parses, has `schema` 1 and the same `version` as `persist.version`.
+3. `options.default_layout`.
+4. An empty document.
+
+The layout is then cleaned up (see `sanitize` on [the layout document](../layout/#check-and-repair)), its saved framing is restored, and the selected view of the first docked panel (or of the first floating one) gets focus.
+
+```rust title="examples/basic.rs (trimmed)"
+let workspace = cx.new(|cx| {
+    Workspace::new(
+        WorkspaceOptions {
+            default_layout: Some(doc),
+            navigation: Navigation::Free,
+            ..Default::default()
+        },
+        view_types(),
+        window,
+        cx,
+    )
+});
+```
+
+## WorkspaceOptions
+
+Every field is public. `WorkspaceOptions::default()` gives the values in the last column.
+
+| Field | Type | What it does | Default |
+| --- | --- | --- | --- |
+| `floating` | `Option<FloatingLayer>` | The layer new floating panels go on: `Overlay` (over the whole workspace) or `Stage` (over the stage). `None` turns floating off: nothing can be floated. | `Some(FloatingLayer::Overlay)` |
+| `navigation` | `Navigation` | `Off`, `Focus` or `Free`. See [Navigation](#navigation). | `Navigation::Focus` |
+| `reduced_motion` | `bool` | No animations: layout changes, the camera, hiding and restoring all jump to their end. | `false` |
+| `theme` | `ThemeMode` | The colors. See [Themes](#themes). | `ThemeMode::System` |
+| `keymap` | `Keymap` | Your key bindings. They replace the default binding of each command they name; the others keep theirs. | empty |
+| `gesture_keys` | `GestureKeys` | The keys held for camera gestures in free navigation. | `default_gesture_keys()` |
+| `tabs` | `TabOptions` | How tabs look and how long the undo toast stays. | `TabOptions::default()` |
+| `panel_menu` | `PanelMenu` | The panel menu: built-in, off or rewritten. See [Menus](../menus/). | `PanelMenu::Default` |
+| `keep_pushed` | `bool` | While a divider drag pushes neighbouring dividers out of the way, `true` leaves them where they were pushed when you drag back; `false` lets them return to where they started. | `true` |
+| `detail` | `Option<Detail>` | When a nested group of panels is drawn smaller than `size` pixels, it collapses into one tile with an outline of its splits. `None` never collapses. Needs navigation on. | `Some(Detail::default())` |
+| `persist` | `Option<Persist>` | A JSON file the layout is saved to and restored from. | `None` |
+| `default_layout` | `Option<LayoutDocument>` | The layout to start from when nothing else is given. `reset` goes back to it. | `None` |
+| `document` | `Option<LayoutDocument>` | A layout that wins over the persisted file. | `None` |
+| `hide_toward` | `Option<HideToward>` | A function from a panel id to the rect (workspace pixels) the panel flies to when the menu's **Hide** runs; a dock icon, say. `HideToward` is `Rc<dyn Fn(&Id) -> Option<Rect>>`. | `None` |
+| `slots` | `Slots` | Your own content behind the stage, in an empty stage, in an empty workspace, and over everything. | all `None` |
+
+### TabOptions
+
+| Field | Type | What it does | Default |
+| --- | --- | --- | --- |
+| `fill` | `bool` | Tabs share the tab bar's width instead of sizing to their titles. | `false` |
+| `inset` | `f32` | Padding, in pixels, above the tabs and at the bar's sides (at least the tab corner radius at the sides). | `4.0` |
+| `undo_seconds` | `f64` | After the user closes a tab, a toast reading "Closed “title”" with an **Undo** button shows for this many seconds. `0` shows no toast; reopening still works by key. | `0.0` |
+
+### Persist
+
+| Field | Type | What it does |
+| --- | --- | --- |
+| `path` | `PathBuf` | The file. The layout is written 120 ms after the last change, as JSON. |
+| `version` | `Option<String>` | Written into the file's `version`. A file whose `version` differs is ignored on load, so bump it when your layout changes shape. |
+
+### Detail
+
+| Field | Type | What it does | Default |
+| --- | --- | --- | --- |
+| `size` | `f64` | A nested split collapses when it, or each of its children, is drawn smaller than this many pixels in either direction. The framed group never collapses. | `48.0` |
+| `outline` | `usize` | How many levels of the collapsed group's splits are drawn as lines on its tile. Double-clicking the tile frames the part under the pointer, down to this depth. | `2` |
+
+### Slots
+
+Each slot is an `Option<SlotFn>`, where `SlotFn` is `Rc<dyn Fn(&mut Window, &mut App) -> AnyElement>`. The workspace calls it every frame the slot shows. In markup, the matching `<Workspace>` props set the same slots.
+
+| Field | Where it shows |
+| --- | --- |
+| `backdrop` | Inside the stage's rounded background, behind its panels. |
+| `stage_empty` | Centered in the stage when the stage has no panels. |
+| `empty` | Over the whole workspace when nothing is open: no docked layout and no floating panel. |
+| `chrome` | Over everything. Pointer events pass through its empty parts. |
+
+## View types
+
+A `ViewType` describes a kind of view: its title, its icon, how its content is made and where it may go.
+
+```rust
+pub fn new(
+    title: impl Into<String>,
+    build: impl Fn(&ViewHandle, &mut Window, &mut App) -> AnyView + 'static,
+) -> ViewType
+```
+
+`build` makes the view's content the first time it is shown. Return any entity that implements `Render`, converted with `.into()`. The workspace releases the entity when the view's tab closes.
+
+```rust title="examples/basic.rs"
+let note = |title: &'static str| {
+    ViewType::new(title, move |handle, _window, cx| {
+        cx.new(|_| Note {
+            label: format!("{title} · {}", handle.id).into(),
+        })
+        .into()
+    })
+};
+```
+
+Then set its rules with the builder methods. Each returns the `ViewType`.
+
+| Method | What it sets |
+| --- | --- |
+| `title_fn(f: impl Fn(&Value) -> String)` | The title, made from the view's params. Replaces the fixed title given to `new`. A view's own `title` in the document wins over both. |
+| `icon(icon: IconName)` | The icon on its tab. |
+| `placement(p: Placement)` | Where `open` puts a new view of this type when `OpenOptions` says nothing. |
+| `allow(allow: Allow)` | Where its panel may go: the stage, the sides, floating. |
+| `singleton()` | At most one view of the type: `open` with `Reuse::Auto` shows the existing one. |
+| `closable(closable: bool)` | `false` removes the close button, the menu's **Close** and the close shortcut. |
+| `tabbar(mode: TabbarMode)` | When its panel shows a tab bar. |
+| `min_size(width: f64, height: f64)` | The size, in pixels, below which the view counts as scaled down. See `Scaling`. |
+| `scaling(scaling: Scaling)` | What happens when the view is drawn smaller than its minimum size. |
+| `gestures(owner: GestureOwner)` | Who gets wheel and touchpad gestures over the view in free navigation. |
+| `accessory(f: impl Fn(&ViewHandle, &mut Window, &mut App) -> AnyElement)` | An element drawn at the end of the tab bar while the view is selected: a count, a button. |
+| `menu(f: impl Fn(&ViewInfo) -> Vec<MenuEntry>)` | The view's own panel-menu entries, shown above the built-in ones while it is selected. |
+
+```rust title="examples/basic.rs"
+note("Editor")
+    .title_fn(|params| params["name"].as_str().unwrap_or("Editor").to_string())
+    .placement(Placement::Stage)
+    .allow(Allow {
+        side: false,
+        ..Default::default()
+    })
+```
+
+The fields are public too:
+
+| Field | Type |
+| --- | --- |
+| `title` | `Rc<dyn Fn(&Value) -> String>` |
+| `icon` | `Option<IconName>` |
+| `rules` | `ViewRules` |
+| `build` | `ViewBuilder`, which is `Rc<dyn Fn(&ViewHandle, &mut Window, &mut App) -> AnyView>` |
+| `menu` | `Option<ViewMenu>`, where `ViewMenu` is `Rc<dyn Fn(&ViewInfo) -> Vec<MenuEntry>>` |
+| `accessory` | `Option<Accessory>`, where `Accessory` is `Rc<dyn Fn(&ViewHandle, &mut Window, &mut App) -> AnyElement>` |
+
+### ViewRules
+
+The rules a `ViewType` carries. `ViewRules::default()` allows everything.
+
+| Field | Type | Default |
+| --- | --- | --- |
+| `placement` | `Option<Placement>` | `None` |
+| `allow` | `Allow` | all `true` |
+| `singleton` | `bool` | `false` |
+| `closable` | `Option<bool>` | `None` (closable) |
+| `tabbar` | `TabbarMode` | `Always` |
+| `min_size` | `Option<(f64, f64)>` | `None` |
+| `scaling` | `Scaling` | `Interactive` |
+| `gestures` | `GestureOwner` | `Content` |
+
+`is_closable(&self) -> bool` is `closable.unwrap_or(true)`.
+
+### Allow
+
+Where a view's panel may be. A panel goes somewhere only if every view in it allows that place.
+
+| Field | Default | `false` keeps the view out of |
+| --- | --- | --- |
+| `stage` | `true` | the stage |
+| `side` | `true` | the docked layout outside the stage |
+| `floating` | `true` | floating panels. Floating also needs `WorkspaceOptions::floating` to be set. |
+
+### TabbarMode
+
+| Variant | When the panel shows a tab bar |
+| --- | --- |
+| `Always` (default) | Always. |
+| `Auto` | Only when the panel has more than one view (and while it is being dragged). |
+| `Never` | Never, if every view in the panel says `Never`. |
+| `Overlay` | When the view is alone in its panel, the content fills the panel and the bar's buttons float over its top end. Read `titlebar()` to leave room for them. |
+
+### Scaling
+
+With a minimum size (from `min_size`, or 480 × 320 pixels for every view in free navigation), the workspace works out a scale for each view: the smallest of 1, width ÷ minimum width and height ÷ minimum height, and never below 0.05. Read it with `view_scale`, `ViewHandle::scale` or `ViewRef::scale` and draw smaller to match.
+
+| Variant | What it does |
+| --- | --- |
+| `Interactive` (default) | The scale is reported; the content stays interactive. |
+| `Inert` | While the scale is below 1, a transparent layer covers the content, so it ignores the pointer. |
+| `Off` | No minimum size: the scale stays 1. |
+
+### GestureOwner
+
+Who gets wheel and touchpad gestures over the view's content in free navigation.
+
+| Variant | What it does |
+| --- | --- |
+| `Content` (default) | A plain mouse wheel goes to the content. <Kbd>Ctrl</Kbd>+wheel steps in and out, and a two-finger touchpad swipe moves the camera. |
+| `Workspace` | A plain mouse wheel also steps in and out of the layout. |
+| `Exclusive` | The content keeps the wheel, <Kbd>Ctrl</Kbd>+wheel, pinch and two-finger swipes; a swipe that already started still finishes. A map or a canvas wants this. |
+
+### ViewHandle
+
+What `build` and an accessory get: the view's id and a weak link to its workspace. Each method does nothing once the workspace is gone.
+
+| Member | What it does |
+| --- | --- |
+| `id: Id` | The view's id. |
+| `set_title(&self, title: impl Into<String>, cx: &mut App)` | Sets the view's title. |
+| `set_params(&self, patch: Value, cx: &mut App)` | Merges `patch`'s keys into the view's params. |
+| `set_badge(&self, badge: Option<Badge>, cx: &mut App)` | Puts a badge on its tab, or takes it off. |
+| `focus(&self, cx: &mut App)` | Shows and focuses the view. |
+| `close(&self, cx: &mut App)` | Closes it, unless a close guard says no. |
+| `hide(&self, cx: &mut App)` | Hides it (see `Workspace::hide`). |
+| `titlebar(&self, cx: &App) -> Titlebar` | The room an overlaid tab bar takes. |
+| `scale(&self, cx: &App) -> f64` | Its scale (see `Scaling`). |
+| `guard_close(&self, guard: impl Fn() -> bool + 'static, cx: &mut App)` | Adds a close guard: the user can close the view only while it returns `true`. Each call adds another guard. |
+
+### AnyView
+
+The content of a view: any `Entity<V>` where `V: Render`, made with `.into()` (`cx.new(|_| MyView { .. }).into()`). `blenderui` renders one root view per window, so the workspace draws each `AnyView` into its panel every frame.
+
+### Titlebar
+
+What `titlebar()` returns. Both fields are zero unless the view's panel shows an `Overlay` tab bar.
+
+| Field | Type | What it is |
+| --- | --- | --- |
+| `height` | `f64` | The tab bar's height: 34 pixels when overlaid. |
+| `inset_end` | `f64` | How much of the top end the bar's buttons cover, in pixels. |
+
+### Badge
+
+| Variant | What its tab shows |
+| --- | --- |
+| `Dot` | A dot. Good for "unsaved". |
+| `Text(String)` | A short text, such as a count. |
+
+## Open, close and move views
+
+Methods on `Workspace`, called with `workspace.update(cx, |ws, cx| ..)`. Where a method takes an `id`, it is a view id or a panel id unless it says otherwise.
+
+| Method | What it does |
+| --- | --- |
+| `open(&mut self, ty: &str, o: OpenOptions, cx) -> Option<ViewInfo>` | Opens a view of type `ty`, or shows an existing one (see `Reuse`). Returns the view, or `None` when `ty` is not a registered type. |
+| `close(&mut self, view_id: &Id, force: bool, cx) -> bool` | Closes a view. Without `force`, a close guard can refuse; then it returns `false`. Closing from code does not add the view to the reopen list. |
+| `reopen_closed(&mut self, cx)` | Reopens the tab the user closed last. The workspace remembers the last 20, puts each back where it was (exactly, when nothing has changed since) and focuses it. |
+| `focus(&mut self, id: &Id, cx)` | Shows and focuses a view, or a panel's selected view: restores its panel if hidden, selects its tab, raises it if floating, and brings it into the framing. |
+| `select(&mut self, view_id: &Id, cx)` | Selects a view's tab without moving focus. |
+| `hide(&mut self, id: &Id, toward: Option<Rect>, cx)` | Hides a panel. Given a view that shares its panel, hides only that view; it comes back as a tab of the same panel. The panel shrinks toward `toward` (workspace pixels) as it leaves, or downward by default. |
+| `restore(&mut self, panel_id: &Id, from: Option<Rect>, cx)` | Puts a hidden panel back where it was and focuses it. It grows out of `from` (workspace pixels) when given. If its old place is gone, it floats. |
+| `float(&mut self, id: &Id, rect: Option<Rect>, cx)` | Floats a panel, or one view out of its panel. `rect` is in fractions of the floating area (see `FloatingPanel`); without it the panel floats near where it was, at most 560 × 400 pixels. Does nothing when floating is off or not allowed. |
+| `dock(&mut self, id: &Id, target: DockTarget, cx)` | Docks a panel, or one view out of its panel, at `target`: beside a node or into a panel as tabs. |
+| `toggle_dock(&mut self, id: &Id, cx)` | Docks a floating panel (beside the stage, to the right when the stage is wider than tall, else below), or floats a docked one where it last floated. |
+| `set_title(&mut self, view_id: &Id, title: String, cx)` | Sets a view's title. |
+| `set_params(&mut self, view_id: &Id, patch: Value, cx)` | Merges the keys of the JSON object `patch` into the view's params. A title made by `title_fn` updates with it. |
+| `set_badge(&mut self, view_id: &Id, badge: Option<Badge>, cx)` | Puts a badge on a tab, or takes it off. Badges are not part of the layout document. |
+| `run(&mut self, command: Command, cx)` | Runs a keyboard command as if its key was pressed. See [Commands](../navigation/#commands). |
+
+### Read the workspace
+
+| Method | What it returns |
+| --- | --- |
+| `document(&self) -> LayoutDocument` | The current layout, with its navigation state (the framing and saved framings). |
+| `views(&self) -> Vec<ViewInfo>` | Every view: docked panels first, then floating, then hidden. |
+| `focused_view(&self) -> Option<&Id>` | The focused view. |
+| `view_scale(&self, view: &Id) -> f64` | A view's scale (see `Scaling`); 1 when unknown. |
+| `titlebar(&self, view: &Id) -> Titlebar` | The room an overlaid tab bar takes over a view. |
+
+### Replace the layout
+
+| Method | What it does |
+| --- | --- |
+| `set_document(&mut self, next: LayoutDocument, animate: bool, cx)` | Shows another layout. It is cleaned up first, panels animate to their new places when `animate` is set, and its saved framing is restored. |
+| `reset(&mut self, cx)` | Deletes the persisted file, if any, and animates back to `default_layout` (or to an empty layout). |
+
+### OpenOptions
+
+All fields are optional; `OpenOptions::default()` opens a new view where its type says.
+
+| Field | Type | What it does |
+| --- | --- | --- |
+| `params` | `Option<Value>` | The view's JSON params. |
+| `id` | `Option<Id>` | The view's id. If a view with this id exists, it is shown instead. Without one, an id is made from the type name. |
+| `title` | `Option<String>` | A title that wins over the type's. |
+| `placement` | `Option<Placement>` | Where the view goes. Without it: the type's `placement`, else the stage if there is one, else a tab in the focused panel, else the side. |
+| `reuse` | `Reuse` | Whether to show an existing view instead. |
+| `focus` | `Option<bool>` | Focus the view. `None` means yes. |
+| `from` | `Option<Rect>` | A rect, in workspace pixels, the new panel grows out of: the button that opened it, say. |
+
+### Reuse
+
+| Variant | What `open` does |
+| --- | --- |
+| `Auto` (default) | `Type` for a singleton type, else `None`. |
+| `None` | Always opens a new view. |
+| `Type` | Shows any open view of the same type. |
+| `Params` | Shows an open view of the same type with equal params. |
+
+### Placement
+
+Where `open` puts a new view. If the views' `Allow` rules forbid the place, the workspace tries the side, then floating, then beside the whole layout.
+
+| Variant | Where it goes |
+| --- | --- |
+| `Stage` | As a tab in the stage: the focused stage panel, else the last one focused, else the first. An empty stage takes it as its panel. With no stage, a tab in the focused panel. |
+| `Float` | A new floating panel on the default layer, cascaded from the middle. |
+| `Side` | A new docked panel to the right of the stage (a quarter of the width), or to the right of the whole layout when there is no stage. |
+| `Tab` | A tab in the focused panel, else in the stage. |
+| `Beside { beside: Id, edge: Edge, share: Option<f64> }` | A new panel on `edge` of the node `beside`, taking `share` of the space (half by default). |
+| `Into { panel: Id, index: Option<usize> }` | A tab in `panel` (or in the stage, given the stage's id) at `index`, else at the end. |
+| `FloatAt { rect: Rect, layer: Option<FloatingLayer> }` | A floating panel at `rect`, in fractions of the floating area, on `layer` or the default one. |
+
+### ViewInfo
+
+What `open`, `views` and the events tell you about a view.
+
+| Field | Type | What it is |
+| --- | --- | --- |
+| `id` | `Id` | The view's id. |
+| `ty` | `String` | Its type name. |
+| `params` | `Value` | Its params, or `Value::Null`. |
+| `title` | `String` | Its title as shown. |
+| `panel_id` | `Option<Id>` | The panel it is in. |
+| `placement` | `ViewPlacement` | Where that panel is. |
+| `selected` | `bool` | Whether it is its panel's selected tab. |
+
+### ViewPlacement
+
+| Variant | Meaning |
+| --- | --- |
+| `Docked` | In the docked layout, outside the stage. |
+| `Stage` | In the stage. |
+| `Floating` | In a floating panel. |
+| `Hidden` | In a hidden panel. |
+
+## Events
+
+```rust
+pub fn subscribe(
+    &mut self,
+    f: impl Fn(Entity<Workspace>, &WorkspaceEvent, &mut App) + 'static,
+    cx: &mut Context<Workspace>,
+)
+```
+
+`f` runs right after each change, once the workspace can be updated again (a job on `blenderui`'s UI queue), so it may call `workspace.update(..)`. A stored listener has the type `Subscriber`, which is `Rc<dyn Fn(Entity<Workspace>, &WorkspaceEvent, &mut App)>`. The workspace only builds events while someone listens.
+
+| `WorkspaceEvent` variant | When |
+| --- | --- |
+| `Change(LayoutDocument)` | After every change to the layout, the views' titles or params, the framing or the saved framings. It carries the new document, the same as `document()`. |
+| `Open(ViewInfo)` | A view was added. |
+| `Close(ViewInfo)` | A view was removed. Its `panel_id` is `None`, and its `title` is its own title or else its type name. |
+| `Focus(Option<Id>)` | The focused view changed. |
+| `Navigate(Option<Id>)` | The framing changed: the framed node's id, or `None` for the whole layout. |
+
+## Navigation
+
+`Navigation` says how much the user can move around the layout.
+
+| Variant | What the user can do |
+| --- | --- |
+| `Off` | Nothing: no maximize, no framing, no collapsed groups. |
+| `Focus` (default) | Frame (maximize) panels and groups, go back and forward, overview, step out, and move between neighbouring panels with the keyboard. |
+| `Free` | All of `Focus`, plus the camera: pan, zoom, pinch, swipe and draw a rectangle to frame. Views get a 480 × 320 minimum size unless they set their own. |
+
+The methods (`frame`, `toggle_maximize`, `overview` ...) are on [Navigation and keys](../navigation/).
+
+## Themes
+
+| `ThemeMode` variant | Colors |
+| --- | --- |
+| `Light` | Light grey background, white panels. |
+| `Medium` | Mid-grey panels on a dark background. |
+| `Dark` | Near-black background, dark panels. |
+| `Darker` | Darker still. |
+| `System` (default) | `Dark` when BUI's theme is dark (`blenderui::set_theme`), else `Light`. |
+
+### Palette
+
+`Palette::for_theme(theme: ThemeMode, system_dark: bool) -> Palette` returns a theme's colors. `system_dark` decides what `System` means. Every field is an `Hsla`:
+
+| Field | Used for |
+| --- | --- |
+| `bg` | The workspace behind the panels. |
+| `panel` | A panel's content area. |
+| `tabbar` | A tab bar. |
+| `tab_hover` | A tab under the pointer. |
+| `tab_active` | The selected tab. |
+| `text` | Text. |
+| `text_muted` | Secondary text and icons. |
+| `border` | Borders and outline lines. |
+| `accent` | The focused tab's top line, dividers being dragged, the highlighted menu row. |
+| `accent_contrast` | Text on `accent`. |
+| `stage` | The stage's background. |
+| `slot` | The drop slot that shows where a dragged tab lands. |
+
+## The root element
+
+`ROOT_ID` is `"zopra"`, the element id of the workspace's root element. The workspace fills its nearest positioned ancestor, and it gives this element keyboard focus when a tab, a tab bar or a floating panel's edge is pressed, so the workspace's keys reach it.

@@ -1,10 +1,12 @@
 ---
-// The /charts pages: the charts' own shell (sidebar, search) around a page, as in the Zopra Charts site.
+// The /charts pages, as in the Zopra Charts site: the addon shell with the charts' guide and the
+// base and derived charts in its sidebar.
 import "katex/dist/katex.min.css";
 import "../styles/chart-docs.css";
-import Base from "./Base.astro";
-import ThemeToggle from "../components/site/ThemeToggle.astro";
-import { ChartsShell } from "../components/chart-docs/shell";
+import AddonLayout from "./AddonLayout.astro";
+import type { ShellProps } from "../components/addon/shell";
+import { baseCharts, derivedCharts } from "../data/charts/registry";
+import { href } from "../lib/href";
 
 interface Props {
   /** The page's own title; the index page has none. */
@@ -19,11 +21,31 @@ const {
   description = "80 charts for BUI apps. Each one has the math behind it, advice on when to use it, a short story, runnable examples and a live render that runs in your browser.",
   image,
 } = Astro.props;
+
+const chartLinks = (list: typeof baseCharts) => list.map((chart) => ({ href: href(`charts/${chart.slug}`), label: chart.name, hint: chart.family }));
+
+const shell: ShellProps = {
+  name: "Charts",
+  home: href("charts"),
+  groups: [
+    {
+      label: "Guide",
+      links: [
+        { href: href("charts"), label: "Getting started" },
+        { href: href("charts/all"), label: "All charts" },
+        { href: href("charts/which"), label: "Which chart to use?" },
+        { href: href("charts/domains"), label: "Domain specific" },
+      ],
+    },
+    { label: "Base charts", links: chartLinks(baseCharts), filter: true },
+    { label: "Derived charts", links: chartLinks(derivedCharts), filter: true },
+  ],
+  filterHint: "Filter charts",
+  searchHint: "Search charts, families and guides",
+  emptyHint: "Nothing matches that. Try a family name, like Finance.",
+};
 ---
 
-<Base title={title ? `${title} · Charts` : "BUI Charts: every chart, with the math, the story and a live render"} description={description} image={image}>
-  <ChartsShell client:load pathname={Astro.url.pathname}>
-    <ThemeToggle slot="actions" />
-    <slot />
-  </ChartsShell>
-</Base>
+<AddonLayout title={title ? `${title} · Charts` : "BUI Charts: every chart, with the math, the story and a live render"} {description} {image} {shell}>
+  <slot />
+</AddonLayout>

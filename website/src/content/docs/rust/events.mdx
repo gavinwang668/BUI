@@ -35,6 +35,7 @@ fn main() {
 ```
 
 - **`cx.listener(...)`** turns a method-like closure into a listener. You get `this` (your view, mutable), the event, the `Window` and the `Context`.
+- **`weak.listener(...)`** does the same from a `WeakEntity` (`cx.weak_entity()`, a `Copy` handle) where there is no `cx`: inside a screen's editor factories, say.
 - **`cx.notify()`** asks for a re-render. Without it, your state changes but the window doesn't know.
 
 If you use [hooks](../hooks/) instead, you don't need either: writing a signal re-renders for you.
@@ -150,6 +151,8 @@ div()
 - **Enter and leave** go to each element on its own, outermost first when entering, innermost first when leaving. The order on a move is `out`, `leave`, `over`, `enter`.
 - **Selecting text:** text in elements is selectable by default; see [Selecting text](../selecting-text/) for `user-select`, copying and `window.selected_text()`.
 - **Focus from code:** `window.focus_id("name")` focuses the element with that `.id(...)`, and `window.focused_id()` tells you which one has focus.
+- **Keys you act on:** call `cx.prevent_default()` in the `on_key_down` that handled a key, and nothing else acts on it: no `keypress`, and none of Blender's own key handling (Ctrl+Z / Ctrl+Y undoing the last widget edit, a hovered widget's shortcuts). An app with its own undo does this on Ctrl+Z.
+- **Typing in a field:** keys typed into one of Blender's text fields reach page listeners too, as in a browser; `window.text_field_focused()` tells a single-key shortcut to stand aside.
 
 ```rust
 div().id("canvas-area")

@@ -1,0 +1,88 @@
+---
+title: Demo apps
+sidebarLabel: Demo apps
+description: Showcase apps on BUI's Rust API, from shader-driven menus and glass UIs to everyday apps built only from Blender's widgets, each a few kilobytes of source you can run and read.
+section: Rust
+order: 97
+languages: ["rust"]
+sources: ["demos/README.md", "demos/Cargo.toml", "demos/src/lib.rs", "demos/src/story.rs", "demos/src/canvas.rs", "demos/src/control.rs"]
+---
+
+The `demos/` folder holds standalone apps built on `blenderui`. Each is a few kilobytes of source, so they are good to read as well as to run. `demos/` is its own cargo workspace and never touches the build of `bindings/rust`.
+
+```sh
+cd demos
+cargo run --release --bin shaders
+```
+
+Swap `shaders` for any name below. Every demo with interaction also takes `-- --storyboard DIR`, which drives it headlessly (clicks, typing, hover and keys along a virtual clock) and saves the frames, and every shader demo takes `-- --frames DIR` for GPU stills.
+
+## Shaders, glass and motion
+
+These show what the [GPU effects](../gpu-effects/) and CSS animation can do. Most have no widgets at all: the page is a shader, and the interaction is part of the picture.
+
+| Demo | Run | What BUI does in it |
+| --- | --- | --- |
+| Shader components | `--bin shaders` | Three `ShaderEffect` canvases: a plasma button (hover), an aurora card (cursor) and a ripple field (click). |
+| Glass UI | `--bin glass` | A shader background under CSS glass (`backdrop-filter: blur() saturate()`), with Blender widgets inside. |
+| Gambit | `--bin gambit` | A noir chess collage raymarched on the GPU: a half-resolution scene pass into a `RenderTarget`, then a full-resolution halftone composite. |
+| Windows Failed | `--bin failed` | A Y2K poster wall: the first click starts a cascade of Win9x error dialogs (CSS keyframes, a shake, a glitch). |
+| Velvet Menu, Phantom | `--bin velvet`, `--bin phantom` | Two game-style main menus for a tech app: an underwater shader with a tilted heavy-italic menu, and a red-room scene under ransom-note type. |
+| Morning | `--bin morning` | A pinch folds a full-screen page into its card in a stack. Pinch on a trackpad or touch screen to scrub it. |
+| ASCII Field, Dreamlog, Intro | `--bin ascii`, `--bin dream`, `--bin intro` | Portfolio and journal pages over one GPU shader each, with inertial scrolling, a springing carousel and a typed terminal. |
+
+## Apps with a look of their own
+
+Full apps with their own style, painted with `Painter`, CSS and shaders rather than Blender's widgets.
+
+| Demo | Run | What BUI does in it |
+| --- | --- | --- |
+| CI pipeline | `--bin pipeline` | A GitHub Actions workflow as a Blender-style node graph; make the test job fail. |
+| Motion editor | `--bin editor` | An After Effects-style layout: layers, keyframes, a timeline and effect controls that key at the playhead. |
+| HUD Shell | `--bin hud` | A heads-up-display desktop: a taskbar whose slots launch and minimise apps, notifications, bio-monitor bars and a GPU minimap radar. |
+| Breeze, Lagoon | `--bin aero`, `--bin amp` | A Frutiger Aero music app that plays, and a skinned 2000s MP3 player with a live spectrum analyzer and an EQ. |
+| Dayline | `--bin tasks` | A desktop planner where checking a task draws the tick, strikes the title and folds the row out, with an Undo toast. |
+| Clock, Headphones | `--bin clock`, `--bin headphones` | A soft-UI clock app in two looks that cross-fade, and a split light and dark headphone controller. |
+| Orbit Messenger | `--bin y2k` | A Y2K chat client over a liquid-chrome metaball shader. |
+
+## Blender UI apps
+
+Everyday apps built **only from what Blender's interface has**, for Blender users who want to know what it can do outside Blender: Blender's screen of areas (split, join and maximize them, each with its editor-type menu, header, toolbar, sidebar and footer), Blender's number fields, sliders, menus, colour picker, checkboxes and text fields, panels and Blender's theme. Everything in them works.
+
+| App | Run | What it shows |
+| --- | --- | --- |
+| BUI Mail | `--bin bui_mail` | An email client: folders, list and reader as areas, live search, drag a message onto a folder, an undoable send. |
+| BUI Chat | `--bin bui_chat` | A community chat: the server rail is a toolbar region, threads open in the sidebar region, voice meters drawn with `Painter`. |
+| BUI Files | `--bin bui_files` | A file explorer on the real file system, read-only, with real thumbnails and every edit inside a sandbox in the temp folder. |
+| BUI Timer | `--bin bui_timer` | World clocks, alarms, timers, a stopwatch, Pomodoro and workspaces that remember their layout. |
+| BUI Notes | `--bin bui_notes` | A block wiki: a page tree you drag, a slash menu, Markdown shortcuts, a task table and a kanban board. |
+| BUI Writer | `--bin bui_writer` | A word processor: a ribbon of Blender widgets, A4 pages with real pagination, tables, find and replace, Markdown export. |
+| BUI Sheet | `--bin bui_sheet` | A spreadsheet with a formula engine, number formats, a fill handle, sheet tabs and a live chart of the selection. |
+| BUI Calendar | `--bin bui_calendar` | Day, week, month and agenda views, with events you drag to create, move and resize. |
+
+### What Blender's UI can and can't do from Rust
+
+Building these apps found the limits. A summary of what the list in `demos/README.md` says:
+
+- **Works as it is:** Blender's areas and workspaces, Blender's widgets with Blender's behaviour (drag a number, type math such as `25*60`, Ctrl+Z, Esc), `.precision(n)` for the decimals shown, text fields that report every keystroke (`attr("live", "")`), panels, themes, `Painter`, shaders, CSS layout and animation, and the desktop shell (notifications, tray, taskbar progress, Blender's File Browser).
+- **Keyboard shortcuts:** `window.text_field_focused()` keeps single-key shortcuts quiet while the user types in a field, and `cx.prevent_default()` takes a key from Blender's own handling.
+- **Needs a workaround:** drag and drop between elements (keep the drop targets from the last render), rich text (keep your own text model), clearing a field after a send, long lists (build the visible rows only: the `blenderui-vlist` and `blenderui-table` crates do this), toggle buttons and tall headers.
+- **Not possible yet:** popup and context menus other than a `Dropdown`, hover tooltips, anything drawn over a Blender widget, the node editor, and starting a text edit from code.
+
+## Shared helpers
+
+The demos share a small library in `demos/src/` that you can reuse: `lib.rs` (the window, the shader with a software fallback, a virtual clock so storyboards are deterministic), `story.rs` (storyboard runs), `canvas.rs` (a design canvas that fits the window crisply, laid out in `rem`), `control.rs` (knobs, faders and scrubbers), `pen.rs` (a `Painter` in a design box's own units), `ease.rs` (the motion curves) and `text.rs` (a typed-into text draft).
+
+## Next steps
+
+<CardGrid>
+  <Card title="GPU effects" href="docs/rust/gpu-effects/" icon="sparkle" kicker="Rust">
+    Run your own shader in a canvas, draw into textures and feed them back.
+  </Card>
+  <Card title="Effects and animations" href="docs/rust/effects-and-animations/" icon="film-strip" kicker="Rust">
+    CSS animations and transitions, springs and timelines.
+  </Card>
+  <Card title="Demos on GitHub" href="https://github.com/ppmpreetham/BUI/tree/main/demos" icon="github" kicker="Source">
+    Read the source of every demo.
+  </Card>
+</CardGrid>

@@ -1,0 +1,112 @@
+---
+// The Addons: crates built on the Rust binding, each with its own site (/panels, /charts). The
+// panels' pages are listed from their collection, so this can't drift from them.
+import { getCollection } from "astro:content";
+import { Code } from "astro-expressive-code/components";
+import FramedLayout from "../../layouts/FramedLayout.astro";
+import PageIntro from "../../components/site/PageIntro.astro";
+import Icon from "../../components/site/Icon.astro";
+import Section from "../../components/landing/Section.astro";
+import Charts from "../../components/landing/Charts.astro";
+import { panelHref, panelsInOrder } from "../../lib/panels";
+import { href, repoFile } from "../../lib/docs";
+
+const panels = panelsInOrder(await getCollection("panels"));
+
+const panelsFeatures = [
+  ["Tabs you drag", "to reorder, onto another panel to join its tabs, to an edge to split it, or out to float it."],
+  ["Dividers you drag", "to resize: Shift snaps to quarters and thirds, a double click evens them out."],
+  ["Panel menus", "from the ⋯ button or a right click: maximize, float or dock, move, split, hide, close, and your own entries."],
+  ["Navigation", "frame a panel or a group, back and forward, an overview, and a free camera you pan, zoom and swipe."],
+  ["A layout that saves itself", "as a JSON document, with rebindable shortcuts, close guards, badges and an undo toast for closed tabs."],
+];
+
+const cargo = `[dependencies]
+bui-panels = { path = "../addons/bui-panels" } # inside a BUI checkout
+blenderui = { path = "../bindings/rust/blenderui" }`;
+---
+
+<FramedLayout title="Addons" description="Panels and Charts: bigger pieces built on BUI's Rust binding, each with its own docs." current="Addons">
+  <PageIntro kicker="Addons" icon="puzzle-piece" title="Bigger pieces, built on BUI.">
+    <p class="max-w-[60ch] text-pretty text-[17px] leading-7 text-muted">
+      Crates for BUI's Rust binding, <code class="font-mono text-foreground">blenderui</code>: panel layouts you dock, tab
+      and float, and eighty charts drawn by the same renderer as Blender's widgets. Each one is its own crate
+      in <code class="font-mono text-foreground">addons/</code>, with its own docs.
+    </p>
+    <nav aria-label="Addons" class="flex flex-wrap gap-3 pt-2">
+      <a href={href("panels/")} class="inline-flex h-11 items-center gap-2 border border-border-strong px-5 text-[15px] transition-[background-color,border-color] duration-150 ease-out hover:border-muted hover:bg-surface">
+        <Icon name="squares-four" weight="duotone" size={18} class="text-link" /> Panels
+      </a>
+      <a href={href("charts/")} class="inline-flex h-11 items-center gap-2 border border-border-strong px-5 text-[15px] transition-[background-color,border-color] duration-150 ease-out hover:border-muted hover:bg-surface">
+        <Icon name="chart-bar" weight="duotone" size={18} class="text-link" /> Charts
+      </a>
+    </nav>
+  </PageIntro>
+
+  <div class="hatch h-10 border-b border-border" aria-hidden="true"></div>
+
+  <Section
+    id="panels"
+    kicker="bui-panels"
+    title="Panels you dock, tab and float"
+    lede="A workspace of splits around a stage, with tabbed views, floating panels, and a layout that saves itself as JSON."
+    icon="squares-four"
+  >
+    <div class="grid lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]">
+      <div class="flex min-w-0 flex-col gap-6 border-border p-5 sm:p-10 lg:border-r lg:p-12">
+        <ul class="flex flex-col gap-4 text-[15px] leading-7">
+          {
+            panelsFeatures.map(([lead, rest]) => (
+              <li class="flex gap-3">
+                <Icon name="check" size={16} class="mt-1.5 shrink-0 text-link" />
+                <span class="text-muted">
+                  <b class="font-semibold text-foreground">{lead}</b> {rest}
+                </span>
+              </li>
+            ))
+          }
+        </ul>
+        <Code code={cargo} lang="toml" title="Cargo.toml" />
+        <div class="flex flex-wrap items-center gap-x-5 gap-y-2 text-sm">
+          <a href={href("panels/")} class="group inline-flex items-center gap-1.5 font-medium text-link">
+            Read the guide <Icon name="arrow-right" size={14} class="transition-transform duration-200 group-hover:translate-x-0.5" />
+          </a>
+          <a href={repoFile("addons/bui-panels/examples/ide.rs")} class="inline-flex items-center gap-1.5 text-muted hover:text-foreground">
+            <Icon name="file-code" size={14} />
+            <span class="font-mono text-[12.5px]">addons/bui-panels/examples/ide.rs</span>
+          </a>
+        </div>
+      </div>
+      <div class="flex min-w-0 flex-col border-t border-border lg:border-t-0">
+        <h3 class="kicker border-b border-border px-5 py-4 text-muted sm:px-10 lg:px-12">The docs</h3>
+        <ul class="flex flex-col">
+          {
+            panels.map((d) => (
+              <li class="border-b border-border-soft last:border-b-0">
+                <a href={panelHref(d)} class="group flex items-start gap-4 px-5 py-4 transition-colors duration-150 ease-out hover:bg-surface sm:px-10 lg:px-12">
+                  <span class="flex min-w-0 flex-1 flex-col gap-1">
+                    <span class="font-medium">{d.data.sidebarLabel ?? d.data.title}</span>
+                    <span class="text-pretty text-[13.5px] leading-6 text-muted">{d.data.description}</span>
+                  </span>
+                  <Icon name="arrow-right" size={14} class="mt-1.5 shrink-0 text-muted transition-transform duration-200 group-hover:translate-x-0.5" />
+                </a>
+              </li>
+            ))
+          }
+        </ul>
+      </div>
+    </div>
+  </Section>
+
+  <div class="hatch h-10 border-y border-border" aria-hidden="true"></div>
+
+  <Section
+    id="charts"
+    kicker="bui-charts"
+    title="Charts, drawn natively"
+    lede="From candlesticks to flame graphs: each chart is an rsx! tag, with its math, examples and API documented."
+    icon="chart-bar"
+  >
+    <Charts />
+  </Section>
+</FramedLayout>

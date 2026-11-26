@@ -1,0 +1,72 @@
+---
+// Docs pages of their own (`page:` in their frontmatter: /benchmarks, /roadmap), in the landing
+// page's frame instead of the docs sidebar. Their /docs/ URLs redirect here.
+import { render } from "astro:content";
+import FramedLayout from "../layouts/FramedLayout.astro";
+import PageIntro from "../components/site/PageIntro.astro";
+import Prose from "../components/site/Prose.astro";
+import PageFoot from "../components/site/PageFoot.astro";
+import Toc from "../components/site/Toc.astro";
+import * as mdxComponents from "../components/docs";
+import Performance from "../components/landing/Performance.astro";
+import { sections, topLinks } from "../config/nav";
+import { getDocs, type Doc } from "../lib/docs";
+
+export async function getStaticPaths() {
+  const docs = await getDocs();
+  return docs.flatMap((doc) => (doc.data.page ? [{ params: { page: doc.data.page.replace(/\/$/, "") }, props: { doc } }] : []));
+}
+
+interface Props {
+  doc: Doc;
+}
+
+const { doc } = Astro.props;
+const { title, description, section, badges, sources, page, lead } = doc.data;
+const { Content, headings } = await render(doc);
+const sectionMeta = sections.find((s) => s.label === section);
+const icon = sectionMeta && "icon" in sectionMeta ? sectionMeta.icon : "file-text";
+const current = topLinks.find((l) => l.href === page)?.label ?? "Docs";
+// `lead:` in the frontmatter: the component shown above the page's text
+const Lead = lead && { performance: Performance }[lead];
+---
+
+<FramedLayout {title} {description} {current}>
+  <PageIntro kicker={section} {icon} {title}>
+    <p class="max-w-[60ch] text-pretty text-[17px] leading-7 text-muted">{description}</p>
+    {
+      badges.length > 0 && (
+        <ul class="flex flex-wrap gap-2" aria-label="About this page">
+          {badges.map((b) => (
+            <li class="inline-flex h-6 items-center border border-border px-2 text-xs text-muted">{b}</li>
+          ))}
+        </ul>
+      )
+    }
+  </PageIntro>
+
+  {
+    Lead && (
+      <>
+        <Lead more={false} />
+        <div class="hatch h-10 border-b border-border" aria-hidden="true" />
+      </>
+    )
+  }
+
+  <div class="xl:grid xl:grid-cols-[minmax(0,1fr)_240px]">
+    <div class="min-w-0 px-5 py-10 sm:px-10 sm:py-14 lg:px-12">
+      <div class="max-w-[52rem]">
+        <Prose>
+          <Content components={mdxComponents} />
+        </Prose>
+        <PageFoot {sources} filePath={doc.filePath} />
+      </div>
+    </div>
+    <div class="hidden border-l border-border xl:block">
+      <div class="sticky top-(--header-h) max-h-[calc(100dvh-var(--header-h))] overflow-y-auto px-5 py-10">
+        <Toc {headings} />
+      </div>
+    </div>
+  </div>
+</FramedLayout>

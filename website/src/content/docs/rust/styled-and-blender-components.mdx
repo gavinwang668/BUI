@@ -253,7 +253,7 @@ These ten components are Blender's widgets, wherever you put them:
 | `Dropdown` | A dropdown menu; options are `option()` children | `select()` |
 | `ProgressBar` | A progress bar (`value`, `max`) | `progress()` |
 
-Each one *is* the element it stands for, so every element method and attribute works on it: `min`, `max`, `step`, `value`, `checked`, `placeholder`, `disabled`, `on_change`, `on_click`, styling and so on.
+Each one *is* the element it stands for, so every element method and attribute works on it: `min`, `max`, `step`, `precision` (the decimals shown: none for a whole-number step unless set, else 3), `value`, `checked`, `placeholder`, `disabled`, `on_change`, `on_click`, styling and so on.
 
 <Tabs sync="rust-syntax" label="Rust syntax">
 <Tab label="rsx!">
@@ -337,8 +337,11 @@ input().id("vol").input_type("range").min(0.0).max(100.0)
 </Tab>
 </Tabs>
 
+- **A text field reports its value when the edit is confirmed** (Enter, or clicking away), as Blender's do. Give it the `live` attribute (`TextField().attr("live", "")`, `<input live>`) to get every keystroke instead, like Blender's search and filter fields.
+- **Keys typed into a text field still reach the page's key listeners**, as in a browser. `window.text_field_focused()` tells you the user is typing, so single-key shortcuts can stand aside.
 - **Values you pass are pushed to the widget only when they change between renders.** A field the user is typing in isn't reset under their fingers.
 - **To control a field**, keep its value in your state and update it from `on_change`, as above. Give it an `.id(...)` so it keeps its identity across renders.
+- **A checkbox or radio** keeps what the user clicked until you give it another `checked`: one you keep in your state follows it (set it from code after a click and it shows), and one you leave alone keeps the user's choice.
 - **A `button()` holding elements other than text** is laid out as an ordinary box (style it with CSS) and still gets `on_click`.
 
 <Callout type="warning" title="Widgets sit on top">

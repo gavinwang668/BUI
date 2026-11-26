@@ -1,0 +1,202 @@
+---
+title: Panel menus and icons
+sidebarLabel: Menus and icons
+description: The panel menu in bui-panels - its built-in entries and their ids, adding your own entries per view type, rewriting or turning off the menu - and the Blender icons IconName names.
+group: Reference
+order: 50
+sources: ["addons/bui-panels/src/menu.rs", "addons/bui-panels/src/workspace.rs", "addons/bui-panels/src/icon.rs", "addons/bui-panels/build.rs", "addons/bui-panels/src/ui/root.rs", "addons/bui-panels/src/ui/layout.rs", "addons/bui-panels/examples/ide.rs", "addons/bui-panels/tests/panels.rs"]
+---
+
+Every panel has a menu. It opens from the `⋯` button at the end of the tab bar, or from a right click anywhere on the tab bar. `blenderui` has no popup menu of its own, so `bui-panels` builds one in Blender's style: rows with a check mark, a shortcut hint and a submenu arrow.
+
+## The built-in entries
+
+What the menu shows depends on where the panel is and what its views allow. In order:
+
+| Entry | `id` | Shown when | What it does |
+| --- | --- | --- | --- |
+| **Maximize** / **Restore size** | `maximize` | Navigation is on and the panel is docked. | Frames the panel, or restores the framing. Shows the `FrameToggle` shortcut. |
+| **Dock** | `dock` | The panel floats on the overlay layer. | Docks it into the stage if its views allow the stage, else to the right of the layout (30%). |
+| **Dock beside stage** | `dock` | The panel floats on the stage layer. | Docks it beside the stage, as `toggle_dock` does. |
+| **Float** | `float` | The panel is docked, floating is on and its views allow it. | Floats it (on the stage layer, it goes back where it last floated). |
+| **Move *title* to** ▸ | `move` | There is somewhere to move the selected view. | A submenu: one row per other panel that allows the view (`move:<panel id>`, named after that panel's selected view, with `+n` for its other tabs), then **New split right** (`split-right`) and **New split below** (`split-below`) when the panel has more than one tab and is docked. |
+| **Hide** | `hide` | Always. | Hides the panel; it flies toward `hide_toward`'s rect when you gave one. |
+| **Close *title*** | `close` | The selected view is closable. | Closes it, so it can be reopened. Shows the `ViewClose` shortcut. |
+| **Close other tabs** | `close-others` | The panel has more than one tab, one of them closable. | Closes every other tab. |
+
+A separator comes before the close entries. The ids are in `bui_panels::builtin` (re-exported from `menu::builtin`), so a menu rewriter can find an entry without matching its label:
+
+| Constant | Value |
+| --- | --- |
+| `builtin::MAXIMIZE` | `"maximize"` |
+| `builtin::FLOAT` | `"float"` |
+| `builtin::DOCK` | `"dock"` |
+| `builtin::MOVE` | `"move"` |
+| `builtin::SPLIT_RIGHT` | `"split-right"` |
+| `builtin::SPLIT_BELOW` | `"split-below"` |
+| `builtin::HIDE` | `"hide"` |
+| `builtin::CLOSE` | `"close"` |
+| `builtin::CLOSE_OTHERS` | `"close-others"` |
+
+## Add your own entries
+
+A view type's `menu` gives entries for panels whose selected view is of that type. They come first, then a separator, then the built-in entries.
+
+```rust title="examples/ide.rs"
+<View
+    id="outline"
+    title="Outline"
+    icon={IconName::Outliner}
+    singleton
+    accessory={rsx! { <span class="text-[11px]">"3 symbols"</span> }}
+    menu={|_info| vec![MenuItem::new("Refresh").run(|_, _| println!("refresh")).into()]}
+>
+```
+
+The same on a `ViewType`, from the crate's tests:
+
+```rust title="tests/panels.rs"
+let search = types.remove("zopra-view:search").unwrap().menu(move |_| {
+    let ping = ping.clone();
+    vec![MenuItem::new("Ping").id("ping").run(move |_, _| ping.set(ping.get() + 1)).into()]
+});
+```
+
+The function gets the selected view's [`ViewInfo`](../workspace/#viewinfo) each time the menu opens.
+
+### MenuItem
+
+```rust
+pub fn new(label: impl Into<SharedString>) -> MenuItem
+```
+
+| Builder | What it sets |
+| --- | --- |
+| `id(self, id: impl Into<SharedString>) -> Self` | An id, for menu rewriters and tests. |
+| `shortcut(self, shortcut: Option<String>) -> Self` | A shortcut hint shown at the right. Only a label: it binds nothing. `keymap::format_combo` makes one from a combo. |
+| `disabled(self, disabled: bool) -> Self` | Greys the row out; it can't be chosen and the keyboard skips it. |
+| `checked(self, checked: bool) -> Self` | Shows a check mark when `true`. |
+| `danger(self) -> Self` | Draws the label in red, for destructive actions. |
+| `run(self, f: impl Fn(&mut Window, &mut App) + 'static) -> Self` | What choosing the row does. The menu closes first. |
+| `submenu(self, items: Vec<MenuEntry>) -> Self` | Makes the row open a submenu. |
+
+Every field is public: `id: Option<SharedString>`, `label: SharedString`, `shortcut: Option<SharedString>`, `disabled: bool`, `checked: Option<bool>`, `danger: bool`, `run: Option<MenuAction>`, `items: Vec<MenuEntry>`. `menu::MenuAction` is `Rc<dyn Fn(&mut Window, &mut App)>`.
+
+### MenuEntry
+
+| Variant | What it is |
+| --- | --- |
+| `Item(MenuItem)` | A row. `MenuItem` converts with `.into()`. |
+| `Separator` | A line between groups. |
+
+Separators tidy themselves: a menu never starts or ends with one or shows two in a row. `menu::tidy_menu(entries: Vec<MenuEntry>) -> Vec<MenuEntry>` does that cleanup, if you build menus yourself.
+
+## Rewrite or turn off the menu
+
+`WorkspaceOptions::panel_menu` takes a `PanelMenu`:
+
+| Variant | The menu holds |
+| --- | --- |
+| `Default` | The view's own entries, a separator, the built-in entries. |
+| `Off` | Only the view's own entries. |
+| `Custom(PanelMenuFn)` | Whatever your function returns, given the default entries and where the panel is. `menu::PanelMenuFn` is `Rc<dyn Fn(Vec<MenuEntry>, &PanelMenuContext) -> Vec<MenuEntry>>`. |
+
+In markup, `panel_menu={|entries, ctx| ..}` sets `Custom` and `no_panel_menu` sets `Off`. The ide example passes every entry through unchanged:
+
+```rust title="examples/ide.rs"
+panel_menu={|entries, _ctx| entries}
+```
+
+### PanelMenuContext
+
+| Field | Type | What it is |
+| --- | --- | --- |
+| `panel_id` | `Id` | The panel the menu is for. |
+| `view` | `ViewInfo` | Its selected view. |
+| `region` | `MenuRegion` | Where the panel is. |
+
+| `MenuRegion` variant | The panel is |
+| --- | --- |
+| `Stage` | In the stage. |
+| `Side` | Docked outside the stage. |
+| `Floating` | Floating. |
+
+## From the keyboard
+
+While a menu is open, keys go to it:
+
+| Key | What it does |
+| --- | --- |
+| <Kbd>↓</Kbd> / <Kbd>↑</Kbd> | Moves the highlight, skipping separators and disabled rows. |
+| <Kbd>→</Kbd> | Opens the highlighted row's submenu. |
+| <Kbd>←</Kbd> | Closes the open submenu. |
+| <Kbd>Esc</Kbd> | Closes the open submenu, or the menu when no submenu is open. |
+| <Kbd>Enter</Kbd> / <Kbd>Space</Kbd> | Runs the highlighted row, or opens its submenu. |
+
+Other keys do nothing while the menu is open; they don't reach the workspace's shortcuts. A click outside the menu closes it.
+
+### Finding rows in tests
+
+`menu::row_id(level: usize, index: usize) -> SharedString` is the element id of a row: `zopra-menu-<level>-<index>`, where level 0 is the main menu and `index` counts separators too. The crate's own test opens the `⋯` button and clicks the first row:
+
+```rust title="tests/panels.rs"
+let button = center(bounds(cx, win.id, "zopra-menu-tools"));
+cx.simulate_click(win.id, button.0, button.1);
+settle(cx, win.id);
+let row = center(bounds(cx, win.id, &row_id(0, 0)));
+cx.simulate_click(win.id, row.0, row.1);
+```
+
+## Icons
+
+`IconName` names icons from Blender, read at build time from the kit's own copy of Blender's SVG icons (`kit/intern/kit_icons_svg.c`). Views use them on their tabs (`ViewType::icon`, the `icon` prop), and `Icon` draws one anywhere.
+
+### IconName
+
+| Variant | Blender icon |
+| --- | --- |
+| `Close` | `PANEL_CLOSE` |
+| `Ellipsis` | `THREE_DOTS` |
+| `Folder` | `FILE_FOLDER` |
+| `File` | `FILE` |
+| `Search` | `VIEWZOOM` |
+| `Settings` | `PREFERENCES` |
+| `Console` | `CONSOLE` |
+| `Plus` | `ADD` |
+| `Minus` | `REMOVE` |
+| `Check` | `CHECKMARK` |
+| `ChevronDown` | `DOWNARROW_HLT` |
+| `ChevronRight` | `RIGHTARROW` |
+| `Window` | `WINDOW` |
+| `Maximize` | `FULLSCREEN_ENTER` |
+| `Minimize` | `FULLSCREEN_EXIT` |
+| `Eye` | `HIDE_OFF` |
+| `EyeOff` | `HIDE_ON` |
+| `Outliner` | `OUTLINER` |
+| `Text` | `TEXT` |
+| `Image` | `IMAGE_DATA` |
+| `Grid` | `GRID` |
+| `Pin` | `PINNED` |
+| `Unpin` | `UNPINNED` |
+| `Info` | `INFO` |
+| `Warning` | `ERROR` |
+| `Cancel` | `CANCEL` |
+
+| Member | What it is |
+| --- | --- |
+| `IconName::ALL: [IconName; 26]` | Every icon, in the order above. |
+| `blender_name(self) -> &'static str` | Blender's name for it (`UI_icons.hh`, without `ICON_`), as in the table. |
+
+`IconName` is `Copy`, `Eq` and `Hash`.
+
+### Icon
+
+An element that draws one icon: `Icon::new(IconName::Close).size(px(12.0)).color(c)`.
+
+| Method | What it does |
+| --- | --- |
+| `new(name: IconName) -> Icon` | A 16-pixel white icon. |
+| `size(self, size: Pixels) -> Self` | Its width and height. |
+| `color(self, color: Rgba) -> Self` | Its color. Blender's icons are white; every white in the SVG becomes this color, and the alpha becomes the element's opacity. |
+
+`Icon` implements `IntoElement`. It decodes the SVG at twice the drawn size, once per icon, color and size, and keeps the result.

@@ -6,9 +6,10 @@ import Sidebar from "../components/site/Sidebar.astro";
 import Toc from "../components/site/Toc.astro";
 import SearchPalette from "../components/site/SearchPalette.astro";
 import Icon from "../components/site/Icon.astro";
+import Prose from "../components/site/Prose.astro";
+import PageFoot from "../components/site/PageFoot.astro";
 import { currentTopLink, languages } from "../config/nav";
-import { site } from "../config/site";
-import { docHref, getNeighbours, href, lastUpdated, repoFile, statusLabel, type Doc } from "../lib/docs";
+import { docHref, getNeighbours, href, statusLabel, type Doc } from "../lib/docs";
 
 interface Props {
   doc: Doc;
@@ -18,14 +19,11 @@ interface Props {
 const { doc, headings } = Astro.props;
 const { title, description, section, status, badges, sources } = doc.data;
 const { prev, next } = await getNeighbours(doc);
-const updated = lastUpdated(doc.filePath);
-const editUrl = site.editBase + (doc.filePath?.replace(/^.*src\/content\/docs\//, "") ?? `${doc.id}.mdx`);
 const langNames = doc.data.languages.map((id) => languages.find((l) => l.id === id)?.label ?? id);
-const dateFmt = new Intl.DateTimeFormat("en", { year: "numeric", month: "long", day: "numeric" });
 ---
 
 <Base title={title} description={description} type="article">
-  <Header menuTarget="docs-sidebar" current={currentTopLink(section, doc.id)} />
+  <Header menuTarget="docs-sidebar" current={currentTopLink(section)} />
   <SearchPalette />
 
   <div class="mx-auto w-full max-w-[1480px] md:grid md:grid-cols-[264px_minmax(0,1fr)] xl:grid-cols-[264px_minmax(0,1fr)_232px]">
@@ -103,33 +101,11 @@ const dateFmt = new Intl.DateTimeFormat("en", { year: "numeric", month: "long", 
           }
         </header>
 
-        <div class="prose" data-prose>
+        <Prose>
           <slot />
-        </div>
+        </Prose>
 
-        {
-          sources.length > 0 && (
-            <aside class="mt-14 border border-border bg-surface px-4 py-3 text-sm" aria-label="Sources">
-              <p class="kicker mb-1.5 inline-flex items-center gap-1.5 text-muted"><Icon name="git-branch" size={13} /> Based on</p>
-              <ul class="flex flex-wrap gap-x-4 gap-y-1">
-                {sources.map((s) => (
-                  <li>
-                    <a href={repoFile(s)} class="font-mono text-[12.5px] text-link underline-offset-4 hover:underline">
-                      {s}
-                    </a>
-                  </li>
-                ))}
-              </ul>
-            </aside>
-          )
-        }
-
-        <div class="mt-10 flex flex-col gap-2 border-t border-border pt-5 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">
-          <a href={editUrl} class="inline-flex items-center gap-2 hover:text-foreground">
-            <Icon name="pencil-simple-line" size={15} /> Edit this page on GitHub
-          </a>
-          {updated && <p>Last updated <time datetime={updated.toISOString()}>{dateFmt.format(updated)}</time></p>}
-        </div>
+        <PageFoot sources={sources} filePath={doc.filePath} />
 
         {
           (prev || next) && (
@@ -166,23 +142,4 @@ const dateFmt = new Intl.DateTimeFormat("en", { year: "numeric", month: "long", 
       </div>
     </div>
   </div>
-
-  <script>
-    // "#" links on headings, and wide tables wrapped so they scroll on phones.
-    const prose = document.querySelector("[data-prose]");
-    prose?.querySelectorAll<HTMLElement>(":scope > h2[id], :scope > h3[id]").forEach((h) => {
-      const a = document.createElement("a");
-      a.href = `#${h.id}`;
-      a.className = "heading-anchor unstyled";
-      a.setAttribute("aria-label", `Link to ${h.textContent}`);
-      a.textContent = "#";
-      h.append(a);
-    });
-    prose?.querySelectorAll(":scope > table").forEach((t) => {
-      const wrap = document.createElement("div");
-      wrap.className = "table-wrap";
-      t.replaceWith(wrap);
-      wrap.append(t);
-    });
-  </script>
 </Base>

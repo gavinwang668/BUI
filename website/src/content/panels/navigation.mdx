@@ -1,0 +1,173 @@
+---
+title: Navigation and keys
+sidebarLabel: Navigation and keys
+description: Framing, history, the overview and the free camera in bui-panels, every keyboard command with its default binding, the keymap format and the gesture keys.
+group: Reference
+order: 40
+sources: ["addons/bui-panels/src/nav.rs", "addons/bui-panels/src/keymap.rs", "addons/bui-panels/src/workspace.rs", "addons/bui-panels/src/features.rs", "addons/bui-panels/src/render.rs", "addons/bui-panels/src/model/types.rs", "addons/bui-panels/src/ui/handle.rs", "addons/bui-panels/Cargo.toml", "addons/bui-panels/README.md", "addons/bui-panels/tests/panels.rs"]
+---
+
+A layout with a dozen panels needs a way to look at one of them properly. In `bui-panels` that is **framing**: the workspace zooms its camera onto a panel or a group of panels until it fills the screen, and back out again. Maximizing a panel frames it; the overview frames everything.
+
+Framing needs `navigation` set to `Navigation::Focus` (the default) or `Navigation::Free`. With `Navigation::Off` none of this page applies except the tab and panel commands.
+
+## Framing
+
+| What | How |
+| --- | --- |
+| Maximize a panel | Double-click its tab bar, **Maximize** in its menu, or <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>Enter</Kbd>. |
+| Restore it | The same again. You return to what you framed before. |
+| Step out to the enclosing group | <Kbd>Esc</Kbd>, when something is framed and your last click was not inside a panel's content. |
+| Frame the neighbour | <Kbd>Alt</Kbd>+<Kbd>Shift</Kbd>+an arrow key, while something is framed. |
+| Go back or forward | <Kbd>Ctrl</Kbd>+<Kbd>Alt</Kbd>+<Kbd>←</Kbd> and <Kbd>→</Kbd>. The workspace keeps the last 100 framings. |
+| Overview | <Kbd>Ctrl</Kbd>+<Kbd>Alt</Kbd>+<Kbd>↑</Kbd> or <Kbd>Ctrl</Kbd>+<Kbd>0</Kbd> frames everything; press it again to return. |
+
+While you drag a tab near the workspace's edge and part of the layout is off screen, the camera scrolls that way.
+
+A floating panel can't be framed on its own. Maximizing one that floats over the stage frames the stage.
+
+While something is framed, groups too small to read collapse into a tile with an outline of their splits (see [`Detail`](../workspace/#detail)). Double-click the tile to frame the part under the pointer.
+
+The framing is part of the layout document (its `navigation`), so it is saved and restored with the layout.
+
+### Framing from code
+
+These are methods on `Workspace`. `WorkspaceRef` has the same ones (`back` and `forward` for the two history methods), taking `cx: &mut App`; see [the markup reference](../markup/#use_workspace-and-workspaceref).
+
+| Method | What it does |
+| --- | --- |
+| `frame(&mut self, target: FrameTarget, cx)` | Frames everything, the stage, or the smallest group that holds the given ids. |
+| `toggle_maximize(&mut self, panel_or_view: &Id, cx) -> bool` | Maximizes a panel (or a view's panel), or restores it when it already is. `false` when navigation is off, the panel floats, or the id is unknown. |
+| `navigate_back(&mut self, cx)` | Goes back in the framing history. |
+| `navigate_forward(&mut self, cx)` | Goes forward. |
+| `overview(&mut self, cx)` | Frames everything and remembers the current framing, so the **Overview** command can return to it. |
+| `framed(&self) -> Option<&Id>` | The framed node's id; `None` when everything shows. |
+| `camera(&self) -> Rect` | The part of the layout the screen shows, in fractions of the whole layout. `Rect::UNIT` is everything. |
+
+### FrameTarget
+
+| Variant | What it frames |
+| --- | --- |
+| `All` | Everything. |
+| `Stage` | The stage. |
+| `Ids(Vec<Id>)` | The smallest node that holds all of them. An id can be a split, the stage, a panel or a view (its docked panel counts). Ids that match nothing are skipped; if none match, nothing happens. |
+
+### Saved framings
+
+A framing can be saved under a name and gone back to later, even after the layout changed: the workspace frames the smallest group that still holds the panels it saved.
+
+| Method | What it does |
+| --- | --- |
+| `save_framing(&mut self, name: &str, cx) -> Option<Framing>` | Saves what is framed now (or everything) under `name`, trimmed. `None` when `name` is blank. |
+| `go_framing(&mut self, id: &Id, cx)` | Frames a saved framing. |
+| `remove_framing(&mut self, id: &Id, cx)` | Deletes it. |
+| `framings(&self) -> &[Framing]` | The saved framings, oldest first. |
+
+A `Framing` has an `id`, a `name` and `frame`, the ids of the panels it holds. Saving and removing fire a `Change` event and are persisted.
+
+## Free navigation
+
+With `navigation: Navigation::Free` the camera moves freely too. When a gesture ends, the camera settles on the panel or group that fits the view best.
+
+| Gesture | Default |
+| --- | --- |
+| Swipe between panels | Two fingers on a touchpad. |
+| Zoom | Pinch on a touchpad (the `pinch` feature). |
+| Scale | <Kbd>Ctrl</Kbd> + two fingers. |
+| Step in or out of the layout | <Kbd>Ctrl</Kbd>+<Kbd>Alt</Kbd> + two fingers, or <Kbd>Ctrl</Kbd>+<Kbd>Alt</Kbd>+wheel, or <Kbd>Ctrl</Kbd>+wheel. |
+| Pan | Drag with the middle button. |
+| Scale with the mouse | Hold <Kbd>Space</Kbd> and drag. |
+| Frame an area | <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd> and drag a rectangle; release to frame what best fits it, or <Kbd>Esc</Kbd> to cancel. |
+
+A view decides whether these gestures reach it with [`GestureOwner`](../workspace/#gestureowner): a map that pans itself should take `Exclusive`. Views also get a minimum size of 480 × 320 pixels in free navigation, so the workspace can report how much they are [scaled down](../workspace/#scaling).
+
+<Callout type="note" title="Pinch and Ctrl">
+BUI reports a trackpad pinch as <Kbd>Ctrl</Kbd> plus a touchpad scroll, as browsers do. With the `pinch` feature on (the default), a <Kbd>Ctrl</Kbd> touchpad scroll without <Kbd>Shift</Kbd> or <Kbd>Alt</Kbd> is always taken as a pinch and zooms about the pointer, before the `touch_scale` chord is looked at. So with the default `touch_scale` of `Ctrl`, the scale gesture only runs as its own gesture when the feature is off.
+</Callout>
+
+## Commands
+
+Every keyboard shortcut runs a `Command`. `Workspace::run(command, cx)` and `WorkspaceRef::run(command, cx)` run one from code. `Ctrl` below is `Mod` in the keymap.
+
+| `Command` | `label()` | Default binding | What it does |
+| --- | --- | --- | --- |
+| `NavigationLeft` | Panel to the left | `Alt+Shift+ArrowLeft` | Frames the neighbour to the left of what is framed. |
+| `NavigationRight` | Panel to the right | `Alt+Shift+ArrowRight` | Frames the neighbour to the right. |
+| `NavigationUp` | Panel above | `Alt+Shift+ArrowUp` | Frames the neighbour above. |
+| `NavigationDown` | Panel below | `Alt+Shift+ArrowDown` | Frames the neighbour below. |
+| `NavigationOverview` | Overview | `Mod+Alt+ArrowUp`, `Mod+0` | Frames everything; again returns to what was framed. |
+| `NavigationBack` | Back | `Mod+Alt+ArrowLeft` | Back in the framing history. |
+| `NavigationForward` | Forward | `Mod+Alt+ArrowRight` | Forward in the framing history. |
+| `NavigationStepOut` | Step out | `Escape` | Frames the group around what is framed. Ignored when nothing is framed or the last click was inside a panel's content. |
+| `FrameToggle` | Frame panel | `Mod+Shift+Enter` | Maximizes the focused panel, or restores it. |
+| `PanelNext` | Next panel | `F6` | Focuses the next panel: docked panels in layout order, then floating ones. |
+| `PanelPrevious` | Previous panel | `Shift+F6` | Focuses the previous panel. |
+| `TabNext` | Next tab | `Mod+Tab` | Selects the next tab of the panel under the pointer, else of the focused panel. |
+| `TabPrevious` | Previous tab | `Mod+Shift+Tab` | Selects the previous tab. |
+| `ViewClose` | Close tab | `Mod+W` | Closes the focused view if it is closable, so it can be reopened. |
+| `ViewReopen` | Reopen closed tab | `Mod+Shift+T` | Reopens the tab closed last. |
+| `PanelFloat` | Float panel | none | Floats the focused panel. |
+| `PanelHide` | Hide panel | none | Hides the focused panel. |
+| `ShortcutsToggle` | Shortcuts | `Mod+Shift+/`, `Mod+?`, `Mod+Shift+?` | Shows or hides the overlay that lists every binding (and, in free navigation, the gestures). <Kbd>Esc</Kbd> also closes it. |
+
+`Command::ALL` holds the 18 commands in the order above, which is the order the shortcuts overlay lists them in. When one key matches several commands, the first in that order wins. `label(self) -> &'static str` is the name the overlay shows.
+
+Keys pressed while a panel menu is open drive the menu instead (see [Menus](../menus/#from-the-keyboard)).
+
+## Keymap
+
+```rust
+pub type Keymap = HashMap<Command, Option<String>>;
+```
+
+`WorkspaceOptions::keymap` (or the `keymap` prop) holds your bindings. Each entry replaces the default for its command; `None` unbinds it. Commands you leave out keep their defaults.
+
+### The combo format
+
+- A combo is modifiers and a key joined by `+`: `Mod+Shift+T`. Several combos for one command are separated by `,`: `Mod+Alt+ArrowUp,Mod+0`.
+- Modifiers: `Mod`, `Ctrl` or `Control`, `Alt` or `Option`, `Shift`, `Meta` or `Cmd`. They are matched exactly: a combo without `Shift` does not match with <Kbd>Shift</Kbd> held.
+- `Mod` is <Kbd>Ctrl</Kbd> on every platform, because BUI reports <Kbd>Cmd</Kbd> as <Kbd>Ctrl</Kbd> on macOS. `Mod`, `Ctrl`, and on macOS `Meta` and `Cmd`, all mean that one key. Elsewhere a `Meta` combo never matches.
+- Keys are case-insensitive. Use DOM names (`Enter`, `ArrowLeft`, `Escape`, `/`, `?`) or BUI's keysyms (`Return`, `Left`, `slash`, `question`); both match. `Esc`, `KP_Enter`, `ISO_Left_Tab`, `plus` and `minus` are understood too. A trailing `+` (`Mod++`) is the plus key.
+
+For example, inserting `(Command::PanelFloat, Some("Mod+Shift+F".into()))` gives floating a shortcut, and `(Command::ViewClose, None)` takes away the close shortcut. An empty `Keymap::new()` keeps every default.
+
+### Keymap functions
+
+In the `bui_panels::keymap` module:
+
+| Function | What it does |
+| --- | --- |
+| `default_keymap() -> Keymap` | The default bindings in the table above. |
+| `merged_keymap(overrides: &Keymap) -> Keymap` | The defaults with `overrides` applied: what a workspace actually uses. |
+| `matches(keystroke: &Keystroke, combo: &str) -> bool` | Whether a keystroke matches any of `combo`'s comma-separated combos. |
+| `normalize_key(name: &str) -> String` | A key's canonical lowercase name, so `Return` and `Enter` both give `enter`, `ArrowLeft` and `Left` both give `left`. |
+| `format_combo(combo: &str) -> String` | The first combo for display: `⌘⇧T` style on macOS, `Ctrl+Shift+T` elsewhere, with arrows as `←` `→` `↑` `↓`. The menus use it for shortcut hints. |
+| `is_mac() -> bool` | Whether this build targets macOS. |
+| `matches_chord(modifiers: Modifiers, combos: &[String], held: &HashSet<String>) -> bool` | Whether held modifiers and keys match any gesture chord (see below). `held` holds `normalize_key` names. |
+| `is_chord_key(keys: &GestureKeys, key: &str) -> bool` | Whether `key` (a normalized name) is one of the held keys in the `pan`, `scale` or `rect` chords. |
+
+## Gesture keys
+
+The chords held for the camera gestures in free navigation. A chord is like a combo, but every part except the modifiers is a key that must be held down, so `space` means "hold <Kbd>Space</Kbd>". `Mod` works as in a keymap.
+
+```rust
+pub struct GestureKeys {
+    pub pan: Vec<String>,
+    pub scale: Vec<String>,
+    pub rect: Vec<String>,
+    pub step: Vec<String>,
+    pub touch_scale: Vec<String>,
+}
+```
+
+| Field | What holding it does | `default_gesture_keys()` |
+| --- | --- | --- |
+| `pan` | Dragging with the left button pans the camera. A middle-button drag always pans. | none |
+| `scale` | Dragging scales the camera about where you pressed. | `space` |
+| `rect` | Dragging draws a rectangle; releasing frames what best fits it. | `Mod+Alt+Shift`, `Mod+Shift` |
+| `step` | The wheel or a two-finger scroll steps in and out of the layout's groups. | `Mod+Alt` |
+| `touch_scale` | A two-finger scroll scales the camera. | `Ctrl` |
+
+A chord's modifiers must match exactly, so `Mod+Shift` and `Mod+Alt+Shift` are different chords.
+
+Start from `default_gesture_keys()` and change the fields you want. `GestureKeys` compares by value, so the workspace rebuilds its chords only when they change.

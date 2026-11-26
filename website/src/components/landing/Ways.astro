@@ -5,6 +5,7 @@
 // The language choice is shared with the docs' <LangTabs> (localStorage "bui:tabs:lang").
 import { Code } from "astro-expressive-code/components";
 import Icon from "../site/Icon.astro";
+import LangIcon from "../site/LangIcon.astro";
 import ThemedImage from "../docs/ThemedImage.astro";
 import { languages } from "./snippets";
 import { href, repoFile } from "../../lib/docs";
@@ -24,9 +25,8 @@ import { href, repoFile } from "../../lib/docs";
           data-lang={l.tab}
           class:list={["ways-lang", i < languages.length - 1 && "border-r"]}
         >
-          <Icon name={l.icon} size={18} weight="duotone" />
+          <LangIcon name={l.icon} />
           <span>{l.tab}</span>
-          {l.syntaxes.length > 1 && <span class="ways-count tabular">{l.syntaxes.length}</span>}
         </button>
       ))
     }
@@ -36,7 +36,7 @@ import { href, repoFile } from "../../lib/docs";
     languages.map((l, li) => (
       <div id={`lang-${l.id}`} role="tabpanel" aria-labelledby={`lang-tab-${l.id}`} hidden={li !== 0} class="ways-lang-panel" data-lang-panel>
         {l.syntaxes.length > 1 && (
-          <div class="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3 sm:px-8">
+          <div class="flex flex-wrap items-center gap-3 border-b border-border px-5 py-3 sm:px-10 lg:px-12">
             <span class="kicker text-muted">Syntax</span>
             <div role="tablist" aria-label={`${l.tab} syntax`} class="ways-syntaxes" data-syntaxes>
               {l.syntaxes.map((s, si) => (
@@ -49,6 +49,7 @@ import { href, repoFile } from "../../lib/docs";
                   tabindex={si === 0 ? 0 : -1}
                   class="ways-syntax"
                 >
+                  <LangIcon name={s.icon} size={15} />
                   {s.label}
                 </button>
               ))}
@@ -65,7 +66,7 @@ import { href, repoFile } from "../../lib/docs";
             class="ways-panel grid lg:grid-cols-[minmax(0,1.1fr)_minmax(0,1fr)]"
             data-syntax-panel
           >
-            <div class="flex min-w-0 flex-col gap-5 border-border p-5 sm:p-8 lg:border-r">
+            <div class="flex min-w-0 flex-col gap-6 border-border p-5 sm:p-10 lg:border-r lg:p-12">
               <div class="flex flex-col gap-2">
                 <h3 class="text-xl font-semibold tracking-[-0.01em]">{s.title}</h3>
                 <p class="max-w-[62ch] text-[15px] leading-7 text-muted">{s.blurb}</p>
@@ -81,7 +82,7 @@ import { href, repoFile } from "../../lib/docs";
                 </a>
               </div>
             </div>
-            <div class="ways-stage hatch flex min-w-0 flex-col items-center justify-center gap-4 border-t border-border p-6 sm:p-10 lg:border-t-0">
+            <div class="ways-stage hatch flex min-w-0 flex-col items-center justify-center gap-4 border-t border-border p-6 sm:p-10 lg:border-t-0 lg:p-12">
               <figure class="flex w-full flex-col items-center gap-3">
                 <ThemedImage
                   shot={s.shot}
@@ -130,16 +131,6 @@ import { href, repoFile } from "../../lib/docs";
     font-weight: 500;
     background: var(--primary);
   }
-  .ways-count {
-    display: inline-grid;
-    min-width: 1.15rem;
-    height: 1.15rem;
-    place-items: center;
-    font-size: 10.5px;
-    font-weight: 600;
-    border: 1px solid currentColor;
-    opacity: 0.6;
-  }
   .ways-syntaxes {
     display: inline-flex;
     flex-wrap: wrap;
@@ -148,6 +139,9 @@ import { href, repoFile } from "../../lib/docs";
   }
   .ways-syntax {
     position: relative;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
     height: 2rem;
     padding: 0 0.85rem;
     font-size: 13px;

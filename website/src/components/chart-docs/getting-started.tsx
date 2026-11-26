@@ -1,4 +1,4 @@
-import { TriangleLine } from "./zigzag"
+import { PageHead } from "../addon/page-head"
 import { Code } from "./code"
 import snippets from "@/data/charts/generated/snippets.json"
 import { Hatch, Section } from "./hatch"
@@ -32,15 +32,12 @@ export default function GettingStarted() {
 
   return (
     <div className="charts-doc">
-      <header className="border-b border-border px-4 pb-8 pt-8 sm:px-8 md:pt-12">
-        <p className="mb-4 text-xs font-semibold uppercase tracking-[0.16em] text-primary">Getting started</p>
-        <h1 className="text-4xl font-light uppercase tracking-tight text-balance md:text-6xl">Charts that make your mouth drool</h1>
+      <PageHead kicker="Getting started" title="Charts that make your mouth drool">
         <p className="mt-5 max-w-2xl text-lg text-pretty md:text-xl">
           <span className="tabular">{charts.length}</span> charts, <span className="tabular">{exampleCount}</span> runnable examples, BUI charts
           give you creative control over your data.
         </p>
-        <TriangleLine className="mt-8 w-full max-w-md" height={14} peakWidth={20} strokeWidth={2} />
-      </header>
+      </PageHead>
 
       <Section id="install" title="Install" kicker="One minute">
         <div className="flex max-w-2xl flex-col gap-4 text-base leading-7 md:text-[17px] md:leading-8">

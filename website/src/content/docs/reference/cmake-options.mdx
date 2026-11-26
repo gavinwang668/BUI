@@ -62,7 +62,7 @@ Every sizeable optional part of the C kit is one row of `features.json`, the sin
 | `BUI_FILEBROWSER` | `filebrowser` | `ON` | Blender's File Browser: the `filebrowser` node and `BK_file_dialog`. |
 | `BUI_SHELL` | `shell` | `ON` | The [desktop shell](/docs/concepts/desktop-shell): tray icons, notifications, taskbar progress, recent files (shell32 / libdbus-1 loaded at run time). |
 | `BUI_ANIM` | `anim` | `ON` | The animation engine: GSAP- and Motion-style tweens, timelines, springs and easings (`kit/intern/anim`). |
-| `BUI_A11Y` | `a11y` | `OFF` (CMake), on in cargo | Screen readers: each window's accessibility tree, served to UI Automation on Windows through AccessKit (`bui-a11y` in `a11y/`). CMake builds it with cargo, so it needs Rust. |
+| `BUI_A11Y` | `a11y` | `OFF` (CMake), on in cargo | Screen readers: each window's accessibility tree, served to UI Automation on Windows through AccessKit (`bui-a11y` in `platform/a11y/`). CMake builds it with cargo, so it needs Rust. |
 | `BUI_BUILD_IMGUI` | `imgui` | `ON` (CMake, with a C++ compiler), off in cargo | Dear ImGui on BUI. |
 
 See [Text and fonts](../../concepts/text-and-fonts/) for what these change on screen.

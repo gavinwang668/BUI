@@ -1,0 +1,137 @@
+---
+/**
+ * One changelog entry: the date and a "Copy link" button in a left column, the entry on the right.
+ *
+ * <Release id="0-5-1" date="13 Nov 2026" iso="2026-11-13">
+ *
+ * ## 0.5.1
+ *
+ * Body in Markdown. `##` is the entry's title, `###` its sections.
+ *
+ * </Release>
+ *
+ * Leave a blank line after <Release> and before </Release>. Without `iso` the date is shown as a plain label
+ * (for "Unreleased"). Below the `lg` breakpoint the date sits above the entry.
+ */
+import Icon from "../site/Icon.astro";
+
+interface Props {
+  id: string;
+  date: string;
+  iso?: string;
+}
+
+const { id, date, iso } = Astro.props;
+---
+
+<section class="release" id={id} data-release>
+  <div class="release-meta">
+    <div class="release-meta-inner">
+      {iso ? <time datetime={iso}>{date}</time> : <span>{date}</span>}
+      <button type="button" class="release-copy" data-copy-link={`#${id}`}>
+        <Icon name="link" size={14} />
+        <span data-label>Copy link</span>
+      </button>
+    </div>
+  </div>
+  <div class="release-body">
+    <slot />
+  </div>
+</section>
+
+<style>
+  .release {
+    position: relative;
+    margin-top: 4.5rem;
+    scroll-margin-top: calc(var(--header-h) + 1.25rem);
+  }
+  .release:first-child {
+    margin-top: 0;
+  }
+  .release-meta {
+    margin-bottom: 0.75rem;
+  }
+  .release-meta-inner {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    font-size: 13px;
+    line-height: 1.4;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .release-copy {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0;
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    cursor: pointer;
+  }
+  .release-copy:hover,
+  .release-copy:focus-visible {
+    color: var(--foreground);
+  }
+
+  /* The title is the page's big type; sections sit under it, with no rules between entries. */
+  .release-body > :global(h2) {
+    margin-top: 0;
+    padding-top: 0;
+    border-top: 0;
+    font-size: 1.875rem;
+    font-weight: 500;
+    line-height: 1.15;
+    letter-spacing: -0.025em;
+  }
+  .release-body > :global(h3) {
+    margin-top: 2rem;
+    font-size: 1.1875rem;
+    font-weight: 500;
+  }
+  .release-body > :global(p),
+  .release-body > :global(ul) {
+    max-width: 38rem;
+  }
+
+  /* Wide screens: the date hangs in the left margin, level with the title. */
+  @media (min-width: 64rem) {
+    .release-meta {
+      position: absolute;
+      top: 0;
+      right: 100%;
+      width: 8.5rem;
+      margin: 0 1.75rem 0 0;
+      padding-top: 0.6rem;
+    }
+    .release-meta-inner {
+      position: sticky;
+      top: calc(var(--header-h) + 1.25rem);
+      flex-direction: column;
+      align-items: flex-end;
+      gap: 0.5rem;
+    }
+  }
+</style>
+
+<script>
+  // "Copy link": copies the entry's URL, and says so for a moment.
+  document.querySelectorAll<HTMLButtonElement>("[data-copy-link]").forEach((btn) => {
+    btn.addEventListener("click", async () => {
+      const url = new URL(btn.dataset.copyLink ?? "", location.href).href;
+      const label = btn.querySelector<HTMLElement>("[data-label]");
+      try {
+        await navigator.clipboard.writeText(url);
+        if (label) label.textContent = "Copied";
+      } catch {
+        history.replaceState(null, "", btn.dataset.copyLink ?? "");
+        if (label) label.textContent = "Link in address bar";
+      }
+      setTimeout(() => {
+        if (label) label.textContent = "Copy link";
+      }, 1800);
+    });
+  });
+</script>

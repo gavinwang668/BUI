@@ -1,0 +1,46 @@
+---
+/**
+ * A language, framework or package manager's file icon from Catppuccin's VS Code icons
+ * (https://github.com/catppuccin/vscode-icons, v1.26.0, MIT: src/assets/lang-icons/LICENSE),
+ * inlined at build time. The icons colour themselves through `--vscode-ctp-*`: Latte in light
+ * mode, Mocha in dark (the page's `color-scheme` picks with `light-dark()`).
+ *
+ *   <LangIcon name="rust" />
+ *
+ * The names are in src/lib/lang-icons.ts. A name without an icon fails the build.
+ */
+import type { LangIconName } from "../../lib/lang-icons";
+
+const icons = import.meta.glob<string>("../../assets/lang-icons/*.svg", { query: "?raw", import: "default", eager: true });
+
+interface Props {
+  name: LangIconName;
+  size?: number;
+  class?: string;
+}
+
+const { name, size = 18, class: className } = Astro.props;
+const svg = icons[`../../assets/lang-icons/${name}.svg`];
+if (!svg) {
+  throw new Error(`LangIcon: no icon "${name}" in src/assets/lang-icons`);
+}
+const html = svg.replace(/width="16" height="16"/, `width="${size}" height="${size}" aria-hidden="true" focusable="false"`);
+---
+
+<span class:list={["lang-icon inline-flex shrink-0", className]} set:html={html} />
+
+<style>
+  /* Catppuccin: Latte, Mocha */
+  .lang-icon {
+    --vscode-ctp-blue: light-dark(#1e66f5, #89b4fa);
+    --vscode-ctp-green: light-dark(#40a02b, #a6e3a1);
+    --vscode-ctp-maroon: light-dark(#e64553, #eba0ac);
+    --vscode-ctp-peach: light-dark(#fe640b, #fab387);
+    --vscode-ctp-red: light-dark(#d20f39, #f38ba8);
+    --vscode-ctp-rosewater: light-dark(#dc8a78, #f5e0dc);
+    --vscode-ctp-sapphire: light-dark(#209fb5, #74c7ec);
+    --vscode-ctp-sky: light-dark(#04a5e5, #89dceb);
+    --vscode-ctp-text: light-dark(#4c4f69, #cdd6f4);
+    --vscode-ctp-yellow: light-dark(#df8e1d, #f9e2af);
+  }
+</style>

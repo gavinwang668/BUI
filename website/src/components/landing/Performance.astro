@@ -1,10 +1,17 @@
 ---
-// Benchmark highlights and charts. Every number comes from src/data/bench.ts, which
+// Benchmark highlights and charts, at the top of /benchmarks. Every number comes from src/data/bench.ts, which
 // follows README.md "Performance" (a Ryzen 7 5800U laptop, Windows 11, on AC power).
 import BenchChart from "../charts/BenchChart.astro";
 import Icon from "../site/Icon.astro";
 import { benchCaveat, highlights, machine } from "../../data/bench";
 import { href, repoFile } from "../../lib/docs";
+
+interface Props {
+  /** The link to every benchmark (off on /benchmarks itself). */
+  more?: boolean;
+}
+
+const { more = true } = Astro.props;
 ---
 
 <ul class="grid grid-cols-1 border-b border-border sm:grid-cols-2 xl:grid-cols-4">
@@ -73,9 +80,13 @@ import { href, repoFile } from "../../lib/docs";
     {machine}. {benchCaveat} gpui figures don't include their GPU time.
   </p>
   <p class="flex shrink-0 flex-wrap gap-x-5 gap-y-1">
-    <a class="group inline-flex items-center gap-1.5 font-medium text-link" href={href("docs/performance/benchmarks/")}>
-      Every benchmark <Icon name="arrow-right" size={14} class="transition-transform duration-200 group-hover:translate-x-0.5" />
-    </a>
+    {
+      more && (
+        <a class="group inline-flex items-center gap-1.5 font-medium text-link" href={href("benchmarks/")}>
+          Every benchmark <Icon name="arrow-right" size={14} class="transition-transform duration-200 group-hover:translate-x-0.5" />
+        </a>
+      )
+    }
     <a class="hover:text-foreground" href={repoFile("bindings/rust/bench/README.md")}>Method and raw data</a>
   </p>
 </div>

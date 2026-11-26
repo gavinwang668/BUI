@@ -9,38 +9,110 @@ sources: ["CHANGELOG.md", "addons/bui-vscode/README.md", "kit/include/BUI_kit.h"
 
 Here's the story of BUI so far, in plain words: what each release gave you, and what's waiting on `main` for the next one. For every detail, read the full [CHANGELOG.md](https://github.com/ppmpreetham/BUI/blob/main/CHANGELOG.md); it follows [Keep a Changelog](https://keepachangelog.com), and versions follow [Semantic Versioning](https://semver.org).
 
+<Release id="unreleased" date="Unreleased">
+
 ## Coming next
 
 These are on `main` and will ship in the next release; the details are under **Unreleased** in the changelog. Nothing here is on PyPI, crates.io or npm yet.
 
-- **Closing a window frees it.** A closed window gives back everything it held, so apps that open and close dialogs no longer grow.
-- **Your own title bar.** `WindowDecorations::Client` and `window_control_area` (or CSS `app-region`) let you draw the bar, and on Windows the window keeps its resize edges, snap and shadow. See [Your own title bar](../../rust/gpui-syntax/#your-own-title-bar).
+### Blender's widgets and screens
+
+What Blender's own interface gives your app.
+
 - **Blender's screen layout.** Areas you resize by dragging the edges between them, split, join and dock by dragging a corner, swap, maximize and drag out of the window; headers, toolbars and sidebars that resize, hide and flip; panels that pin and reorder; the layout saved as JSON. `QSplitter` and tkinter's `PanedWindow` drag Blender's area edges too. See [Screens, areas and regions](../../concepts/screens/).
-- **Animation.** One animation engine in the C kit runs GSAP-style timelines (position strings such as `"<"` and `"+=1"`, stagger, repeat, yoyo) and Motion-style springs, for Rust, JavaScript, React, Python, Lua and C. Rust gets `<motion.div>` in `rsx!`; see [Motion](../../rust/motion/) and [Effects and animations](../../rust/effects-and-animations/).
-- **Vue.** `@blender-ui/vue` renders Vue 3 single-file components in native windows. See [Vue](../../javascript/vue/).
-- **D.** A DUB package with the whole C API, idiomatic wrappers and an HTML, CSS and RSX layer. See [D](../../d/overview/).
-- **Go.** A cgo module with the C kit, and MyGo-style views: `ui.Column(c).Children(...)`, controls bound to your state, and a headless `Tester`. See [Go](../../go/overview/) and [MyGo-style views](../../go/mygo-syntax/).
-- **Video with sound.** A `<video>` now plays its audio track. This changes a default: videos used to be silent, so set `muted` to keep one quiet.
-- **Rust conditionals.** An `Option` is an element: `None` draws nothing and `Some(x)` draws `x`, so `{ cond.then(|| <p>"hi"</p>) }` replaces an empty placeholder.
 - **Controls in node-editor nodes.** A node can hold a button, a checkbox and a dropdown, as Blender's nodes do.
+- **Number fields with `precision`.** `.precision(2)` sets the decimals a number field or slider shows, as a Blender property's precision does. A field whose step turns fractional shows its decimals again.
+- **Themes with keys of your own.** A colour or a number in a theme file that BUI has no field for (`"muted.foreground": "#8696A0"`) is kept and read back by its key with `theme_color` and `theme_value`, so an app's colours live in the same file as Blender's.
+- **Text areas that grow.** `field-sizing: content` makes a browser-look `<textarea>` as tall as its lines, so a message box starts as one line and grows. Inputs and text areas also take their own CSS `color` and `background-color`.
 - **More Qt syntax.** Dock widgets, toolbars, model/view, real dialogs, `QSettings`, dates and a calendar: about 57% of the core widget classes' methods, up from 21%.
-- **Windows.** Resizing a window is smoother and renders far fewer frames, and a window that animates for ever no longer ignores the mouse and keyboard.
-- **Faster frames in Rust.** Text wraps once per size and width instead of once per use, scrolling a page that nothing follows places the last frame again instead of rendering the view, and CSS animations copy less: a page of 400 paragraphs renders again in half the time, and scrolling 1,500 plain rows (no hover styles) takes 5.0 ms per frame instead of 17.9; rows with hover styles take 19.6 ms instead of 32.6. These are per-frame times of one development machine, so compare the two numbers, not the milliseconds; the [changelog](https://github.com/ppmpreetham/BUI/blob/main/CHANGELOG.md) has the details.
-- **Fixes.** Tailwind `text-sm` line heights and `truncate` now show the `…`; form widgets and overlays paint in the right order in Rust.
-- **Editor extensions** for `rsx!` in VS Code and Zed. See [Editor support](../../rust/editor-support/).
+
+### Animation, effects and media
+
+Motion that costs almost nothing, shaders of your own, and sound.
+
+- **Animation.** One animation engine in the C kit runs GSAP-style timelines (position strings such as `"<"` and `"+=1"`, stagger, repeat, yoyo) and Motion-style springs, for Rust, JavaScript, React, Python, Lua and C. Rust gets `<motion.div>` in `rsx!`; see [Motion](../../rust/motion/) and [Effects and animations](../../rust/effects-and-animations/).
 - **Effects that cost almost nothing.** CSS animations and transitions of colours, opacity and transforms repaint without rendering or laying out; `scale` draws as vectors; a wide blur works at a fraction of the resolution and is cached, so a turning 64 px blurred cover went from 5 s to 2 ms a frame. Turns and skews run on the GPU. See [Effects and animations](../../rust/effects-and-animations/).
+- **Your own shaders on the GPU.** A canvas runs a pixel shader of yours (`Painter::effect`), written once in GLSL for Direct3D and OpenGL. An effect can also draw into a texture (`RenderTarget`, `Painter::effect_to`) that a later pass samples, so a simulation can feed back on itself. See [GPU effects](../../rust/gpu-effects/) and the [demo apps](../../rust/demos/).
+- **Video with sound.** A `<video>` now plays its audio track. This changes a default: videos used to be silent, so set `muted` to keep one quiet.
 - **Sound without a picture.** `BK_sound_*` (Rust `blenderui::Sound`) plays an audio file or url, with play, pause, seek and volume. See [Video](../../concepts/video/).
-- **Fonts for every script.** A CSS family list is used whole, glyphs a font lacks come from the rest of the list, then from the system's fallback fonts for their script when one is installed, and installed fonts are found by their own names. See [Text and fonts](../../concepts/text-and-fonts/).
-- **Rust: `Window::scroll_into_view`**, with an eased glide, and hover and copy on painted lists. See [Virtual lists](../../rust/virtual-list/).
-- **Images** are no longer repainted at every render, and a window resize reuses their decodes instead of blinking.
-- **Touch screens and trackpad gestures.** One model in the kit for every platform: a tap clicks, a drag scrolls and flings, a long press opens the context menu, and two fingers pan, pinch and turn. Rust has `on_pan`, `on_pinch` and `on_rotate`. On Android the `touch_drag` window key is gone: a custom node calls `BK_custom_set_touch(node, BK_TOUCH_MODE_POINTER)`. See [Touch and gestures](../../concepts/touch/).
+
+### CSS and layout
+
+More of the web's CSS, drawn as browsers draw it.
+
+- **CSS that looks right.** `box-shadow` blurs smoothly and leaves empty boxes empty, `radial-gradient()` takes its position and size, each corner keeps its own `border-radius`, `overflow: hidden` rounds what it holds, and `text-shadow` takes lists with blur. Rounded, turned and blurred boxes keep their corners and draw fast.
 - **CSS measured against web-platform-tests.** Inline layout as browsers do it (text goes round floats, `text-align: justify`), grid lanes, subgrid, anchor positioning and view transitions: 4,860 of the 7,135 reftests that run pass (68.1%). See [Coverage](../../reference/coverage/#css-against-web-platform-tests).
+- **Boxes lay out as in a browser.** A flex item a quarter of 190px is 47.5px wide (it was rounded to 48), and `element_bounds` reports what `getBoundingClientRect` would. Each edge of a background, border and image snaps to the nearest device pixel, so edges stay crisp and neighbouring boxes still meet. The cascade, selectors and `rem` follow the specifications, `aspect-ratio` works on images, and borders sit where they belong.
+
+### Text, fonts and images
+
+Every script, and pictures that are not drawn twice.
+
+- **Fonts for every script.** A CSS family list is used whole, glyphs a font lacks come from the rest of the list, then from the system's fallback fonts for their script when one is installed, and installed fonts are found by their own names. See [Text and fonts](../../concepts/text-and-fonts/).
+- **Text details.** Han characters follow their own line (a Chinese line after a Japanese one no longer takes Japanese forms), synthetic italic works on the GPU glyph atlas, `text-overflow: ellipsis` no longer cuts most real text in the middle of a glyph, and finding a font by name no longer stalls the window: the font folders are read on a thread of their own and the list is cached.
 - **More image formats.** TIFF and HEIC (through the OS) are on by default; OpenEXR, AVIF and JPEG XL are opt-in. See [Images](../../concepts/images/).
+- **Images** are no longer repainted at every render, and a window resize reuses their decodes instead of blinking.
+
+### Input, events and windows
+
+Input that behaves as it does in a browser or a native window.
+
+- **Input that behaves as in a window.** Simulated keys and clicks reach your listeners while Blender handles them, so `prevent_default` works in headless runs; a field your own Enter replaces no longer crashes, and keys typed after a click that rebuilds a button go where the pointer is.
+- **Every HTML event.** Rust and JavaScript get a listener for each `on*` event, with capture and bubbling, `on_key_press`, and Blender's press-drag (`on_press_drag`: once per press, from the first movement past the drag threshold).
+- **Touch screens and trackpad gestures.** One model in the kit for every platform: a tap clicks, a drag scrolls and flings, a long press opens the context menu, and two fingers pan, pinch and turn. Rust has `on_pan`, `on_pinch` and `on_rotate`. On Android the `touch_drag` window key is gone: a custom node calls `BK_custom_set_touch(node, BK_TOUCH_MODE_POINTER)`. See [Touch and gestures](../../concepts/touch/).
+- **Shortcuts that stand aside.** `Window::text_field_focused()` tells a single-key shortcut not to fire while someone types in a Blender text field, and `WeakEntity::listener` makes a listener from a copyable handle for elements built away from `render`.
+- **Your own title bar.** `WindowDecorations::Client` and `window_control_area` (or CSS `app-region`) let you draw the bar, and on Windows the window keeps its resize edges, snap and shadow. See [Your own title bar](../../rust/gpui-syntax/#your-own-title-bar).
+- **Rust: `Window::scroll_into_view`**, with an eased glide, and hover and copy on painted lists. See [Virtual lists](../../rust/virtual-list/).
+- **Windows.** Resizing a window is smoother and renders far fewer frames, and a window that animates for ever no longer ignores the mouse and keyboard.
+
+### Languages and tools
+
+More ways to write your UI.
+
+- **Vue.** `@blender-ui/vue` renders Vue 3 single-file components in native windows. See [Vue](../../javascript/vue/).
+- **D.** A DUB package with the whole C API, idiomatic wrappers and an HTML, CSS and RSX layer, on code.dlang.org: `dub add blenderui`. See [D](../../d/overview/).
+- **Go.** A cgo module with the C kit, and MyGo-style views: `ui.Column(c).Children(...)`, controls bound to your state, and a headless `Tester`. See [Go](../../go/overview/) and [MyGo-style views](../../go/mygo-syntax/).
+- **C#.** A first slice of a C# binding: every function of the C kit through generated interop, and `Node`, `Frame`, `Button`, `Label`, `Context` and `Window` on top, with a headless test suite and a hello example. See [C#](../../csharp/overview/).
+- **Ruby.** The `blenderui` gem, a C extension over the kit: nodes, layout managers, menus, canvas items, text areas, images, headless rendering to PNG, native windows that let other threads run, and `BUI::Builder` for interfaces made of blocks. It is not on RubyGems yet. See [Ruby](../../ruby/overview/).
+- **Lua follows the kit.** Custom nodes get their callbacks (`on_event`, `on_frame`, `on_draw`, `on_free`), canvas items take images and effects, and areas split, join, dock and swap from Lua and D too.
+- **Rust conditionals.** An `Option` is an element: `None` draws nothing and `Some(x)` draws `x`, so `{ cond.then(|| <p>"hi"</p>) }` replaces an empty placeholder.
+- **Rust props as a struct.** `#[component] fn chat(ChatProps { title, .. }: ChatProps)` uses a `#[derive(Props)]` struct, optional props take an `Option` (`x={None}` leaves the prop out), and a missing required prop is reported on its tag (`<Card />`) instead of on the whole `rsx!`.
+- **The `bui` command.** `bui new` and `bui init` ask what to write in (Rust, JavaScript or TypeScript with React, Svelte or plain DOM, Python, Lua, C), check that the language's tools are installed, and write a project with that language's lints and formatter.
+- **Editor extensions** for `rsx!` in VS Code and Zed. See [Editor support](../../rust/editor-support/).
+
+### Platforms and the desktop
+
+Windows, Android, the browser and assistive technology.
+
 - **The desktop shell.** Tray icons with menus, notifications, taskbar progress and recent files, from every language. See [Desktop shell](../../concepts/desktop-shell/).
-- **Screen readers on Windows**, through AccessKit (the new `bui-a11y` crate in `a11y/`). See [Limitations](../limitations/#accessibility).
-- **Direct3D 12, opt-in**, and `BUI_GPU_ADAPTER=high-performance` for the discrete GPU. See [Rendering](../../concepts/rendering/).
+- **Screen readers on Windows**, through AccessKit (the new `bui-a11y` crate in `platform/a11y/`). See [Limitations](../limitations/#accessibility).
+- **Direct3D 12, opt-in**, and `BUI_GPU_ADAPTER=high-performance` for the discrete GPU. See [GPU backends and adapters](../../concepts/gpu-backends/) and [Rendering](../../concepts/rendering/).
 - **MSIX packages.** `bui build app.jsx --msix`, or `bui package` for any BUI executable. See [Standalone executables](../../javascript/standalone-executables/#releasing-on-windows).
-- **Android apps in Rust** with `blenderui::android_main!`, and **a blenderui app in a web page** through WebAssembly. See [Android](../../concepts/android/) and [WebAssembly](../../rust/webassembly/).
+- **Android.** Real apps in Rust with `blenderui::android_main!`, Dear ImGui and JavaScript (React, Vue or Svelte on QuickJS, about 2.8 MB) apps, scrolling and flings ported from Android's own, a rubber band past the ends, the display's fastest refresh rate (90 Hz panels no longer held to 60), and Back that walks back through an app's screens. See [Android](../../concepts/android/).
+- **A blenderui app in a web page**, through WebAssembly, with frames that copy twice as fast. See [WebAssembly](../../rust/webassembly/).
+
+### Faster
+
+Less work per frame, and none when nothing changed.
+
+- **Faster frames in Rust.** Text wraps once per size and width instead of once per use, scrolling a page that nothing follows places the last frame again instead of rendering the view, and CSS animations copy less: a page of 400 paragraphs renders again in half the time, and scrolling 1,500 plain rows (no hover styles) takes 5.0 ms per frame instead of 17.9; rows with hover styles take 19.6 ms instead of 32.6. These are per-frame times of one development machine, so compare the two numbers, not the milliseconds; the [changelog](https://github.com/ppmpreetham/BUI/blob/main/CHANGELOG.md) has the details.
+- **Plain content costs nothing.** Moving over, pressing and releasing on elements nothing answers to no longer renders the window: clearing a selection with a click on a page of 12,000 words takes 3 ms instead of 31, and a drag-select across it 11 ms instead of 61 to 108.
+- **Less to lay out and paint.** The kit arranges only the nodes that changed, Rust does not paint boxes outside the view, and painting and CSS redraws allocate nothing per frame.
+
+### Fixed
+
+Bugs that were found by building real apps and by the web-platform-tests.
+
+- **Closing a window frees it.** A closed window gives back everything it held, so apps that open and close dialogs no longer grow.
+- **Fixes.** Tailwind `text-sm` line heights and `truncate` now show the `…`; form widgets and overlays paint in the right order in Rust.
+- **Controls and input.** A checkbox or radio the user clicked no longer ignores the app from then on, a highlighted span no longer hides its later words, simulated keys reach listeners while Blender handles them, a field replaced by its own Enter no longer crashes, and a drag no longer jumps to the window's corner when the pointer leaves one of Blender's widgets.
+- **Screens and the C API.** Removing a maximized area gives the others back, a saved layout keeps settings the host hasn't applied yet, a node can no longer be added under itself, and menu items only go to menu buttons.
+- **Windows.** The system's maximize button maximizes again, a window that animates for ever can be dragged, and GPU effects drawn from two threads no longer report a missing shader compiler.
+- **GPU effects** written in GLSL now compile on Direct3D too: `atan(y, x)` becomes `atan2` and names HLSL reserves are renamed.
+
+</Release>
+
+<Release id="0-5-1" date="13 Nov 2026" iso="2026-11-13">
 
 ## In 0.5.1
 
@@ -68,6 +140,10 @@ Open a pie while a key is held and release the key to pick, as Blender does. Als
 - Wayland: no more crash at exit, the first window draws at once, frames copy only what changed, and cursors use the compositor's cursor shapes.
 - Rust views are lighter and quicker: one hasher, 136-byte elements, and a display list that changes everywhere redraws only what changed.
 - Fixed: closing a pie during its open animation, input methods typing key names, a frame callback that closed its own window, the Lua module that could not be loaded, a macOS link error for the npm runtime, and `bui_version_string()` stuck at 0.1.0.
+
+</Release>
+
+<Release id="0-5-0" date="8 Nov 2026" iso="2026-11-08">
 
 ## In 0.5.0
 
@@ -107,6 +183,10 @@ Three people have tried the Cocoa host by hand (two Apple Silicon Macs and an In
 ### Thanks
 
 seclorum, concprog, HEOJUNFO, giraldeau, YuFu-Onship, piaoboo and DanNoby, and everyone who tested and reported on Discord.
+
+</Release>
+
+<Release id="0-1-0-to-0-4-1" date="5–6 Nov 2026">
 
 ## From 0.1.0 to 0.4.1
 
@@ -161,6 +241,10 @@ Some work on `main` is described in the README but doesn't have a changelog entr
 - GPU text read an environment variable on every text run, which pushed the GPU raster from 1.6 to 9.4 ms per frame at 3,000 cells. It now reads it once.
 - In Rust, `cx.notify()` inside `WindowHandle::update` didn't re-render that window.
 
+</Release>
+
+<Release id="0-1-0" date="First release">
+
 ## 0.1.0: the first release
 
 The first release of `blenderui` on PyPI brought the foundations:
@@ -171,6 +255,8 @@ The first release of `blenderui` on PyPI brought the foundations:
 - **Qt syntax:** a subset of Qt's widgets, layouts, signals, `QPainter`, menus and timers.
 - **45 Blender components**, from panels and sliders to pie menus, the color picker and editors.
 - **Packaging** as `blenderui`, with `import blenderui` as an alias of `bui`.
+
+</Release>
 
 <Callout type="tip" title="Follow along">
 Watch the [repository](https://github.com/ppmpreetham/BUI) on GitHub to hear about releases, or check the [Roadmap](../roadmap/) for what's planned next.

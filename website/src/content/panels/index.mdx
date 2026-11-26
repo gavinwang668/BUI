@@ -1,0 +1,276 @@
+---
+title: Panels (bui-panels)
+sidebarLabel: Panels
+description: bui-panels gives a Rust app dockable panel layouts on blenderui, with splits around a stage, tabbed views, floating panels, drag and drop, navigation and a JSON layout that saves itself.
+group: Guide
+order: 10
+sources: ["addons/bui-panels/README.md", "addons/bui-panels/Cargo.toml", "addons/bui-panels/build.rs", "addons/bui-panels/layout.json", "addons/bui-panels/src/lib.rs", "addons/bui-panels/src/workspace.rs", "addons/bui-panels/src/drag.rs", "addons/bui-panels/src/render.rs", "addons/bui-panels/src/nav.rs", "addons/bui-panels/src/ui/root.rs", "addons/bui-panels/examples/basic.rs", "addons/bui-panels/examples/ide.rs", "addons/bui-panels/tests/panels.rs", "addons/bui-panels/tests/markup.rs"]
+---
+
+An editor needs more than one view on screen: a file list, a few open documents, a console, an outline. Users want to move them around, put two side by side, pull one out into its own window and find the same arrangement next time. **`bui-panels` is that layout, ready-made**, for apps built on BUI's Rust binding, `blenderui`.
+
+You describe the views your app has. The crate draws the tabs, the dividers and the menus, handles every drag, and keeps the whole arrangement in a JSON document you can save and load.
+
+It is the BUI port of `zopra-panels` (GPUI-PANEL): the same model, layout JSON, keymap, view types and markup, on `blenderui` instead of gpui and gpui-kit. It has its own layout model and does not use BUI's screens and areas (`blenderui::screen`).
+
+## What you get
+
+- **A workspace**: a tree of splits around one **stage**, the main area where documents open.
+- **Panels** of tabbed **views**. Drag a tab to reorder it, onto another panel to join its tabs, onto a panel's edge to split it, or out to float it.
+- **Floating panels** above the layout. Drag their edges to resize them.
+- **Dividers** you drag to resize. <Kbd>Shift</Kbd> snaps to quarters and thirds; a double click evens out the two sides.
+- **Panel menus**, from the `⋯` button or a right click on the tab bar: maximize, float or dock, move to another panel, split, hide, close, close others, and your own entries.
+- **Navigation**: frame (maximize) a panel or a group, go back and forward, show the overview, step out, move to the panel on the left, right, above or below. In free navigation you can also pan, zoom and swipe the camera.
+- **Keyboard shortcuts** you can rebind, **close guards**, **badges** on tabs, an **undo toast** for closed tabs, **hiding and restoring** panels, and **persistence** to a file.
+- **Blender's icons** (`IconName`), drawn from the kit's own SVGs.
+
+## Add it to your project
+
+Inside a BUI checkout, depend on the crate by path:
+
+```toml title="Cargo.toml"
+[dependencies]
+bui-panels = { path = "../addons/bui-panels" } # inside a BUI checkout
+blenderui = { path = "../bindings/rust/blenderui" }
+```
+
+Building needs what `blenderui` needs: CMake and a C compiler.
+
+The crate also reads Blender's icons at build time, from the checkout's `kit/intern/kit_icons_svg.c`. If you build it outside the checkout, point it at one:
+
+| Variable | What it does |
+| --- | --- |
+| `BUI_SOURCE_DIR` | The BUI checkout whose `kit/intern/kit_icons_svg.c` the build script reads. Without it, the build uses the directory two levels above the crate. Changing it rebuilds the icons. |
+
+### Features
+
+| Feature | Default | What it does |
+| --- | --- | --- |
+| `pinch` | On | A trackpad pinch zooms the camera in free navigation. BUI reports a pinch as <Kbd>Ctrl</Kbd> plus a touchpad scroll, as browsers do. |
+| `default` | On | `pinch` and `blenderui/default`. A WebAssembly build turns the defaults off and picks the kit features it can build. |
+
+## Two ways in
+
+There are two ways to make a workspace. Both end in the same engine.
+
+- **The `Workspace` entity.** You register view types in Rust, build a layout document and create the entity. This suits apps that open views from code.
+- **`<Workspace>` markup.** You write the layout in `rsx!`, with `<Row>`, `<Column>`, `<Stage>`, `<Panel>`, `<Float>` and `<View>`. This suits apps that already use [components and hooks](../docs/rust/rsx-and-components/).
+
+### A workspace entity
+
+View types are registered in Rust. The workspace is a window's root view here, but it can also be part of one:
+
+```rust title="src/main.rs"
+use std::collections::HashMap;
+use blenderui::prelude::*;
+use bui_panels::{Allow, ViewType, Workspace, WorkspaceOptions, create_document, layout::*};
+
+struct Note(SharedString);
+impl Render for Note {
+    fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
+        div().p(px(12.0)).child(self.0.clone())
+    }
+}
+
+fn main() {
+    Application::new().run(|cx| {
+        cx.open_window(WindowOptions::default(), |window, cx| {
+            let note = |title: &'static str| ViewType::new(title, move |_, _, cx| cx.new(|_| Note(title.into())).into());
+            let types = HashMap::from([
+                ("files".into(), note("Files").allow(Allow { stage: false, ..Default::default() })),
+                ("editor".into(), note("Editor")),
+            ]);
+            let doc = create_document(
+                Some(&row([panel([view("files")]).into(), stage(Some(panel([view("editor")]).into())).into()],
+                          Some(vec![1.0, 3.0])).into()),
+                vec![],
+                None,
+            ).unwrap();
+            let options = WorkspaceOptions { default_layout: Some(doc), ..Default::default() };
+            cx.new(|cx| Workspace::new(options, types, window, cx))
+        }).unwrap();
+    });
+}
+```
+
+- **`ViewType::new(title, build)`** names a kind of view and says how to make its content: any entity that implements `Render`, turned into an `AnyView` with `.into()`.
+- **`Allow { stage: false, .. }`** keeps the file list out of the stage.
+- **`create_document`** turns the `row`, `panel`, `view` and `stage` helpers into a layout document. `Some(vec![1.0, 3.0])` gives the stage three times the file list's width.
+
+Open more views from code, and listen for what happens:
+
+```rust
+workspace.update(cx, |ws, cx| {
+    ws.subscribe(
+        |_, event, _| match event {
+            WorkspaceEvent::Open(v) => println!("open {}", v.id),
+            WorkspaceEvent::Close(v) => println!("close {}", v.id),
+            _ => {}
+        },
+        cx,
+    );
+    ws.open(
+        "editor",
+        OpenOptions {
+            params: Some(json!({ "name": "new.ts" })),
+            ..Default::default()
+        },
+        cx,
+    );
+});
+```
+
+The [Workspace reference](workspace/) has every option and method.
+
+### A workspace in markup
+
+```rust title="src/main.rs"
+use blenderui::prelude::*;
+use bui_panels::prelude::*;
+
+#[component]
+fn Editor(path: SharedString) {
+    let view = use_view();                       // this view: badge, title, close guard ...
+    let (dirty, set_dirty) = use_state(false);
+    view.guard_close(move |_| !dirty());
+    rsx! { <div class="p-3" onClick={move || set_dirty(true)}>{path}</div> }
+}
+
+#[component]
+fn Ide() {
+    let ws = use_workspace();
+    rsx! {
+        <Workspace handle={ws} persist="layout.json" navigation={Navigation::Free}
+                   on_change={|doc, _, _| println!("{} views", doc.views.len())}>
+            <Row sizes={[1.0, 3.0]}>
+                <Panel id="left">
+                    <View id="files" title="Files" icon={IconName::Folder} keep_out_of_stage>"files"</View>
+                </Panel>
+                <Stage>
+                    <Panel id="docs">
+                        <View id="a.ts" title="a.ts" content={|| rsx! { <Editor path="a.ts" /> }} />
+                    </Panel>
+                </Stage>
+            </Row>
+        </Workspace>
+    }
+}
+
+struct Root;
+impl Render for Root {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        scope(window, cx, || app().child(rsx! { <Ide /> }))  // lends the window and app to <Workspace>
+    }
+}
+```
+
+- **`scope(window, cx, ..)`** lends the window and the app to the `<Workspace>` inside it. `blenderui` components get only their props, so a `<Workspace>` must render inside a `scope`.
+- **`persist="layout.json"`** saves the arrangement to that file and restores it next time.
+- **`use_view()`** inside a view's `content` gives you that view: guard its close, badge its tab, change its title.
+
+The workspace fills its nearest positioned ancestor, which is the window when it is the root. The [Markup reference](markup/) has every component and prop.
+
+## The concepts
+
+| Word | What it is |
+| --- | --- |
+| **Workspace** | The whole area. It holds one layout tree (the docked part), any floating panels, the hidden panels and a record for every view. |
+| **Split** | A node of the tree that lays its children side by side (axis `x`, a `<Row>`) or stacked (axis `y`, a `<Column>`). Each child has a weight; the weights set the sizes. |
+| **Stage** | The main area, at most one per layout. New documents open here by default. It can be empty, and it stays in the tree when its last panel leaves. |
+| **Panel** | A box with a tab bar. It holds one or more views and shows the selected one. |
+| **View** | One tab: an id, a type, optional JSON params and an optional title. Its type decides how its content is made and where it may go. |
+| **Floating panel** | A panel above the docked layout, at a rect given as fractions of the area it floats over. It floats either over the whole workspace (`overlay`) or over the stage (`stage`). |
+| **Hidden panel** | A panel taken off screen, with a note of where to put it back. |
+| **Layout document** | All of the above as one serializable value, `LayoutDocument`. It is plain JSON; see [the layout document](layout/). |
+| **Framing** | Which part of the layout fills the screen. Maximizing a panel frames it; the overview frames everything. Framings can be saved by name. |
+
+## Using a workspace
+
+These work in every workspace, with nothing to set up.
+
+| To | Do this |
+| --- | --- |
+| Reorder tabs | Drag a tab along its tab bar. |
+| Move a tab to another panel | Drag it onto that panel. A drop slot shows where it lands once the pointer rests there. |
+| Split a panel | Drag a tab to the panel's edge. |
+| Move a whole panel | Drag the empty part of its tab bar, or its only tab. |
+| Float a tab or a panel | Drag it out and drop it where there is no target, or choose **Float** in its menu. |
+| Resize | Drag a divider. Hold <Kbd>Shift</Kbd> to snap to a quarter, a third, a half, two thirds or three quarters. |
+| Even out two panels | Double-click the divider between them. |
+| Resize with the keyboard | Focus a divider and press the arrow keys: 2% of the split per press, 10% with <Kbd>Shift</Kbd>. |
+| Resize a floating panel | Drag its edges or corners. |
+| Cancel a drag | Press <Kbd>Esc</Kbd> while dragging. |
+| Maximize a panel | Double-click its tab bar, choose **Maximize** in its menu, or press <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>Enter</Kbd>. Do it again to restore. |
+| Close a tab | Its close button, a middle click on it, **Close** in the menu, or <Kbd>Ctrl</Kbd>+<Kbd>W</Kbd>. |
+| Reopen a closed tab | <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>T</Kbd>, or **Undo** on the toast when `undo_seconds` is set. |
+| See every shortcut | <Kbd>Ctrl</Kbd>+<Kbd>Shift</Kbd>+<Kbd>/</Kbd> shows an overlay of the keyboard shortcuts and, in free navigation, the gestures. |
+
+<Kbd>Ctrl</Kbd> is `Mod` in a keymap. BUI reports <Kbd>Cmd</Kbd> as <Kbd>Ctrl</Kbd> on macOS, so the same bindings work there. [Navigation and keys](navigation/) lists every shortcut and gesture.
+
+## Testing a workspace
+
+A workspace runs headless like any other `blenderui` window, so tests can drag tabs and press keys. The crate's own tests do: they build the layout from `layout.json`, drag a divider, drag tabs between and within panels, run a panel menu with the mouse and the keyboard, move focus with the keyboard, and round-trip the markup workspace through its file. See [headless testing](../docs/rust/headless-testing/).
+
+Parts of the workspace carry element ids, so a test can find them:
+
+| Element id | What it is |
+| --- | --- |
+| `zopra` | The workspace's root element (the `ROOT_ID` constant). |
+| `zopra-panel-<panel>` | A docked or floating panel. |
+| `zopra-bar-<panel>` | A panel's tab bar. |
+| `zopra-body-<panel>` | A panel's content area. |
+| `zopra-tab-<view>` | A tab. |
+| `zopra-close-<view>` | A tab's close button. |
+| `zopra-menu-<panel>` | A panel's `⋯` button. |
+| `zopra-menu-<level>-<row>` | A row of an open menu; `menu::row_id(level, row)` builds it. |
+| `zopra-menu-<level>` | A column of an open menu. |
+| `zopra-div-<split>-<index>` | The divider after child `index` of a split. |
+| `zopra-resize-<panel>-<edge>` | A floating panel's resize handle. |
+| `zopra-group-<id>` | A group collapsed into an outline (see `Detail`). |
+| `zopra-undo-toast`, `zopra-undo` | The undo toast and its **Undo** button. |
+| `zopra-shortcuts` | The shortcuts overlay. |
+| `__zopra-drop-slot` | The slot that shows where a dragged tab will land. |
+
+```sh
+cargo run --example basic          # the entity, view types in Rust
+cargo run --example ide            # markup, kept in ./layout.json
+cargo run --example ide -- --screenshot ide.ppm   # headless, to a PPM
+cargo test                         # model unit tests + headless workspaces (tests/)
+```
+
+## Coming from zopra-panels
+
+Change the imports (`zopra_panels` to `bui_panels`, `gpui_kit::gpui` to `blenderui::prelude`) and the app setup (`Application::new()`; markup renders inside `bui_panels::ui::scope`). Otherwise:
+
+- `cx.subscribe(&workspace, ..)` is `workspace.update(cx, |ws, cx| ws.subscribe(.., cx))`.
+- `ViewRef` methods take no `cx` (`view.set_badge(b)`, `view.close()`, `view.titlebar()`). The changes are made when the workspace next renders, so they work in render code and in `use_effect`.
+- A `<View>` needs an `id`, because `blenderui` keeps `key` for hook state. `content` is a closure (`content={move || rsx! { <Editor/> }}`). `use_view()` works in `content` and in `<Template>`s, not in a `<View>`'s children, because `blenderui` builds children before their parent.
+- `IconName` is Blender's icons: `IconName::Folder` is `FILE_FOLDER`, `Close` is `PANEL_CLOSE`, and so on.
+- `Mod` is <Kbd>Ctrl</Kbd>. Keys are BUI's keysyms (`Return`, `Left` ...), and a keymap's DOM names (`Enter`, `ArrowLeft`) still match them.
+
+## The reference
+
+<CardGrid>
+  <Card title="Workspace" href="panels/workspace/" icon="layers" kicker="Reference">
+    The entity, its options, view types, opening and closing views, events, themes and persistence.
+  </Card>
+  <Card title="Markup" href="panels/markup/" icon="code" kicker="Reference">
+    `<Workspace>`, the layout components, `<View>` props, `use_workspace` and `use_view`.
+  </Card>
+  <Card title="Navigation and keys" href="panels/navigation/" icon="compass" kicker="Reference">
+    Framing, history, the camera, every command and its default key, and gesture keys.
+  </Card>
+  <Card title="Menus and icons" href="panels/menus/" icon="list" kicker="Reference">
+    Panel menus, your own entries, the built-in entry ids, and Blender's icons.
+  </Card>
+  <Card title="The layout document" href="panels/layout/" icon="book" kicker="Reference">
+    The JSON schema field by field, the builder, and the functions that edit a document.
+  </Card>
+  <Card title="The layout model" href="panels/model/" icon="cpu" kicker="Reference">
+    The geometry underneath: layout rects, divider pushing, spatial navigation, drop targets and springs.
+  </Card>
+</CardGrid>
+
+## License
+
+MIT (see the crate's `LICENSE`). The icons are Blender's (GPL-2.0-or-later), and `blenderui` is GPL-3.0-or-later.

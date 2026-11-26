@@ -1,0 +1,23 @@
+---
+// The top of a page of its own (/addons, /benchmarks, /roadmap): a kicker, the title as large as the
+// landing page's, then what the page puts in the slot (its lede, links).
+import Icon from "./Icon.astro";
+
+interface Props {
+  kicker: string;
+  /** A Phosphor icon next to the kicker. */
+  icon: string;
+  title: string;
+}
+
+const { kicker, icon, title } = Astro.props;
+---
+
+<header class="flex flex-col gap-5 border-b border-border px-5 py-14 sm:px-10 sm:py-20 lg:px-12">
+  <p class="kicker inline-flex items-center gap-2 text-link">
+    <Icon name={icon} weight="duotone" size={14} />
+    {kicker}
+  </p>
+  <h1 class="max-w-[18ch] text-balance text-[2.6rem] font-light leading-[1.04] tracking-[-0.035em] sm:text-6xl">{title}</h1>
+  <slot />
+</header>

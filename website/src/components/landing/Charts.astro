@@ -1,0 +1,42 @@
+---
+// A taste of BUI Charts: a few previews from the registry (src/data/charts), each linking to its page.
+import Icon from "../site/Icon.astro";
+import { bySlug, charts, exampleCount, imageOf } from "../../data/charts/registry";
+import { href } from "../../lib/docs";
+
+// Picked for variety; a slug missing from the registry is skipped.
+const picks = ["candlestick", "heatmap", "gantt", "flame-graph", "alluvial", "gauge", "histogram", "chord-diagram"]
+  .map((slug) => bySlug.get(slug))
+  .filter((chart) => chart !== undefined);
+---
+
+<div class="grid gap-px border-b border-border bg-border sm:grid-cols-2 lg:grid-cols-4">
+  {
+    picks.map((chart) => (
+      <a href={href(`charts/${chart.slug}`)} class="group flex flex-col gap-3 bg-background p-4 sm:p-5" data-reveal>
+        <div class="img-outline overflow-hidden bg-surface">
+          <img
+            src={imageOf(chart.slug)}
+            alt={`${chart.name} preview`}
+            width={480}
+            height={270}
+            loading="lazy"
+            class="aspect-video w-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
+          />
+        </div>
+        <div class="flex flex-col gap-0.5">
+          <h3 class="text-sm font-semibold uppercase tracking-[0.08em]">{chart.name}</h3>
+          <p class="font-mono text-xs text-link">&lt;{chart.tag}&gt;</p>
+        </div>
+        <p class="text-pretty text-[13px] leading-5 text-muted">{chart.blurb}</p>
+      </a>
+    ))
+  }
+</div>
+
+<p class="flex flex-col gap-2 px-5 py-4 text-sm sm:flex-row sm:items-center sm:justify-between sm:px-8">
+  <span class="text-muted"><span class="tabular">{charts.length}</span> charts and <span class="tabular">{exampleCount}</span> examples, drawn by the same renderer as the widgets.</span>
+  <a href={href("charts/all")} class="group inline-flex items-center gap-1.5 font-medium text-link hover:underline hover:underline-offset-4">
+    See every chart <Icon name="arrow-right" size={14} class="transition-transform duration-200 group-hover:translate-x-0.5" />
+  </a>
+</p>

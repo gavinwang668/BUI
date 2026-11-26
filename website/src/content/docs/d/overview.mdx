@@ -10,19 +10,33 @@ sources: ["bindings/d/README.md", "bindings/d/dub.json", "bindings/d/source/bui/
 
 **The `bindings/d` package gives D programs Blender's widget drawing, layout and interaction rules.** It is a DUB package with three layers: raw `extern(C)` declarations that match the C headers one to one, D classes and delegates for the common paths, and an HTML/CSS/RSX authoring layer. All of them come from `import bui;`.
 
-The package lives in the repository. Add it to a DUB project as a path dependency:
+It is on [code.dlang.org](https://code.dlang.org/packages/blenderui). Add it to a DUB project:
+
+```sh
+dub add blenderui
+```
+
+or write the dependency yourself:
 
 ```json title="dub.json"
 {
     "name": "my-app",
     "targetType": "executable",
     "dependencies": {
-        "bui": { "path": "../BUI/bindings/d" }
+        "blenderui": "~>0.6.0"
     }
 }
 ```
 
-The first build runs CMake and builds the C kit into `bindings/d/.bui/`; later builds reuse it. You need a D compiler with DUB, CMake and a C compiler. The binding is tested with LDC 1.43 (the DMD 2.113 front end); on Windows, the build script finds Visual Studio's CMake when it is not on `PATH`.
+DUB downloads BUI's repository at that version (the C kit is built from its sources, so the download is the whole repository). The first build runs CMake and builds the C kit into the package's `bindings/d/.bui/` folder in DUB's package cache; later builds reuse it. You need a D compiler with DUB, CMake and a C compiler.
+
+To use a checkout instead (to try a change, or a version that is not released), clone the repository and use a path dependency on the repository root or on `bindings/d`:
+
+```json title="dub.json"
+"dependencies": {
+    "blenderui": { "path": "../BUI" }
+}
+``` The binding is tested with LDC 1.43 (the DMD 2.113 front end); on Windows, the build script finds Visual Studio's CMake when it is not on `PATH`.
 
 ## A first window
 

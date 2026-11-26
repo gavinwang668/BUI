@@ -238,6 +238,31 @@ of each file.
 `type`: `note` (default), `tip`, `warning`, `joke`, `coming-soon`. Optional
 `title`. One or two per page; if everything is a callout, nothing is.
 
+### Release
+
+One entry of a changelog: the date and a "Copy link" button in a column on the
+left, the entry on the right (above it on a phone). Use it on the changelog page,
+one `<Release>` per version or group of versions.
+
+```mdx
+<Release id="0-5-1" date="13 Nov 2026" iso="2026-11-13">
+
+## In 0.5.1
+
+Released on 13 November 2026: your own themes and windows that are see-through.
+
+### Your own themes
+
+A theme file (JSON) adds themes next to Dark and Light.
+
+</Release>
+```
+
+Leave a blank line after `<Release>` and before `</Release>`. `id` is the anchor
+the link copies. `date` is the label (`"Unreleased"` works); add `iso` for a real
+date so it renders as a `<time>`. The `##` is the entry's big title and `###`
+its sections.
+
 ### ComingSoon
 
 For features that **aren't built yet**. It links to the roadmap and to

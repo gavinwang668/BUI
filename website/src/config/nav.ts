@@ -4,20 +4,21 @@
 // sidebar, breadcrumbs, prev/next links and search all follow this order.
 // To add a section, add it here; to add a page, add an .mdx file.
 // `icon` is any Phosphor icon name (https://phosphoricons.com).
+// A language's section has `lang` instead: its Catppuccin file icon (<LangIcon>).
 
 export const sections = [
   { label: "Start here", blurb: "What BUI is and how to install it", icon: "compass" },
   { label: "Tutorials", blurb: "Build a first app, one language at a time", icon: "graduation-cap" },
-  { label: "Python", blurb: "tkinter, Qt syntax and Blender components", icon: "file-py" },
-  { label: "Rust", blurb: "HTML, CSS, Tailwind, rsx! and hooks, natively", icon: "file-rs" },
-  { label: "JavaScript & React", blurb: "Node.js, Bun, React, Svelte, Vue and standalone apps", icon: "file-js" },
-  { label: "Dear ImGui", blurb: "The real Dear ImGui, in Blender's theme", icon: "squares-four" },
-  { label: "C & C++", blurb: "The C kit and embedding BUI in your host", icon: "file-c" },
-  { label: "Lua", blurb: "The bui-lua host and the bui module", icon: "moon" },
-  { label: "D", blurb: "A DUB package with raw C declarations and D wrappers", icon: "code" },
-  { label: "C#", blurb: "C# components over every kit function", icon: "file-c-sharp" },
-  { label: "Go", blurb: "The kit from Go, and MyGo-style views", icon: "file-code" },
-  { label: "Ruby", blurb: "A C extension gem, with interfaces built from blocks", icon: "diamond" },
+  { label: "Python", blurb: "tkinter, Qt syntax and Blender components", lang: "python" },
+  { label: "Rust", blurb: "HTML, CSS, Tailwind, rsx! and hooks, natively", lang: "rust" },
+  { label: "JavaScript & React", blurb: "Node.js, Bun, React, Svelte, Vue and standalone apps", lang: "javascript" },
+  { label: "Dear ImGui", blurb: "The real Dear ImGui, in Blender's theme", lang: "cpp" },
+  { label: "C & C++", blurb: "The C kit and embedding BUI in your host", lang: "c" },
+  { label: "Lua", blurb: "The bui-lua host and the bui module", lang: "lua" },
+  { label: "D", blurb: "A DUB package with raw C declarations and D wrappers", lang: "d" },
+  { label: "C#", blurb: "C# components over every kit function", lang: "csharp" },
+  { label: "Go", blurb: "The kit from Go, and MyGo-style views", lang: "go" },
+  { label: "Ruby", blurb: "A C extension gem, with interfaces built from blocks", lang: "ruby" },
   { label: "Concepts", blurb: "How BUI works under the hood", icon: "lightbulb-filament" },
   { label: "Performance", blurb: "Numbers, and how to measure them yourself", icon: "gauge" },
   { label: "Reference", blurb: "Variables, options, matrices and terms", icon: "books" },
@@ -50,25 +51,29 @@ export const languageIds = languages.map((l) => l.id) as unknown as [LanguageId,
 
 /**
  * The header's product-level links. They name areas of the site, not pages: the sidebar
- * lists the pages. `match` decides when a link shows as current: a docs section label, or
- * a page id.
+ * lists the pages. `match` names the docs sections the link is current for; a page of its own
+ * (an addon, a docs page with `page:` in its frontmatter) says so itself.
  */
 export const topLinks = [
   { label: "Docs", href: "docs/start/introduction/", match: {} },
   { label: "Tutorials", href: "docs/tutorials/first-app-python/", match: { sections: ["Tutorials"] } },
-  { label: "Charts", href: "charts/", match: {} },
-  { label: "Benchmarks", href: "docs/performance/benchmarks/", match: { sections: ["Performance"] } },
-  { label: "Roadmap", href: "docs/project/roadmap/", match: { pages: ["project/roadmap"] } },
+  {
+    label: "Addons",
+    href: "addons/",
+    match: {},
+    // shown on hover or focus; the mobile menu lists them under the link
+    menu: [
+      { label: "Panels", href: "panels/", icon: "squares-four", blurb: "Tabbed, docked and floating panel layouts" },
+      { label: "Charts", href: "charts/", icon: "chart-bar", blurb: "80 charts, with the math and a live render" },
+    ],
+  },
+  { label: "Benchmarks", href: "benchmarks/", match: { sections: ["Performance"] } },
+  { label: "Roadmap", href: "roadmap/", match: {} },
 ] as const;
 
 export type TopLink = (typeof topLinks)[number];
 
 /** Which top link is current for a docs page. */
-export function currentTopLink(section: string, pageId: string): string | undefined {
-  for (const l of topLinks) {
-    const m = l.match as { sections?: readonly string[]; pages?: readonly string[] };
-    if (m.pages?.includes(pageId)) return l.label;
-    if (m.sections?.includes(section)) return l.label;
-  }
-  return "Docs";
+export function currentTopLink(section: string): string {
+  return topLinks.find((l) => (l.match as { sections?: readonly string[] }).sections?.includes(section))?.label ?? "Docs";
 }

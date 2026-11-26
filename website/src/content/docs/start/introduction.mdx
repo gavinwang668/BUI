@@ -1,39 +1,44 @@
 ---
 title: Welcome to BUI
 sidebarLabel: Introduction
-description: BUI is Blender's user interface as a standalone library. Here's what that means, who it's for, and where to start.
+description: BUI is a native UI toolkit that grew out of Blender's interface code. Use it for Blender's widgets, for plain HTML and CSS, or for both. Here's what it is, who it's for, and where to start.
 section: Start here
 order: 10
 sources: ["README.md", "ARCHITECTURE.md", "docs/getting-started.md"]
 ---
 
-If you've ever dragged a number in Blender, watched the cursor vanish, and felt the value glide under your hand, you already know what BUI is for. **BUI takes Blender's interface out of Blender and puts it in your app.**
+**BUI is a native UI toolkit, built on the engine that draws Blender's interface.** One small runtime in C lays out your window, handles the mouse, keyboard and touch, animates it and draws it, on the CPU or the GPU, without a browser. You write the UI in the language and style you already know: tkinter, Qt-style Python, Rust, React, Svelte, Vue, Dear ImGui or plain C, with bindings for C#, Go, Lua, Ruby and D.
 
-You keep writing UI the way you like: tkinter, Qt-style Python, Rust, React, Dear ImGui or plain C. BUI draws it with Blender's widgets and gives it Blender's interaction rules. No Blender install needed.
+That engine happens to be Blender's. So **Blender's widgets come with it, but they are a part of BUI, not the whole of it.** Use them when you want the number fields, sliders, pie menus and node editor Blender users know. Or never touch them: build an ordinary app with HTML, CSS or Tailwind, your own components and your own look, and keep what the engine gives every app: fast starts, an idle window that uses no CPU, damage-driven redraws and native windows on Windows, Linux and macOS.
 
 <Figure
   shot="python-components"
   alt="A real BUI window: a Render Properties editor with a menu bar, side tabs, collapsible panels and sub-panels, number fields, sliders, dropdowns, a color swatch and a progress bar"
-  caption="A real BUI window, built with the Blender components from Python (<code>examples/site/render_props.py</code>)."
+  caption="A BUI window built with the Blender components from Python (<code>examples/site/render_props.py</code>). Components are one way to use BUI."
 />
 
 ## What BUI is
 
-BUI is a **UI library**: code that draws buttons, fields and panels in a window and tells your program when someone uses them.
+BUI is a **UI toolkit**: code that draws buttons, fields, text, images and panels in a window and tells your program when someone uses them.
 
-At its heart is the **kit**, a small runtime written in C. The kit holds every widget in one tree, lays them out, handles the mouse and keyboard, and draws them the way Blender does. The drawing code is a C port of Blender's own widget code, and the interaction follows Blender's rules.
+At its heart is the **kit**, a small runtime written in C. The kit holds every element in one tree, lays them out, handles input, animates and draws them. Its drawing and interaction code is a C port of Blender's own, which is why it is fast and why it behaves the way it does.
 
-On top of the kit sit **bindings**: thin layers that let other languages talk to it. Your code builds the widget tree and handles callbacks. Everything else (layout, input, drawing, putting pixels on screen) happens in fast native code.
+Two layers sit on that engine, and you can use either, or both:
+
+- **Blender's look and widgets.** Ready-made Blender components (`Panel`, `NumberSlider`, `PieMenu`, a node editor and more), Blender's theme and Blender's interaction rules.
+- **A general UI toolkit.** HTML, CSS and Tailwind in Rust and JavaScript, React, Svelte and Vue components, CSS Grid and flexbox, animation, images, video, charts, tkinter and Qt-style Python. None of it needs a Blender component; draw whatever you like, in your own style.
+
+On top of the kit sit **bindings**: thin layers that let other languages talk to it. Your code builds the tree and handles callbacks. Everything else (layout, input, drawing, putting pixels on screen) happens in fast native code.
 
 ## Who it's for
 
+- **You want a native desktop UI without a browser.** Write it with HTML and CSS, React, Svelte, Vue or Rust, and ship an executable of a few megabytes.
 - **You have a tkinter app** and wish it looked less like 1998. Run it on BUI, unchanged.
 - **You're building a tool for artists**, and they already know Blender. Give them the panels, sliders and shortcuts their hands expect.
-- **You write Rust or React** and want a native desktop UI without shipping a browser.
 - **You use Dear ImGui** and want it to look and feel like Blender, with one build flag.
 - **You're curious** how a UI toolkit works. The source is readable, and the [Concepts](#how-it-works-in-one-minute) are explained in plain words.
 
-You don't need to know Blender to use BUI. If you do, you'll feel at home.
+You don't need to know Blender to use BUI, and you don't need its widgets either. If you do know Blender, you'll feel at home.
 
 ## Pick your language
 
@@ -49,11 +54,11 @@ Every row below drives the same C kit, so they all get the same widgets and inte
   ["<strong>C</strong> (<code>BUI_kit.h</code>)", "done", "The kit itself"],
 ]} />
 
-Not sure which to pick? If you already have code, use the row that matches it. If you're starting fresh in Python, the Blender components are the friendliest: the [first-app tutorial](../../tutorials/first-app-python/) uses them.
+Not sure which to pick? If you already have code, use the row that matches it. Starting fresh in Rust or JavaScript, write it as you would for the web. Starting fresh in Python and want Blender's look, the Blender components are the friendliest: the [first-app tutorial](../../tutorials/first-app-python/) uses them.
 
 ## What it feels like
 
-These come from Blender and work in every API:
+Every BUI app is native and quick: the first frame in milliseconds, and an idle window that costs nothing. When you use Blender's widgets, you also get Blender's interaction, in every API:
 
 - **Drag to scrub.** Press a number field and drag sideways. The cursor hides and wraps, so you never hit the screen edge. <Kbd>Shift</Kbd> slows it down, <Kbd>Ctrl</Kbd> snaps.
 - **Math in number fields.** Click a Blender number field and type `2*pi` or `90/4`.
@@ -74,9 +79,10 @@ BUI is Blender's UI, minus the default cube. You're free to add your own; we won
 
 ## What BUI is not
 
+- **Not only Blender widgets.** They are one part of BUI. An app can be plain HTML and CSS, or your own components, and never use one.
 - **Not Blender.** It contains the parts of Blender's UI code it needs and builds on its own. You don't need Blender installed.
 - **Not a browser.** The Rust and JavaScript sides use HTML and CSS as a *UI language*, but there's no browser engine, no webview and no network.
-- **Not a re-imagining.** The widget drawing is ported from Blender's `interface_widgets.cc`, and Dear ImGui support runs the real Dear ImGui.
+- **Not a re-imagining.** The engine and the Blender widgets are ported from Blender's own code (`interface_widgets.cc` and more), and Dear ImGui support runs the real Dear ImGui.
 
 BUI is derived from Blender's source code, so it follows Blender's licensing: the GNU GPL, version 3 or later.
 

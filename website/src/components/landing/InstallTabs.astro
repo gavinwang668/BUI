@@ -1,17 +1,38 @@
 ---
-const commands = [
-  { id: "pip", label: "pip", cmd: "pip install blenderui", note: "Python 3.11+: tkinter, Qt syntax, components, Dear ImGui" },
-  { id: "npm", label: "npm", cmd: "npm install @blender-ui/react react", note: "Node.js 18+ or Bun · prebuilt for Windows x64" },
-  { id: "bun", label: "bun", cmd: "bun add @blender-ui/react react", note: "Bun reads JSX directly: bun app.jsx" },
-  { id: "svelte", label: "svelte", cmd: "npm install @blender-ui/svelte svelte", note: "Svelte 5 · Node.js 22.15+ or Bun · prebuilt for Windows x64" },
-  { id: "vue", label: "vue", cmd: "npm install @blender-ui/vue vue", note: "Vue 3 · Node.js 22.15+ or Bun · prebuilt for Windows x64" },
+import LangIcon from "../site/LangIcon.astro";
+import Icon from "../site/Icon.astro";
+import type { LangIconName } from "../../lib/lang-icons";
+
+// These languages build the C kit from a checkout of the repository, so their tab starts with the clone.
+const clone = "git clone --depth 1 https://github.com/ppmpreetham/BUI";
+
+const commands: { id: string; label: string; icon?: LangIconName; cmd: string; note: string }[] = [
+  { id: "bui", label: "bui", cmd: "curl -LsSf https://bui.preetham.top/install.sh | sh", note: "Linux and macOS · then bui new my-app (Rust, JavaScript, Python, Lua or C) or bui init in your own project" },
+  { id: "bui-win", label: "bui (Windows)", icon: "powershell", cmd: "irm https://bui.preetham.top/install.ps1 | iex", note: "PowerShell · then bui new my-app, or bui init in your own project to add BUI to it" },
+  { id: "pip", label: "pip", icon: "python", cmd: "pip install blenderui", note: "Python 3.11+: tkinter, Qt syntax, components, Dear ImGui" },
+  { id: "npm", label: "npm", icon: "npm", cmd: "npm install @blender-ui/react react", note: "Node.js 18+ or Bun · prebuilt for Windows x64" },
+  { id: "bun", label: "bun", icon: "bun", cmd: "bun add @blender-ui/react react", note: "Bun reads JSX directly: bun app.jsx" },
+  { id: "svelte", label: "svelte", icon: "svelte", cmd: "npm install @blender-ui/svelte svelte", note: "Svelte 5 · Node.js 22.15+ or Bun · prebuilt for Windows x64" },
+  { id: "vue", label: "vue", icon: "vue", cmd: "npm install @blender-ui/vue vue", note: "Vue 3 · Node.js 22.15+ or Bun · on npm with the next release" },
   {
     id: "cargo",
     label: "cargo",
+    icon: "cargo",
     cmd: "cargo add blenderui",
     note: "From crates.io · Rust 1.88+, CMake and a C compiler",
   },
-  { id: "cmake", label: "cmake", cmd: "cmake -S . -B build && cmake --build build", note: "C, C++ and Dear ImGui, from a clone of the repo" },
+  { id: "luarocks", label: "luarocks", icon: "lua-rocks", cmd: "luarocks install blenderui", note: "Lua 5.4 · builds the kit: CMake and a C and C++20 compiler" },
+  {
+    id: "go",
+    label: "go",
+    icon: "go-mod",
+    cmd: `${clone} && cd BUI/bindings/go && go generate ./bui && go run ./examples/counter`,
+    note: "Go 1.22+ with cgo, CMake and gcc or clang · runs the counter example; to use it in your own app, see the Go guide",
+  },
+  { id: "dotnet", label: "dotnet", icon: "nuget", cmd: "dotnet add package BlenderUI", note: "C# · not on nuget.org yet: pack it from a clone and add the feed first (see the C# guide)" },
+  { id: "ruby", label: "ruby", icon: "ruby-gem", cmd: `${clone} && cd BUI/bindings/ruby && bundle install && rake compile`, note: "Ruby 3.1+, CMake and a C++20 compiler · builds from a clone: not on RubyGems yet" },
+  { id: "dub", label: "dub", icon: "dub", cmd: "dub add blenderui", note: "D with DUB, CMake and a C compiler · the first build builds the C kit; on code.dlang.org" },
+  { id: "cmake", label: "cmake", icon: "cmake", cmd: `${clone} && cd BUI && cmake -S . -B build && cmake --build build`, note: "C, C++ and Dear ImGui, built from a clone of the repo" },
 ];
 ---
 
@@ -28,14 +49,15 @@ const commands = [
           tabindex={i === 0 ? 0 : -1}
           data-cmd={c.cmd}
           data-note={c.note}
-          class="relative h-10 shrink-0 px-3 font-mono text-[13px] text-muted transition-colors duration-150 hover:text-foreground aria-selected:text-foreground aria-selected:after:absolute aria-selected:after:inset-x-2 aria-selected:after:bottom-0 aria-selected:after:h-0.5 aria-selected:after:bg-primary"
+          class="relative inline-flex h-10 shrink-0 items-center gap-1.5 px-3 font-mono text-[13px] text-muted transition-colors duration-150 hover:text-foreground aria-selected:text-foreground aria-selected:after:absolute aria-selected:after:inset-x-2 aria-selected:after:bottom-0 aria-selected:after:h-0.5 aria-selected:after:bg-primary"
         >
+          {c.icon ? <LangIcon name={c.icon} size={14} /> : <Icon name="terminal-window" size={14} />}
           {c.label}
         </button>
       ))
     }
   </div>
-  <div id="install-panel" role="tabpanel" aria-labelledby="install-tab-pip" class="flex items-start gap-3 px-4 py-4">
+  <div id="install-panel" role="tabpanel" aria-labelledby={`install-tab-${commands[0].id}`} class="flex items-start gap-3 px-4 py-4">
     <span class="select-none font-mono text-[13.5px] leading-6 text-accent" aria-hidden="true">$</span>
     <code class="min-w-0 flex-1 break-all font-mono text-[13.5px] leading-6 text-foreground" data-cmd-text>{commands[0].cmd}</code>
     <button

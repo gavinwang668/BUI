@@ -64,9 +64,9 @@ One source runs on every renderer. It is GLSL with a small set of compatibility 
 | `vec4 input_raw(int i, vec2 texel)` | Like `input_color`, but not premultiplied: for data (a render target), not pictures. |
 | `vec4 input_load(int i, vec2 texel)` | The one texel containing `texel`, exactly (no filtering; clamped to the texture). |
 | `float`, `int`, `bool`, `vec2`, `vec3`, `vec4` | Types (`float2`, `float3`, `float4` work too). One-scalar constructors such as `vec3(0.5)` work on both renderers. |
-| `mix fract mod clamp step smoothstep abs sign floor ceil min max pow exp exp2 log sqrt inversesqrt sin cos tan asin acos atan length distance dot normalize` | The usual built-ins. Use `atan2(y, x)` for the two-argument arc tangent. |
+| `mix fract mod clamp step smoothstep abs sign floor ceil min max pow exp exp2 log sqrt inversesqrt sin cos tan asin acos atan length distance dot normalize` | The usual built-ins. The two-argument arc tangent is GLSL's `atan(y, x)` or `atan2(y, x)`; integers take `>> << & \| ^`. |
 
-Keep to a portable subset: no matrices, no structs or global variables (use `out` and `inout` parameters), no arrays other than `U`, and do not name things `sample`, `line`, `point`, `half`, `texture`, `sampler`, `noise` or `pass` (Direct3D reserves them). An input id with no live texture samples as opaque white.
+Keep to a portable subset: no matrices, no structs or global variables (use `out` and `inout` parameters), and no arrays other than `U`. Names Direct3D reserves but GLSL doesn't (`sample`, `line`, `point`, `half`, `texture`, `sampler`, `noise`, `pass` …) are fine: they are renamed for it. An input id with no live texture samples as opaque white.
 
 ## Errors and fallbacks
 

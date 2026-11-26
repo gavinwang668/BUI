@@ -5,7 +5,8 @@
  *   <Tab label="uv">…</Tab>
  * </Tabs>
  *
- * `sync="key"` keeps every Tabs with the same key on the page (and on later pages) on the
+ * A label that names a language (Python, Rust, rsx!, C++ … see `tabIcons` in src/lib/lang-icons.ts)
+ * shows its Catppuccin icon. `sync="key"` keeps every Tabs with the same key on the page (and on later pages) on the
  * same label, remembered in localStorage. <LangTabs> is <Tabs sync="lang">.
  * Don't nest Tabs inside Tabs.
  */
@@ -16,6 +17,9 @@ interface Props {
   /** Just the tab strip: no box around the panels, which keep the page's own width and spacing. */
   bare?: boolean;
 }
+
+import LangIcon from "../site/LangIcon.astro";
+import { tabIcons } from "../../lib/lang-icons";
 
 const { sync, label = "Choose one", bare = false } = Astro.props;
 
@@ -45,8 +49,9 @@ const decode = (s: string) =>
           aria-selected={n === 0 ? "true" : "false"}
           tabindex={n === 0 ? 0 : -1}
           data-tab={decode(l)}
-          class="relative h-10 shrink-0 whitespace-nowrap px-4 text-sm text-muted transition-colors duration-150 ease-out hover:text-foreground aria-selected:bg-background aria-selected:font-medium aria-selected:text-foreground aria-selected:after:absolute aria-selected:after:inset-x-0 aria-selected:after:top-0 aria-selected:after:h-0.5 aria-selected:after:bg-primary"
+          class="relative inline-flex h-10 shrink-0 items-center gap-2 whitespace-nowrap px-4 text-sm text-muted transition-colors duration-150 ease-out hover:text-foreground aria-selected:bg-background aria-selected:font-medium aria-selected:text-foreground aria-selected:after:absolute aria-selected:after:inset-x-0 aria-selected:after:top-0 aria-selected:after:h-0.5 aria-selected:after:bg-primary"
         >
+          {tabIcons[decode(l)] && <LangIcon name={tabIcons[decode(l)]} size={15} />}
           {decode(l)}
         </button>
       ))

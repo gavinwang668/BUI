@@ -250,6 +250,17 @@ body {
   text-rendering: optimizeLegibility;
 }
 
+/* Code reads as typed: JetBrains Mono's ligatures would draw `=>` and `!=` as single glyphs.
+   Expressive Code reverts every style inside its blocks (`all: revert`), so its blocks inherit
+   the setting from their wrapper. */
+code,
+pre,
+kbd,
+samp,
+.expressive-code {
+  font-variant-ligatures: none;
+}
+
 ::selection {
   background: color-mix(in oklab, var(--primary) 32%, transparent);
 }

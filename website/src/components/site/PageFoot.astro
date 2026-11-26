@@ -1,0 +1,48 @@
+---
+// The foot of a written page: the repository files it's based on, a link to edit it, and when it
+// last changed.
+import Icon from "./Icon.astro";
+import { site } from "../../config/site";
+import { lastUpdated, repoFile } from "../../lib/docs";
+
+interface Props {
+  /** Repository files the page is based on. */
+  sources: string[];
+  /** The page's file, relative to the website (an entry's `filePath`). */
+  filePath: string | undefined;
+}
+
+const { sources, filePath } = Astro.props;
+const updated = lastUpdated(filePath);
+const dateFmt = new Intl.DateTimeFormat("en", { year: "numeric", month: "long", day: "numeric" });
+---
+
+{
+  sources.length > 0 && (
+    <aside class="mt-14 border border-border bg-surface px-4 py-3 text-sm" aria-label="Sources">
+      <p class="kicker mb-1.5 inline-flex items-center gap-1.5 text-muted">
+        <Icon name="git-branch" size={13} /> Based on
+      </p>
+      <ul class="flex flex-wrap gap-x-4 gap-y-1">
+        {sources.map((s) => (
+          <li>
+            <a href={repoFile(s)} class="font-mono text-[12.5px] text-link underline-offset-4 hover:underline">
+              {s}
+            </a>
+          </li>
+        ))}
+      </ul>
+    </aside>
+  )
+}
+
+<div class="mt-10 flex flex-col gap-2 border-t border-border pt-5 text-sm text-muted sm:flex-row sm:items-center sm:justify-between">
+  {
+    filePath && (
+      <a href={site.editBase + filePath} class="inline-flex items-center gap-2 hover:text-foreground">
+        <Icon name="pencil-simple-line" size={15} /> Edit this page on GitHub
+      </a>
+    )
+  }
+  {updated && <p>Last updated <time datetime={updated.toISOString()}>{dateFmt.format(updated)}</time></p>}
+</div>

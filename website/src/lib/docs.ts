@@ -9,7 +9,8 @@ export type Doc = CollectionEntry<"docs">;
 
 export { href } from "./href";
 
-export const docHref = (doc: Doc) => href(`docs/${doc.id}/`);
+/** A page's URL: its own (`page:` in its frontmatter, e.g. "benchmarks/") or under /docs. */
+export const docHref = (doc: Doc) => href(doc.data.page ?? `docs/${doc.id}/`);
 
 /** A link to a file in the BUI repository, e.g. repoFile("docs/rust.md"). */
 export const repoFile = (path: string) => site.blobBase + path.replace(/^\//, "");

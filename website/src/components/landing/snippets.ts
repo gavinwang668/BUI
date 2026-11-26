@@ -6,10 +6,14 @@
 // the same syntax as the snippet; `caption` names its source. `fallback` is only used if a
 // pair goes missing; see src/lib/shots.ts.
 
+import type { LangIconName } from "../../lib/lang-icons";
+
 export interface Syntax {
   id: string;
   /** The syntax switcher's label. */
   label: string;
+  /** Catppuccin file icon beside the label (<LangIcon>). */
+  icon: LangIconName;
   title: string;
   blurb: string;
   lang: string;
@@ -27,13 +31,15 @@ export interface Syntax {
 export interface Language {
   id: string;
   tab: string;
-  icon: string;
+  /** Catppuccin file icon (<LangIcon>). */
+  icon: LangIconName;
   syntaxes: Syntax[];
 }
 
 const tkinter: Syntax = {
   id: "tkinter",
   label: "tkinter",
+  icon: "python",
   title: "Your tkinter app, unchanged",
   blurb:
     "Every public tkinter and ttk name is there: 7,846 of 7,846. Run an existing program with blenderui-tk and it wakes up looking like Blender.",
@@ -60,6 +66,7 @@ root.mainloop()`,
 const qt: Syntax = {
   id: "qt",
   label: "Qt syntax",
+  icon: "python",
   title: "Qt-style Python, no Qt required",
   blurb: "QWidget, layouts, signals and clicked.connect, drawn by BUI. The everyday subset works today; more is on the way.",
   lang: "py",
@@ -97,6 +104,7 @@ app.exec()`,
 const rsx: Syntax = {
   id: "rsx",
   label: "rsx!",
+  icon: "rust",
   title: "HTML, CSS and Tailwind, natively",
   blurb:
     "rsx!, components and hooks, all 113 HTML elements and modern CSS. Add <NumberSlider> and you get Blender's real slider. Typos in Tailwind classes fail to compile, politely.",
@@ -134,6 +142,7 @@ fn main() {
 const gpui: Syntax = {
   id: "gpui",
   label: "gpui builders",
+  icon: "rust",
   title: "gpui code compiles unchanged",
   blurb:
     "The same file builds against Zed's gpui, gpui-fast and blenderui. This is the benchmark's settings window: on blenderui it shows its first frame in 40 ms instead of 231 ms.",
@@ -168,6 +177,7 @@ const gpui: Syntax = {
 const htmlBuilder: Syntax = {
   id: "html",
   label: "HTML builder",
+  icon: "html",
   title: "Plain HTML elements, as functions",
   blurb:
     "One constructor per HTML element (h2(), ul(), input(), button() …) and gpui's app model. Elements with an id keep their state across renders; cx.notify() re-renders.",
@@ -206,132 +216,285 @@ impl Render for Todo {
 const react: Syntax = {
   id: "react",
   label: "React (JSX)",
+  icon: "javascript-react",
   title: "React, without a browser",
   blurb:
     "React 19.3 renders straight to BUI on Node.js or Bun. Hooks keep React's names but hold signals, so a change can update one node without a re-render.",
   lang: "jsx",
-  file: "app.jsx",
+  file: "todo.jsx",
   code: `/** @jsxImportSource @blender-ui/react */
-import { render, useState, NumberSlider } from "@blender-ui/react"
+import { render, useState, Button, Checkbox, ProgressBar, TextField } from "@blender-ui/react"
+import { TASKS, TAG_COLORS, CSS } from "./todo_style"
 
-function Counter() {
-  const [count, setCount] = useState(0)
+function Task({ task, onToggle }) {
   return (
-    <main styled className="p-6 flex flex-col gap-3">
-      <span>Clicks: {count}</span>
-      <button onClick={() => setCount((c) => c + 1)}>Add one</button>
-      <NumberSlider min={0} max={10} />
-    </main>
+    <div className={task.done ? "item done" : "item"}>
+      <Checkbox checked={task.done} onChange={onToggle} />
+      <span className="text">{task.text}</span>
+      <span className="tag" style={{ backgroundColor: TAG_COLORS[task.tag] }}>{task.tag}</span>
+    </div>
   )
 }
 
-render(<Counter />, { title: "Counter", width: 360, height: 200, gpu: true })`,
+function Tasks() {
+  const [tasks, setTasks] = useState(TASKS)
+  const [filter, setFilter] = useState("All")
+  const [draft, setDraft] = useState("")
+  const all = tasks.value ?? tasks
+  const done = all.filter((t) => t.done).length
+  const pct = Math.round((100 * done) / all.length)
+  const shown = all.filter((t) => filter.value === "All" || (filter.value === "Done") === t.done)
+  return (
+    <div>
+      <style>{CSS}</style>
+      <div className="head">
+        <h1>Robot Arm · Sprint 4</h1>
+        <span className="muted">{all.length - done} open · {done} done</span>
+      </div>
+      <div className="add">
+        <TextField placeholder="Add a task…" value={draft} onChange={(e) => setDraft(e.target.value)} />
+        <Button onClick={() => draft.value && setTasks((ts) => [...ts, { text: draft.value, tag: "Modeling", done: false }])}>Add</Button>
+      </div>
+      <div className="filters">
+        {["All", "Active", "Done"].map((f) => (
+          <span key={f} className={filter.value === f ? "filter on" : "filter"} onClick={() => setFilter(f)}>{f}</span>
+        ))}
+      </div>
+      <div className="list">
+        {shown.map((t) => (
+          <Task key={t.text} task={t} onToggle={() => setTasks((ts) => ts.map((x) => (x === t ? { ...x, done: !x.done } : x)))} />
+        ))}
+      </div>
+      <div className="foot">
+        <ProgressBar className="bar" max="100" value={String(pct)} />
+        <span className="muted">{pct}% complete</span>
+      </div>
+    </div>
+  )
+}
+
+render(<Tasks />, { title: "Tasks (React)", width: 440, height: 370, gpu: true })`,
   install: "npm install @blender-ui/react react",
   shot: "js-react-tasks",
   fallback: "images/shots/js-react-tasks-dark.png",
   alt: "A task list in React on BUI: a Blender text field and button, checkboxes and a progress bar",
   caption: "examples/site/js/todo_react.js, React on BUI",
   docs: "docs/javascript/react/",
-  source: "README.md",
+  source: "examples/site/js/todo_react.js",
 };
 
 const svelte: Syntax = {
   id: "svelte",
   label: "Svelte",
+  icon: "svelte",
   title: "Svelte 5, in a native window",
   blurb:
     "Runes, snippets, bindings and scoped styles, unchanged. Svelte's compiled components run on BUI's DOM, so a $state change updates the one node that shows it.",
   lang: "svelte",
-  file: "Counter.svelte",
+  file: "Tasks.svelte",
   code: `<script>
-  import { Button, NumberSlider } from "@blender-ui/svelte"
-  let count = $state(0)
+  import { Button, Checkbox, ProgressBar, TextField } from "@blender-ui/svelte"
+  import { TASKS, TAG_COLORS, CSS } from "./todo_style"
+
+  let tasks = $state(TASKS.map((t) => ({ ...t })))
+  let filter = $state("All")
+  let draft = $state("")
+  const done = $derived(tasks.filter((t) => t.done).length)
+  const pct = $derived(Math.round((100 * done) / tasks.length))
+  const shown = $derived(tasks.filter((t) => filter === "All" || (filter === "Done") === t.done))
 </script>
 
-<main styled class="p-6 flex flex-col gap-3">
-  <span>Clicks: {count}</span>
-  <Button onclick={() => count++}>Add one</Button>
-  <NumberSlider min={0} max={10} />
-</main>
+<div>
+  <svelte:element this={"style"}>{CSS}</svelte:element>
+  <div class="head">
+    <h1>Robot Arm · Sprint 4</h1>
+    <span class="muted">{tasks.length - done} open · {done} done</span>
+  </div>
+  <div class="add">
+    <TextField placeholder="Add a task…" value={draft} oninput={(e) => (draft = e.target.value)} />
+    <Button onclick={() => draft && tasks.push({ text: draft, tag: "Modeling", done: false })}>Add</Button>
+  </div>
+  <div class="filters">
+    {#each ["All", "Active", "Done"] as f (f)}
+      <span class={filter === f ? "filter on" : "filter"} onclick={() => (filter = f)}>{f}</span>
+    {/each}
+  </div>
+  <div class="list">
+    {#each shown as task (task.text)}
+      <div class={task.done ? "item done" : "item"}>
+        <Checkbox checked={task.done} onchange={() => (task.done = !task.done)} />
+        <span class="text">{task.text}</span>
+        <span class="tag" style:background-color={TAG_COLORS[task.tag]}>{task.tag}</span>
+      </div>
+    {/each}
+  </div>
+  <div class="foot">
+    <ProgressBar class="bar" max="100" value={String(pct)} />
+    <span class="muted">{pct}% complete</span>
+  </div>
+</div>
 
-<!-- app.js: render(Counter, { title: "Counter", gpu: true }) -->`,
+<!-- app.js: render(Tasks, { title: "Tasks", gpu: true }) -->`,
   install: "npm install @blender-ui/svelte svelte",
   shot: "js-svelte-tasks",
   fallback: "images/shots/js-svelte-tasks-dark.png",
   alt: "A task list in Svelte on BUI: a Blender text field and button, checkboxes and a progress bar",
   caption: "examples/site/js/TodoSvelte.svelte, Svelte on BUI",
   docs: "docs/javascript/svelte/",
-  source: "bindings/svelte/README.md",
+  source: "examples/site/js/TodoSvelte.svelte",
 };
 
 const vue: Syntax = {
   id: "vue",
   label: "Vue",
+  icon: "vue",
   title: "Vue 3, in a native window",
   blurb:
     "Refs, v-model, slots and scoped styles, unchanged. Vue's own runtime and compiler run through a custom renderer over BUI's DOM, so a ref change updates the nodes that show it.",
   lang: "vue",
-  file: "Counter.vue",
+  file: "Tasks.vue",
   code: `<script setup>
-import { ref } from "vue"
-import { Button, NumberSlider } from "@blender-ui/vue"
-const count = ref(0)
-const size = ref(2)
+import { ref, computed } from "vue"
+import { Button, Checkbox, ProgressBar, TextField } from "@blender-ui/vue"
+import { TASKS, TAG_COLORS, CSS } from "./todo_style"
+
+let nextId = 0
+const tasks = ref(TASKS.map((t) => ({ ...t, id: nextId++ })))
+const filter = ref("All")
+const draft = ref("")
+const done = computed(() => tasks.value.filter((t) => t.done).length)
+const pct = computed(() => Math.round((100 * done.value) / tasks.value.length))
+const shown = computed(() => tasks.value.filter((t) => filter.value === "All" || (filter.value === "Done") === t.done))
+const add = () => { if (draft.value) tasks.value.push({ id: nextId++, text: draft.value, tag: "Modeling", done: false }) }
 </script>
 
 <template>
-  <main styled class="p-6 flex flex-col gap-3">
-    <span>Clicks: {{ count }}</span>
-    <Button @click="count++">Add one</Button>
-    <NumberSlider v-model="size" :min="0" :max="10" />
-  </main>
+  <div>
+    <component :is="'style'">{{ CSS }}</component>
+    <div class="head">
+      <h1>Robot Arm · Sprint 4</h1>
+      <span class="muted">{{ tasks.length - done }} open · {{ done }} done</span>
+    </div>
+    <div class="add">
+      <TextField placeholder="Add a task…" v-model="draft" />
+      <Button @click="add">Add</Button>
+    </div>
+    <div class="filters">
+      <span v-for="f in ['All', 'Active', 'Done']" :key="f" :class="filter === f ? 'filter on' : 'filter'" @click="filter = f">{{ f }}</span>
+    </div>
+    <div class="list">
+      <div v-for="task in shown" :key="task.id" :class="task.done ? 'item done' : 'item'">
+        <Checkbox v-model="task.done" />
+        <span class="text">{{ task.text }}</span>
+        <span class="tag" :style="{ backgroundColor: TAG_COLORS[task.tag] }">{{ task.tag }}</span>
+      </div>
+    </div>
+    <div class="foot">
+      <ProgressBar class="bar" max="100" :value="String(pct)" />
+      <span class="muted">{{ pct }}% complete</span>
+    </div>
+  </div>
 </template>
 
-<!-- app.js: render(Counter, { title: "Counter", gpu: true }) -->`,
+<!-- app.js: render(Tasks, { title: "Tasks", gpu: true }) -->`,
   install: "npm install @blender-ui/vue vue",
   shot: "js-vue-tasks",
   fallback: "images/shots/js-vue-tasks-dark.png",
   alt: "A task list in Vue on BUI: a Blender text field and button, checkboxes and a progress bar",
   caption: "examples/site/js/TodoVue.vue, Vue on BUI",
   docs: "docs/javascript/vue/",
-  source: "bindings/vue/README.md",
+  source: "examples/site/js/TodoVue.vue",
 };
 
 const dom: Syntax = {
   id: "dom",
   label: "DOM-like API",
+  icon: "javascript",
   title: "A DOM you already know, minus the browser",
   blurb:
     "createElement, appendChild, addEventListener and className with Tailwind. Any attribute can be a signal: bind it once and the node follows.",
   lang: "js",
-  file: "app.js",
-  code: `const { App, signal } = require('@blender-ui/native')
+  file: "todo.js",
+  code: `const { App } = require("@blender-ui/native")
+const { TASKS, TAG_COLORS, CSS } = require("./todo_style")
 
 const app = new App({ gpu: true })
-const win = app.window({ title: 'Hello', width: 360, height: 220 })
-win.body.setAttribute('styled', '') // Blender's look for the page
-win.body.className = 'm-0 p-6 flex flex-col gap-3 bg-[#2b2b2b] text-[#e6e6e6]'
+const win = app.window({ title: "Tasks", width: 440, height: 370 })
+const el = (tag, cls, text) => {
+  const e = win.createElement(tag)
+  if (cls) e.className = cls
+  if (text !== undefined) e.appendChild(win.createTextNode(String(text)))
+  return e
+}
+win.body.setAttribute("styled", "")
+win.body.appendChild(el("style", null, CSS))
 
-const clicks = signal(0)
-const label = win.createElement('span')
-label.textContent = clicks // bound: follows the signal
-const button = win.createElement('button')
-button.textContent = 'Add one'
-button.addEventListener('click', () => clicks.value++)
-win.body.appendChild(label)
-win.body.appendChild(button)`,
+const head = el("div", "head")
+head.appendChild(el("h1", null, "Robot Arm · Sprint 4"))
+const count = el("span", "muted")
+head.appendChild(count)
+win.body.appendChild(head)
+
+const add = el("div", "add")
+const input = win.createElement("TextField")
+input.setAttribute("placeholder", "Add a task…")
+add.appendChild(input)
+const addBtn = el("Button", null, "Add")
+add.appendChild(addBtn)
+win.body.appendChild(add)
+
+const filters = el("div", "filters")
+for (const [i, f] of ["All", "Active", "Done"].entries()) filters.appendChild(el("span", i === 0 ? "filter on" : "filter", f))
+win.body.appendChild(filters)
+
+const list = el("div", "list")
+win.body.appendChild(list)
+const foot = el("div", "foot")
+const progress = win.createElement("ProgressBar")
+progress.className = "bar"
+progress.setAttribute("max", "100")
+foot.appendChild(progress)
+const pct = el("span", "muted")
+foot.appendChild(pct)
+win.body.appendChild(foot)
+
+const tasks = TASKS.map((t) => ({ ...t }))
+const refresh = () => {
+  for (const c of [...list.childNodes]) { list.removeChild(c); c.destroy() }
+  for (const t of tasks) {
+    const row = el("div", t.done ? "item done" : "item")
+    const box = win.createElement("Checkbox")
+    if (t.done) box.setAttribute("checked", "")
+    box.addEventListener("change", (e) => { t.done = e.target.checked; refresh() })
+    row.appendChild(box)
+    row.appendChild(el("span", "text", t.text))
+    const tag = el("span", "tag", t.tag)
+    tag.style = { backgroundColor: TAG_COLORS[t.tag] }
+    row.appendChild(tag)
+    list.appendChild(row)
+  }
+  const done = tasks.filter((t) => t.done).length
+  count.textContent = \`\${tasks.length - done} open · \${done} done\`
+  progress.setAttribute("value", String(Math.round((100 * done) / tasks.length)))
+  pct.textContent = \`\${Math.round((100 * done) / tasks.length)}% complete\`
+}
+addBtn.addEventListener("click", () => {
+  if (input.value) { tasks.push({ text: input.value, tag: "Modeling", done: false }); refresh() }
+})
+refresh()`,
   install: "npm install @blender-ui/native",
   shot: "js-dom-tasks",
   fallback: "images/shots/js-dom-tasks-dark.png",
   alt: "The same task list built with createElement, appendChild and addEventListener",
   caption: "examples/site/js/todo_dom.js, @blender-ui/native",
   docs: "docs/javascript/native-api/",
-  source: "docs/javascript.md",
+  source: "examples/site/js/todo_dom.js",
 };
 
 const imguiCpp: Syntax = {
   id: "cpp",
   label: "C++",
+  icon: "cpp",
   title: "The real Dear ImGui, in Blender's clothes",
   blurb:
     "Existing ImGui code compiles unchanged. Flip one build option (BUI_IMGUI_BLENDER_WIDGETS) and DragFloat becomes Blender's drag-to-scrub field.",
@@ -361,6 +524,7 @@ int main() {
 const imguiC: Syntax = {
   id: "c",
   label: "C",
+  icon: "c",
   title: "All 399 functions, from C",
   blurb: "cimgui conventions: ImGui::Button is ImGui_Button, references become pointers, every struct keeps its C++ layout.",
   lang: "c",
@@ -399,6 +563,7 @@ int main(void)
 const imguiPy: Syntax = {
   id: "python",
   label: "Python",
+  icon: "python",
   title: "pyimgui-style Python",
   blurb: "snake_case functions; an in/out value comes back after the result: changed, v = imgui.slider_float(…).",
   lang: "py",
@@ -426,6 +591,7 @@ imgui.run(frame, title="Hello", size=(1280, 800))`,
 const imguiRust: Syntax = {
   id: "rust",
   label: "Rust",
+  icon: "rust",
   title: "A safe Rust API, and the raw FFI",
   blurb: "&mut values for in/out arguments, &str for strings, slices for (pointer, count) pairs. imgui::sys has every C function.",
   lang: "rust",
@@ -457,6 +623,7 @@ fn main() {
 const c: Syntax = {
   id: "kit",
   label: "C kit",
+  icon: "c",
   title: "The kit itself, in C",
   blurb: "Everything above sits on one C runtime. Build a node tree, set properties, and open a native window.",
   lang: "c",
@@ -490,10 +657,135 @@ int main(void)
   source: "docs/c-api.md",
 };
 
+const lua: Syntax = {
+  id: "lua",
+  label: "Lua",
+  icon: "lua",
+  title: "Every widget, from Lua",
+  blurb: "A bui-lua executable and a bui module for Lua 5.4, LuaJIT and LuaRocks. Nodes, properties and events, the same as the C kit.",
+  lang: "lua",
+  file: "counter.lua",
+  code: `local bui = require("bui")
+
+local root = bui.Node("frame")
+root:set("padding", 12)
+
+local label = bui.Node("label")
+label:set("text", "Count: 0")
+root:add(label)
+label:geom(bui.GEOM_PACK, {side = 0, fill = 1})
+
+local count = 0
+local inc = bui.Node("button")
+inc:set("text", "Increment")
+inc:on(bui.EV_CLICK, function()
+    count = count + 1
+    label:set("text", "Count: " .. count)
+end)
+root:add(inc)
+inc:geom(bui.GEOM_PACK, {fill = 1, pady0 = 4})
+
+local win = bui.Window(bui.Context(root), "Counter", 240, 200)
+win:show()
+bui.run()`,
+  install: "luarocks install blenderui",
+  shot: "lua-editor",
+  fallback: "images/shots/lua-editor-dark.png",
+  alt: "A table editor written in Lua: a tree view with three columns, a toolbar with search and undo, and a collapsible editor panel",
+  caption: "bindings/lua/examples/editor_screenshot.lua, the table editor",
+  docs: "docs/lua/overview/",
+  source: "bindings/lua/examples/counter.lua",
+};
+
+const go: Syntax = {
+  id: "go",
+  label: "Go",
+  icon: "go",
+  title: "MyGo-style views",
+  blurb: "The view builds the window from your state and runs again after input. Controls bind to the state, and a headless Tester checks it.",
+  lang: "go",
+  file: "main.go",
+  code: `type counter struct{ n int }
+
+func (s *counter) view(c *ui.Context) {
+	if c.Shortcut(0, ui.KeyUp) {
+		s.n++
+	}
+	ui.Column(c).Fill().Center().Gap(16).Children(func() {
+		ui.Textf(c, "%d", s.n).FontSize(56).Bold()
+		ui.Row(c).Gap(8).Children(func() {
+			if ui.Button(c.Key("decrement"), "−").Width(44).Clicked() {
+				s.n--
+			}
+			if ui.Button(c.Key("reset"), "Reset").Disabled(s.n == 0).Clicked() {
+				s.n = 0
+			}
+			if ui.PrimaryButton(c.Key("increment"), "+").Width(44).Clicked() {
+				s.n++
+			}
+		})
+	})
+}`,
+  install: "go run ./examples/counter",
+  shot: "go-counter",
+  fallback: "images/shots/go-counter-dark.png",
+  alt: "A counter written in Go: a large number, decrement and increment buttons and a Reset button",
+  caption: "bindings/go/examples/counter, MyGo style",
+  docs: "docs/go/mygo-syntax/",
+  source: "bindings/go/examples/counter/main.go",
+};
+
+const ruby: Syntax = {
+  id: "ruby",
+  label: "Ruby",
+  icon: "ruby",
+  title: "Interfaces built with blocks",
+  blurb: "A C extension gem, no FFI. Columns, rows and buttons are blocks, and the same interface renders without a window for tests.",
+  lang: "ruby",
+  file: "counter.rb",
+  code: `require "bui"
+
+class Counter
+  attr_reader :count
+
+  def initialize(ui)
+    @count = 0
+    ui.column padding: 16, spacing: 8 do |col|
+      @shown = col.label "0", text_align: "center", bold: true
+      col.row spacing: 4 do |row|
+        row.button("Decrement") { self.count = count - 1 }
+        row.button("Reset") { self.count = 0 }
+        row.button("Increment") { self.count = count + 1 }
+      end
+    end
+  end
+
+  def count=(n)
+    @count = n
+    @shown.text = n.to_s
+  end
+end
+
+BUI.app do
+  win = window("Counter", width: 300, height: 120)
+  Counter.new(BUI::Builder.new(win.root))
+end`,
+  install: "bundle install && ruby -Ilib examples/counter.rb",
+  shot: "ruby-counter",
+  fallback: "images/shots/ruby-counter-dark.png",
+  alt: "A counter written in Ruby: the count, and Decrement, Reset and Increment buttons",
+  caption: "bindings/ruby/examples/counter.rb",
+  docs: "docs/ruby/overview/",
+  source: "bindings/ruby/examples/counter.rb",
+};
+
 export const languages: Language[] = [
-  { id: "python", tab: "Python", icon: "file-py", syntaxes: [tkinter, qt] },
-  { id: "rust", tab: "Rust", icon: "file-rs", syntaxes: [rsx, gpui, htmlBuilder] },
-  { id: "javascript", tab: "JavaScript", icon: "file-js", syntaxes: [react, svelte, vue, dom] },
-  { id: "imgui", tab: "Dear ImGui", icon: "squares-four", syntaxes: [imguiCpp, imguiC, imguiPy, imguiRust] },
-  { id: "c", tab: "C", icon: "file-c", syntaxes: [c] },
+  { id: "python", tab: "Python", icon: "python", syntaxes: [tkinter, qt] },
+  { id: "rust", tab: "Rust", icon: "rust", syntaxes: [rsx, gpui, htmlBuilder] },
+  { id: "javascript", tab: "JavaScript", icon: "javascript", syntaxes: [react, svelte, vue, dom] },
+  { id: "imgui", tab: "Dear ImGui", icon: "cpp", syntaxes: [imguiCpp, imguiC, imguiPy, imguiRust] },
+  { id: "c", tab: "C", icon: "c", syntaxes: [c] },
+  { id: "lua", tab: "Lua", icon: "lua", syntaxes: [lua] },
+  { id: "go", tab: "Go", icon: "go", syntaxes: [go] },
+  { id: "ruby", tab: "Ruby", icon: "ruby", syntaxes: [ruby] },
 ];
