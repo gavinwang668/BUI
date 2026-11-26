@@ -15,7 +15,9 @@ on:
   workflow_call: # release.yml runs the whole suite before publishing
 
 concurrency:
-  group: ci-${{ github.ref }}
+  # The event that started the run is part of the group: release.yml calls this workflow, and a push to main (which
+  # starts a run of its own) must not cancel the tests of a release that is publishing
+  group: ci-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
