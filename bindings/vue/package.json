@@ -1,6 +1,6 @@
 {
   "name": "@blender-ui/vue",
-  "version": "0.5.1",
+  "version": "0.6.0",
   "description": "Vue 3 for BUI: Blender's UI in native windows from Vue components, refs and single-file components. Node.js and Bun.",
   "type": "module",
   "main": "index.cjs",
