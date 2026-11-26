@@ -20,6 +20,8 @@ It is its own layout model: it does not use BUI's screens and areas (`blenderui:
 This is the BUI port of `zopra-panels` (GPUI-PANEL): the same model, layout JSON, keymap, view
 types and markup, on blenderui instead of gpui / gpui-kit.
 
+`zopra-panels` is itself a port of [Trellis](https://trellisui.com/), fractal dockable workspaces for web tools.
+
 ## Cargo
 
 ```toml

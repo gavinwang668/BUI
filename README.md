@@ -308,7 +308,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 Bigger pieces for the Rust binding, each its own crate in `addons/` with its own docs on the [website](https://bui.preetham.top/addons/):
 
 - **BUI Charts** (`addons/bui-charts`): some eighty charts (time series, bar gauges, heatmaps, candlesticks, flame graphs, node graphs, alluvial and chord diagrams and more), each a component you write in `rsx!`, style with `class` and feed from a signal. Hover tooltips, crosshairs, legends, zoom and keyboard stepping come with them, drawn by the same renderer as Blender's widgets ([bui.preetham.top/charts](https://bui.preetham.top/charts/)).
-- **BUI Panels** (`addons/bui-panels`): dockable panel layouts, with a stage, tabbed views you drag to reorder, join, split or float, panel menus, navigation, and a layout that saves and restores itself as JSON ([bui.preetham.top/panels](https://bui.preetham.top/panels/)).
+- **BUI Panels** (`addons/bui-panels`): dockable panel layouts, with a stage, tabbed views you drag to reorder, join, split or float, panel menus, navigation, and a layout that saves and restores itself as JSON ([bui.preetham.top/panels](https://bui.preetham.top/panels/)). It is a port of `zopra-panels`, which is a port of [Trellis](https://trellisui.com/) (fractal, dockable workspaces for web tools).
 - **Editor extensions** (`addons/bui-vscode`, `addons/bui-zed`): `rsx!` highlighting, snippets and Tailwind class completion in VS Code and Zed.
 - **Demo apps** (`demos/`): showcase apps on the Rust API, from shader-driven menus to everyday apps built only from Blender's widgets ([Demo apps](https://bui.preetham.top/docs/rust/demos/)).
 
