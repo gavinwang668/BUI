@@ -42,7 +42,7 @@ cmake --build build
 | `BUI_IMAGE_TIFF`, `BUI_IMAGE_HEIC` | `ON` | TIFF (libtiff) and HEIC (the OS's decoder, loaded at run time) images. The other formats have a `BUI_IMAGE_*` option too (`features.json`) |
 | `BUI_IMAGE_EXR`, `BUI_IMAGE_AVIF`, `BUI_IMAGE_JXL` | `OFF` | OpenEXR (OpenEXRCore), AVIF (libavif and dav1d) and JPEG XL (libjxl) images |
 | `BUI_SHELL` | `ON` | The desktop shell: tray icons, notifications, taskbar progress, recent files (`kit/intern/shell`) |
-| `BUI_A11Y` | `OFF` | Screen readers (UI Automation on Windows) through the `bui-a11y` crate in `a11y/`; needs cargo |
+| `BUI_A11Y` | `OFF` | Screen readers (UI Automation on Windows) through the `bui-a11y` crate in `platform/a11y/`; needs cargo |
 | `BUI_TEXT_FREETYPE` | `ON` | Rasterize glyphs with the vendored FreeType 2.13.3, the way Blender's BLF does (light hinting, gamma 1.43, Inter's optical size). `OFF` uses stb_truetype. Ignored when `BUI_TEXT_GDI` is on. |
 | `BUI_TEXT_GDI` | `OFF` | Use Windows' GDI text engine and system fonts instead of the portable engine (embedded Inter, Slug on the GPU) |
 

@@ -9,9 +9,9 @@
     BUI
   </h1>
 
-**Blender's user interface, as a library you can use from Python, Rust, JavaScript (React, Svelte, Vue), C, C++, C#, Go, Lua, Ruby, D and Dear ImGui.**
+**A native UI toolkit built on the engine that draws Blender's interface, for Python, Rust, JavaScript (React, Svelte, Vue), C, C++, C#, Go, Lua, Ruby, D and Dear ImGui.**
 
-People spent decades building and optimizing Blender's GUI. It's battery and memory efficient, and super duper fast. We decoupled it, to give everyone a chance to build their own products with it. It supports multiple languages and frameworks, so you won't miss a beat!
+People spent decades building and optimizing Blender's GUI. It's battery and memory efficient, and super duper fast. We decoupled it, to give everyone a chance to build their own products with it. Blender's widgets come with it, but they are a part of BUI, not the whole of it: you can build an app with plain HTML and CSS, React, Svelte or Vue and never use one. It supports multiple languages and frameworks, so you won't miss a beat!
 
 [![PyPI](https://img.shields.io/pypi/v/blenderui?label=pypi%20blenderui)](https://pypi.org/project/blenderui/)
 [![Python](https://img.shields.io/pypi/pyversions/blenderui)](https://pypi.org/project/blenderui/)
@@ -129,21 +129,32 @@ more to say.
 
 ## 1. What BUI is
 
-BUI takes the user interface of [Blender](https://www.blender.org) (its widget
-drawing, its interaction rules and its look) and turns it into a standalone UI
-library with a small C core. Your code builds the widget tree and handles
-callbacks. Layout, input, drawing and presenting all happen in fast native code,
-on the CPU or the GPU.
+BUI is a native UI toolkit. It takes the engine behind the user interface of
+[Blender](https://www.blender.org) (its drawing, its interaction rules and its
+look) and turns it into a standalone library with a small C core. Your code
+builds the widget tree and handles callbacks. Layout, input, animation, drawing
+and presenting all happen in fast native code, on the CPU or the GPU.
 
 At the heart of BUI is the **kit**: a small runtime written in C. The kit
-holds every widget in one tree, lays them out, handles the mouse and keyboard,
-and draws them the way Blender does. The drawing code is a C port of
-Blender's own widget code, and the interaction follows Blender's rules. On top
-of the kit sit **bindings**: thin layers that let Python, Rust, JavaScript,
-C++ and Dear ImGui talk to it.
+holds every element in one tree, lays them out, handles the mouse, keyboard and
+touch, animates and draws them. Its drawing and interaction code is a C port of
+Blender's own. On top of the kit sit **bindings**: thin layers that let Python,
+Rust, JavaScript, C++, C#, Go, Lua, Ruby, D and Dear ImGui talk to it.
+
+Two layers sit on that engine, and you can use either, or both:
+
+- **Blender's look and widgets**: ready-made Blender components (panels, number
+  sliders, pie menus, a node editor and more), Blender's theme and Blender's
+  interaction rules.
+- **A general UI toolkit**: HTML, CSS and Tailwind in Rust and JavaScript,
+  React, Svelte and Vue components, CSS Grid and flexbox, animation, images,
+  video, charts, tkinter and Qt-style Python. None of it needs a Blender
+  component; draw whatever you like, in your own style.
 
 What BUI is not:
 
+- **Not only Blender widgets.** They are one part of BUI. An app can be plain
+  HTML and CSS, or your own components, and never use one.
 - **Not Blender.** It contains the parts of Blender's UI code it needs and
   builds on its own. You don't need Blender installed, and you don't need to
   know Blender to use it.
@@ -166,12 +177,13 @@ in any language, can have both: Blender's feel, and Blender's efficiency.
 
 ## 3. Who it's for
 
+- **You want a native desktop UI without a browser.** Write it with HTML and
+  CSS, React, Svelte, Vue or Rust, and ship an executable of a few megabytes.
+  You never have to use a Blender widget.
 - **You have a tkinter app** and wish it looked less like 1998. Run it on BUI,
   unchanged.
 - **You're building a tool for artists** who already know Blender. Give them
   the panels, sliders and shortcuts their hands expect.
-- **You write Rust or React** and want a native desktop UI without shipping a
-  browser.
 - **You use Dear ImGui** and want it to look and feel like Blender, with one
   build flag.
 - **You're curious** how a UI toolkit works. The source is readable, and the
@@ -195,7 +207,7 @@ all get the same widgets and interactions:
 | **JavaScript / React / Svelte / Vue** on Node.js or Bun: a DOM-like API, JSX, Svelte or Vue components                                                   | The same engine and components in native windows, over napi-rs; React's hooks backed by signals; Svelte 5 and Vue 3 components                  | Working               |
 | **Dear ImGui** from C++, C, Python or Rust                                                                                                               | The real Dear ImGui on BUI windows in Blender's theme, or a build where ImGui's widgets _are_ Blender's widgets                                 | Working               |
 | **C** (`BUI_kit.h`)                                                                                                                                      | The kit itself: nodes, widgets, windows                                                                                                         | Working               |
-| **D** (the `bui` DUB package in `bindings/d`)                                                                                                            | Idiomatic D wrappers, the complete raw C API and an HTML/CSS/RSX authoring layer                                                                                                | Working               |
+| **D** (`dub add blenderui`, or the package in `bindings/d`)                                                                                                            | Idiomatic D wrappers, the complete raw C API and an HTML/CSS/RSX authoring layer                                                                                                | Working               |
 | **C#** (the `Bui` assembly in `bindings/csharp`): `Node`, `Frame`, `Button`, `Context`, `Window` | C# components over every `BK_*` function, generated from `BUI_kit.h` | Partial |
 | **Go**: the kit's nodes (`bindings/go/bui`), or [MyGo](https://github.com/egoist/mygo)-style views (`ui.Column(c).Children(...)`, `ui.Checkbox(c, &v, "Sync")`) | Blender's widgets from Go, with a headless `Tester` for `go test` | Working |
 | **Ruby** (the `blenderui` gem in `bindings/ruby`) | A C extension over the kit (no FFI): nodes, windows and menus, interfaces built from blocks, headless tests | Working |
@@ -250,7 +262,7 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 ### Fast by design
 
 - **Damage rendering**: an idle UI costs 0% CPU, and a hover redraws only the widget it touches.
-- **Opt-in GPU renderer** (Direct3D 11 on Windows, or Direct3D 12 when asked; OpenGL 3.3 on Linux), modeled on Blender's instanced widget drawing. It draws the same pixels as the CPU raster.
+- **Opt-in GPU renderer** (Direct3D 11 on Windows, or Direct3D 12 when asked; OpenGL 3.3 on Linux), modeled on Blender's instanced widget drawing. It draws the same pixels as the CPU raster. `BUI_GPU_API=d3d12` picks Direct3D 12 and `BUI_GPU_ADAPTER=high-performance` the discrete GPU of a hybrid laptop ([GPU backends and adapters](https://bui.preetham.top/docs/concepts/gpu-backends/)).
 - **GPU effects**: your own GLSL pixel shader in a canvas (`BK_ITEM_EFFECT`, Rust `Painter::effect`), run on Direct3D and OpenGL in paint order with an image as the fallback; the compile log comes back as a string.
 - **Android** (`platform/android`, [docs/android.md](docs/android.md)): the kit's window host on a `NativeActivity`, so C, Lua and Rust apps run as on a desktop (`Application::run`, `bui.open`); damage-driven rendering, [touch](docs/touch.md) (taps, flings, long presses, pinches) and the soft keyboard; `python platform/android/build.py [--lua DIR | --rust CRATE]` makes a signed APK of 1 to 2 MB. Run on an x86_64 emulator, and on an arm64 phone (the refresh rate, a Rust app on `blenderui::android_main!`).
 - **GPU render targets**: an effect can draw into a texture (`RenderTarget`, `BUI_target_create`, `Painter::effect_to`, `Rgba8` / `Rgba16F` / `Rgba32F`) and sample it in a later pass, so simulations can feed back on themselves. Tested on Direct3D 11; the OpenGL backend has the same code and has not been run.
@@ -291,12 +303,21 @@ If you're starting fresh in Python, the Blender components are the friendliest.
 - **Blender's look**: Blender's theme colors and metrics with Inter; or, with `BUI_IMGUI_BLENDER_WIDGETS=ON`, Blender's actual widgets and interaction, pixel-identical to BUI's own.
 - **Idle costs nothing**: frames run only on input and while something animates.
 
+### Addons
+
+Bigger pieces for the Rust binding, each its own crate in `addons/` with its own docs on the [website](https://bui.preetham.top/addons/):
+
+- **BUI Charts** (`addons/bui-charts`): some eighty charts (time series, bar gauges, heatmaps, candlesticks, flame graphs, node graphs, alluvial and chord diagrams and more), each a component you write in `rsx!`, style with `class` and feed from a signal. Hover tooltips, crosshairs, legends, zoom and keyboard stepping come with them, drawn by the same renderer as Blender's widgets ([bui.preetham.top/charts](https://bui.preetham.top/charts/)).
+- **BUI Panels** (`addons/bui-panels`): dockable panel layouts, with a stage, tabbed views you drag to reorder, join, split or float, panel menus, navigation, and a layout that saves and restores itself as JSON ([bui.preetham.top/panels](https://bui.preetham.top/panels/)).
+- **Editor extensions** (`addons/bui-vscode`, `addons/bui-zed`): `rsx!` highlighting, snippets and Tailwind class completion in VS Code and Zed.
+- **Demo apps** (`demos/`): showcase apps on the Rust API, from shader-driven menus to everyday apps built only from Blender's widgets ([Demo apps](https://bui.preetham.top/docs/rust/demos/)).
+
 ### Native everywhere
 
 - **Native windows** on Windows (Win32) and Linux (X11, and an experimental native Wayland host), and a Cocoa host for macOS, ported from Blender's GHOST.
 - **HiDPI**: per-monitor DPI on Windows, `Xft.dpi` on Linux, Retina on macOS.
 - **The desktop shell**: tray icons with menus, notifications, a progress on the taskbar button (or the Dock icon) and the system's recent documents, from every language ([Desktop shell](https://bui.preetham.top/docs/concepts/desktop-shell/)).
-- **Screen readers** on Windows: the widgets and the HTML page reach UI Automation through [AccessKit](https://accesskit.dev) (the `bui-a11y` crate in `a11y/`), built only once a reader asks. macOS and Linux are next.
+- **Screen readers** on Windows: the widgets and the HTML page reach UI Automation through [AccessKit](https://accesskit.dev) (the `bui-a11y` crate in `platform/a11y/`), built only once a reader asks. macOS and Linux are next.
 - **Headless mode** for tests and screenshots, with a virtual clock that steps animations exactly.
 - On Linux, libX11 and libGL are loaded at run time, so BUI imports on servers without them.
 
@@ -2153,6 +2174,8 @@ How each was counted: [Coverage](https://bui.preetham.top/docs/reference/coverag
 | `backends/qt/`                                          | C++ Qt/QPainter render-sink backend                                                                                                                                                                                                                                                                                                                                                                                                             |
 | `bench/`                                                | The start time and battery benchmark; `bench/images/` (decoders, thumbnail grid)                                                                                                                                                                                                                                                                                                                                                                |
 | `examples/`, `tools/`                                   | Demos, the website's screenshot programs (`examples/site/`), the icon and theme generators, the docs screenshot generator                                                                                                                                                                                                                                                                                                                       |
+| `addons/` | Crates and extensions built on the Rust binding: `bui-charts` (some eighty charts), `bui-panels` (dockable panel layouts), `bui-components`, and the VS Code and Zed extensions for `rsx!` |
+| `demos/`                                                | Standalone showcase apps on the Rust API (its own cargo workspace): shader components, glass and skeuomorphic apps, menus, music players, a HUD taskbar, a planner, portfolio motion, and everyday apps (mail, chat, files, timer, notes, writer, sheet, calendar) built only from Blender's interface, with what it can and can't do. See [`demos/README.md`](demos/README.md) |
 | `website/`                                              | The documentation website, [bui.preetham.top](https://bui.preetham.top)                                                                                                                                                                                                                                                                                                                                                                         |
 
 ## 41. Examples
