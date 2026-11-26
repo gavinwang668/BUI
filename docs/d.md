@@ -1,4 +1,4 @@
-# D: the `bui` DUB package
+# D: the `blenderui` DUB package
 
 The canonical D guide lives in
 [`bindings/d/README.md`](../bindings/d/README.md). It covers install, a first
@@ -13,7 +13,7 @@ The package is a normal DUB dependency:
     "name": "my-app",
     "targetType": "executable",
     "dependencies": {
-        "bui": { "path": "../BUI/bindings/d" }
+        "blenderui": { "path": "../BUI" }
     }
 }
 ```

@@ -1,0 +1,15 @@
+{
+    "name": "blenderui",
+    "description": "Blender's interface as a retained-mode D UI toolkit: a C kit with idiomatic D wrappers",
+    "homepage": "https://bui.preetham.top",
+    "license": "GPL-3.0-or-later",
+    "authors": ["BUI contributors"],
+    "copyright": "BUI contributors",
+    "targetType": "none",
+    "dependencies": {
+        "blenderui:blenderui": "*"
+    },
+    "subPackages": [
+        "./bindings/d"
+    ]
+}
