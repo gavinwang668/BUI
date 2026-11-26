@@ -4,7 +4,7 @@ description = "Screen-reader accessibility for the BUI kit: its flat node trees 
 # a member of the Rust bindings' workspace: one version and lock with the crates that use it, and
 # blenderui-sys can be packaged against it before it is on crates.io (`cargo package -p bui-a11y
 # -p blenderui-sys`)
-workspace = "../bindings/rust"
+workspace = "../../bindings/rust"
 version.workspace = true
 edition.workspace = true
 license.workspace = true

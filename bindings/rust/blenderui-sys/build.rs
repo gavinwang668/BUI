@@ -166,7 +166,7 @@ fn main() {
         println!("cargo:rustc-link-lib=m");
         println!("cargo:rustc-link-lib=pthread");
     }
-    for dir in ["kit", "gpu", "core", "CMakeLists.txt", "bindings/imgui", "a11y/include"] {
+    for dir in ["kit", "gpu", "core", "CMakeLists.txt", "bindings/imgui", "platform/a11y/include"] {
         println!("cargo:rerun-if-changed={}", root.join(dir).display());
     }
     println!("cargo:rerun-if-env-changed=BUI_SOURCE_DIR");

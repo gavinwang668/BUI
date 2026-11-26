@@ -48,7 +48,7 @@ freetype = [] # Text through the vendored FreeType like Blender's BLF
 filebrowser = [] # Blender's File Browser
 anim = [] # animation: GSAP and Motion (kit/intern/anim)
 shell = [] # the desktop shell: tray icons, notifications, taskbar progress, recent files
-a11y = ["dep:bui-a11y"] # screen readers: the kit's accessibility trees and their adapters (a11y/)
+a11y = ["dep:bui-a11y"] # screen readers: the kit's accessibility trees and their adapters (platform/a11y/)
 # The Lua host (bindings/lua: bui-lua, bui.so). features.json lists it, so it is here too; the
 # crate's C sources (vendored for crates.io) leave bindings/lua out, so turning it on builds
 # nothing more for Rust.
@@ -64,7 +64,7 @@ imgui-blender-widgets = ["imgui"]
 
 [dependencies]
 # the kit's accessibility adapters (AccessKit); its C ABI links with the kit
-bui-a11y = { path = "../../../a11y", version = "0.5.1", optional = true }
+bui-a11y = { path = "../../../platform/a11y", version = "0.5.1", optional = true }
 
 [build-dependencies]
 cmake = "0.1"

@@ -1,4 +1,4 @@
-/* bui-a11y's C ABI (a11y/src/ffi.rs): the platform accessibility adapter of a native window, fed
+/* bui-a11y's C ABI (platform/a11y/src/ffi.rs): the platform accessibility adapter of a native window, fed
  * the kit's flat trees (BKA11yNode, BUI_kit.h) and turning them into AccessKit updates. Only the
  * kit calls it (kit/intern/a11y and the window hosts).
  *
