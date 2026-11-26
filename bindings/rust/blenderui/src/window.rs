@@ -453,7 +453,11 @@ struct RawEvent {
 
 /// The application state (gpui's `App`).
 pub struct App {
+    /// By id (never reused): `None` while the window is lent to a callback (`with_window`) and once it
+    /// has closed and been freed (`free_closed`).
     windows: Vec<Option<Box<Window>>>,
+    /// How many windows are lent to callbacks right now.
+    lent: usize,
     entities: Vec<Slot>,
     headless: bool,
     real_clock: bool,
@@ -522,7 +526,7 @@ impl App {
     /// follow the virtual one tests step with [`App::advance_clock`].
     fn create(headless: bool, real_clock: bool) -> App {
         crate::motion::start_clock(real_clock);
-        App { windows: Vec::new(), entities: Vec::new(), headless, real_clock, globals: HashMap::new(), propagate: true,
+        App { windows: Vec::new(), lent: 0, entities: Vec::new(), headless, real_clock, globals: HashMap::new(), propagate: true,
               default_prevented: false, remote: None, close_hooks: Vec::new(), closed_later: None,
               activation_hooks: Vec::new(), shell_hooks: Vec::new(), notified: 0, shutdown_later: false,
               theme_seen: crate::theme_generation() }
@@ -541,7 +545,12 @@ impl App {
     /// Drop an entity's value. Its handles become dead: `WeakEntity::update`
     /// skips them, `Entity::read` / `update` panic.
     pub fn release<T: 'static>(&mut self, entity: Entity<T>) {
-        if let Some(slot) = self.entities.get_mut(entity.id as usize).filter(|s| s.generation == entity.generation) {
+        self.release_slot(entity.id, entity.generation);
+    }
+
+    /// Drop the value of entity `id` while it is generation `generation`.
+    fn release_slot(&mut self, id: u32, generation: u32) {
+        if let Some(slot) = self.entities.get_mut(id as usize).filter(|s| s.generation == generation) {
             slot.value = None;
             slot.generation += 1;
         }
@@ -585,6 +594,7 @@ impl App {
             }
         }
         let entity = build(&mut w, self);
+        w.view_entity = (entity.id, entity.generation);
         let view = entity;
         w.view = Some(Box::new(move |window: &mut Window, cx: &mut App| {
             view.update(cx, |v, cx| v.render(window, cx).into_any_element())
@@ -728,8 +738,10 @@ impl App {
 
     fn with_window<R>(&mut self, id: usize, f: impl FnOnce(&mut Window, &mut App) -> R) -> Option<R> {
         let mut w = self.windows.get_mut(id)?.take()?;
+        self.lent += 1;
         let notified = self.notified;
         let r = f(&mut w, self);
+        self.lent -= 1;
         // the window is out of the list while it runs: a `notify` in what it called missed it
         if self.notified != notified {
             w.refresh();
@@ -765,6 +777,26 @@ impl App {
         self.closed_later = None;
     }
 
+    /// Free the windows that have closed: what they hold of the kit, their raster and their root view
+    /// (the window owns it, as gpui's does). A window waits while close hooks are running (a hook
+    /// still to come may look at it) and, a native one, until the system has destroyed it (its close
+    /// is on the stack until then).
+    fn free_closed(&mut self) {
+        if self.closed_later.is_some() {
+            return;
+        }
+        for id in 0..self.windows.len() {
+            let done = self.windows[id].as_deref().is_some_and(|w| {
+                // SAFETY: the window's own native window, alive until `destroy`.
+                w.life == Life::Closed && w.native.is_none_or(|n| unsafe { sys::BK_window_is_open(n) } == 0)
+            });
+            if let Some(mut w) = self.windows[id].take_if(|_| done) {
+                w.destroy();
+                self.release_slot(w.view_entity.0, w.view_entity.1);
+            }
+        }
+    }
+
     /// Handle queued kit events, then re-render what changed.
     fn drain(&mut self) {
         crate::shell::drain(self);
@@ -790,6 +822,7 @@ impl App {
     /// Re-render dirty windows now (headless) or soon (native: next loop turn).
     fn flush(&mut self) {
         self.drain();
+        self.free_closed();
         let theme = crate::theme_generation();
         if theme != self.theme_seen {
             self.theme_seen = theme;
@@ -836,7 +869,7 @@ impl App {
     /// a window's callback (an event handler, a render), it runs once that callback has returned.
     pub fn shutdown(&mut self) {
         // a window lent to a callback is out of its slot: free them all once it is back
-        self.shutdown_later = self.windows.iter().any(Option::is_none);
+        self.shutdown_later = self.lent > 0;
         if self.shutdown_later {
             return;
         }
@@ -1358,6 +1391,8 @@ pub struct Window {
     phys: (i32, i32),
     scale: f32,
     view: Option<ViewFn>,
+    /// The root view's entity (id, generation): released with the window.
+    view_entity: (u32, u32),
     frame: Option<Frame>,
     /// A view transition starting or running (`crate::transition`).
     transition: Option<crate::transition::Transition>,
@@ -1486,6 +1521,7 @@ impl Window {
                 phys: (w.round() as i32, h.round() as i32),
                 scale: 1.0,
                 view: None,
+                view_entity: (u32::MAX, 0),
                 frame: None,
                 transition: None,
                 lent_bounds: Vec::new(),

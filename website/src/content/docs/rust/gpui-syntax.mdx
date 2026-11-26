@@ -105,6 +105,8 @@ let win = cx.open_window(opts, |_, cx| cx.new(|_| MyView)).unwrap();
 
 The event loop runs until every window is closed.
 
+A closed window is freed once its `on_window_closed` hooks have run, its root view with it: keep what should outlive the window in another entity.
+
 ### Your own title bar
 
 With `window_decorations: WindowDecorations::Client`, the app draws the title bar. Mark its parts with `window_control_area`, as in gpui:
