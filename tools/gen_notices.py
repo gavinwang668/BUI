@@ -147,7 +147,7 @@ VENDORED = [
 def run_metadata() -> dict:
     env = dict(os.environ, RUSTC_WRAPPER="")
     r = subprocess.run(["cargo", "metadata", "--format-version", "1", "--locked"],
-                       cwd=RUST, capture_output=True, text=True, env=env)
+                       cwd=RUST, capture_output=True, text=True, encoding="utf-8", env=env)
     if r.returncode != 0:
         sys.exit("cargo metadata failed:\n" + r.stderr[-800:])
     return json.loads(r.stdout)

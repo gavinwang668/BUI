@@ -224,6 +224,12 @@ def refresh_locks(npm: bool) -> list[Path]:
             touched.append(ROOT / lock)
         else:
             print(f"warning: {lock} was not refreshed (run `cargo update --workspace` in {cwd.relative_to(ROOT)}): CI builds with --locked and would reject it")
+    # the third-party notices list every crate with its version, so they follow the locks (`release.yml` checks them)
+    r = run([sys.executable, str(ROOT / "tools" / "gen_notices.py")], check=False)
+    if r.returncode == 0:
+        touched.append(ROOT / "THIRD_PARTY_NOTICES.md")
+    else:
+        print("warning: THIRD_PARTY_NOTICES.md was not regenerated (run `python tools/gen_notices.py`): release.yml checks it")
     if npm:
         r = run(["npm", "install", "--package-lock-only", "--ignore-scripts"], cwd=ROOT / "bindings", check=False)
         if r.returncode == 0:
